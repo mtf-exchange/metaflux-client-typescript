@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*", "__tests__/**/*", "vitest.config.ts"],
+  "exclude": ["node_modules", "dist", "pkg", "wasm"],
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  }
+}

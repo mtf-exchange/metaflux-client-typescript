@@ -1,0 +1,55 @@
+{
+  "name": "@metaflux/client",
+  "version": "0.0.1",
+  "description": "MetaFlux (MTF) TypeScript client SDK — WASM-backed crypto + ESM-only fetch wrappers.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./wasm": {
+      "import": "./pkg/metaflux_client_wasm.js",
+      "types": "./pkg/metaflux_client_wasm.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "pkg",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build:wasm": "wasm-pack build wasm/ --target web --out-dir ../pkg",
+    "build:ts": "tsc",
+    "build": "npm run build:wasm && npm run build:ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src/ __tests__/",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "metaflux",
+    "mtf",
+    "dex",
+    "perp",
+    "client",
+    "sdk",
+    "wasm"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}

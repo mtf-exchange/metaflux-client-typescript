@@ -1,0 +1,52 @@
+{
+  "compilerOptions": {
+    // Strict everywhere. The session direction is "no any"; this enforces
+    // it at the compiler level rather than relying on convention.
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "noUncheckedIndexedAccess": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+
+    // ES2022: native top-level await + class fields + .at() on arrays.
+    // The browser baseline (Chrome 94+, Firefox 93+, Safari 15+) all
+    // ship 2022 features, and Node 20 LTS gives us native ESM + global
+    // fetch. No transpile target older than that.
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+
+    // Emit ESM + .d.ts. Single-file dist/index.js + dist/index.d.ts.
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+
+    // Interop with the wasm-pack-generated .js loader (it's ESM but
+    // tsc treats the default export funny without esModuleInterop).
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+
+    // Pkg-relative imports — wasm-pack writes pkg/ at the repo root, our
+    // TS source is in src/, so an "../pkg/..." import would land at
+    // dist/../pkg/ post-build which IS the correct relative path.
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+
+    // Required so the .d.ts files we ship are usable from consumers
+    // running both bundlers and bare ESM.
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "pkg", "wasm", "__tests__"]
+}
