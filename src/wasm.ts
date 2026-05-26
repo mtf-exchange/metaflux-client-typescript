@@ -104,8 +104,13 @@ export async function loadWasm(): Promise<WasmModule> {
         throw new WasmNotBuiltError(err);
       }
       // wasm-pack's default-export `init` accepts an optional .wasm URL;
-      // we let it auto-resolve relative to the .js shim.
-      await mod.default();
+      // we let it auto-resolve relative to the .js shim. The Node-target
+      // build (`--target nodejs`) loads the .wasm synchronously at
+      // module-load time and exposes NO default export — only `web` /
+      // `bundler` builds need this call.
+      if (typeof (mod as { default?: unknown }).default === 'function') {
+        await (mod as { default: () => Promise<unknown> }).default();
+      }
       return mod;
     })();
   }
