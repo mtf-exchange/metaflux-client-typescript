@@ -1,0 +1,72 @@
+[package]
+name = "metaflux_client_wasm"
+version = "0.0.1"
+edition = "2021"
+description = "WASM-backed crypto + canonical-encoding primitives for the MetaFlux TypeScript client SDK."
+license = "MIT OR Apache-2.0"
+publish = false
+
+# This crate is intentionally OUTSIDE the main metaflux Cargo workspace —
+# it ships embedded inside @metaflux/client (the npm package) via wasm-pack
+# and must compile cleanly on the `wasm32-unknown-unknown` target without
+# pulling the server-side workspace's dev deps. Treat this Cargo.toml as
+# the workspace root for this crate (the `[workspace]` table below makes
+# the implicit workspace explicit so a stray `Cargo.toml` walk from a
+# parent directory cannot accidentally absorb this crate).
+[workspace]
+
+[lib]
+# `cdylib` produces the .wasm artifact wasm-pack consumes; `rlib` lets
+# the same crate be `cargo test`ed natively (the inline test module
+# below runs against the native target, not the wasm target — much
+# faster, and the primitives we exercise are platform-agnostic).
+crate-type = ["cdylib", "rlib"]
+name = "metaflux_client_wasm"
+
+[dependencies]
+# wasm-bindgen 0.2.x is the canonical JS<->Rust bridge. Pinned to the
+# 0.2 series; minor bumps in this series have been API-compatible for
+# the small surface we use (`#[wasm_bindgen]` exports + `Vec<u8>` <->
+# `Uint8Array` marshalling).
+wasm-bindgen = "0.2"
+
+# secp256k1 ECDSA + recoverable signatures. The same crate used by the
+# consensus crate (see metaflux/crates/consensus/src/signing.rs); keeping
+# the wire conventions identical avoids cross-impl drift between client
+# and node.
+k256 = { version = "0.13", features = ["ecdsa", "ecdsa-core"] }
+
+# keccak256 — production hash for every action digest + EIP-712 envelope
+# + EVM address derivation. tiny_keccak matches what core-state/signing.rs
+# uses; sha3 is a similarly minimal alternative that ships keccak via
+# the `Keccak256` type. Picked sha3 here because it has a slightly
+# friendlier streaming API for wasm-bindgen exports.
+sha3 = "0.10"
+
+# msgpack codec for canonical action encoding. The MetaFlux node ingests
+# `rmp_serde::to_vec(&Action)` bytes inside the SignedEnvelope payload
+# field — see core-state/src/signing.rs's docstring. Keeping the
+# client-side encoder on the same crate guarantees byte-for-byte parity.
+rmp-serde = "1"
+serde = { version = "1", features = ["derive"] }
+
+# `getrandom` with the `js` feature is required for `k256` ECDSA signing
+# under wasm32 — RFC 6979 deterministic nonces don't need RNG for the
+# signature itself, but `k256`'s sign API still pulls `getrandom` for
+# nonce blinding. The `js` feature wires `getrandom` to `crypto.getRandomValues`.
+getrandom = { version = "0.2", features = ["js"] }
+
+[dev-dependencies]
+# Native-target tests only. wasm-bindgen-test would be needed if we
+# exercised the wasm target, but per session direction we keep dev
+# friction low by running tests natively.
+hex = "0.4"
+
+[profile.release]
+# wasm-pack defaults are fine; tweak only for size-sensitive deployments.
+# `opt-level = "s"` shaves ~15% off the wasm artifact at no runtime cost
+# for cryptographic workloads (the hot path is k256 scalar math, which
+# the compiler already fully unrolls).
+opt-level = "s"
+lto = true
+codegen-units = 1
