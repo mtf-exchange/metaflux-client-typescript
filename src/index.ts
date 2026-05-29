@@ -10,6 +10,16 @@
 export { Client, type ClientOpts } from './client.js';
 export { MetaFluxApiError } from './http.js';
 export {
+  // MTF-native signed-action surface (the path the server now accepts).
+  // Exported so power users can build / sign / inspect actions out-of-band.
+  MTF_CHAIN_ID,
+  nativeActionDigest,
+  buildNativeOrderAction,
+  signNativeAction,
+  recoverNativeSigner,
+  nativeRequestBody,
+} from './native.js';
+export {
   WasmNotBuiltError,
   WasmCallError,
   // Low-level crypto wrappers — exported so power users can build
@@ -32,4 +42,13 @@ export type {
   Side,
   Tif,
   ErrorEnvelope,
+  // MTF-native action types.
+  NativeOrder,
+  NativeBuilder,
+  NativeSide,
+  NativeOrderKind,
+  NativeTif,
+  NativeStpMode,
+  NativeSignedAction,
+  NativeExchangeAck,
 } from './types.js';
