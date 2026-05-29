@@ -17,8 +17,16 @@ import {
   signSecp256k1,
 } from './wasm.js';
 import { httpRequest } from './http.js';
+import {
+  buildNativeOrderAction,
+  nativeRequestBody,
+  recoverNativeSigner,
+  signNativeAction,
+} from './native.js';
 import type {
   Market,
+  NativeExchangeAck,
+  NativeOrder,
   Order,
   OrderAck,
   Position,
@@ -206,6 +214,12 @@ export class Client {
 
   /// Submit a pre-signed order to the gateway.
   ///
+  /// DEPRECATED / LEGACY: this targets the old `{payload,signature,signer}` →
+  /// `/v1/orders` envelope with a msgpack body and an `Order(...)` typehash.
+  /// The server now accepts the MTF-native `{action,nonce,signature}` →
+  /// `/exchange/native` envelope instead — use `submitOrderNative`. Retained
+  /// only for any consumer still on the old gateway adapter.
+  ///
   /// Wire shape: POSTs the `SignedOrder` as a msgpack-friendly JSON
   /// envelope — `payload` and `signature` go as base64url strings (the
   /// gateway's existing `LoginEnvelope` shape uses base64; we mirror
@@ -220,6 +234,70 @@ export class Client {
         signature: bytesToBase64Url(signed.signature),
         signer: bytesToHex(signed.signer, '0x'),
       },
+      bearer: this.jwt,
+    });
+  }
+
+  /// Submit an order via the MTF-native signed-action front door
+  /// (`POST /exchange/native`).
+  ///
+  /// This is the path the server now accepts. It supersedes the legacy
+  /// `signOrder` + `submitOrder` flow (msgpack body + `Order(...)` typehash +
+  /// `{payload,signature,signer}` → `/v1/orders`), which targeted an
+  /// envelope the node no longer recognizes.
+  ///
+  /// Flow:
+  /// 1. `buildNativeOrderAction` produces the canonical snake_case action JSON
+  ///    string (`{"type":"submit_order","order":{...}}`), field order matching
+  ///    the server `NativeOrder`.
+  /// 2. `signNativeAction` computes the native EIP-712 digest over the EXACT
+  ///    action bytes (`MetaFluxAction(string action,uint64 nonce)` struct hash,
+  ///    5-field domain) and signs it.
+  /// 3. The action string is POSTed VERBATIM inside `{action, nonce, signature}`
+  ///    — the server recovers the signer over the raw `action` bytes, so the
+  ///    signed bytes and the sent bytes are identical.
+  ///
+  /// `order.owner` MUST equal the signing wallet's address; we recover the
+  /// signer locally and reject a mismatch before hitting the network (the
+  /// server enforces the same).
+  ///
+  /// `nonce` is the per-owner replay nonce bound into the digest. Defaults to
+  /// `Date.now()` (unix-ms) — supply an explicit monotonically-increasing
+  /// value for back-to-back submissions in the same millisecond.
+  ///
+  /// `chainId` defaults to the MTF-native chain id (998), independent of the
+  /// legacy `ClientOpts.chainId` (which is the wrong domain for this path).
+  async submitOrderNative(
+    order: NativeOrder,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    if (this.privateKey === undefined) {
+      throw new Error(
+        'submitOrderNative requires a privateKey in ClientOpts (this Client is read-only)',
+      );
+    }
+    const nonce = opts.nonce ?? BigInt(Date.now());
+    const actionJson = buildNativeOrderAction(order);
+    const signed = await signNativeAction(
+      this.privateKey,
+      actionJson,
+      nonce,
+      opts.chainId,
+    );
+
+    // Local guard: the recovered signer must equal the claimed owner. The
+    // server enforces this too (401 on mismatch), but failing here saves a
+    // round-trip and surfaces a key/owner mismatch with a clear message.
+    const signer = await recoverNativeSigner(signed, opts.chainId);
+    if (signer.toLowerCase() !== order.owner.toLowerCase()) {
+      throw new Error(
+        `order.owner ${order.owner} != recovered signer ${signer}`,
+      );
+    }
+
+    return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange/native', {
+      method: 'POST',
+      rawJson: nativeRequestBody(signed),
       bearer: this.jwt,
     });
   }

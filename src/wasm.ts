@@ -111,13 +111,27 @@ export async function loadWasm(): Promise<WasmModule> {
       } catch (err) {
         throw new WasmNotBuiltError(err);
       }
-      // wasm-pack's default-export `init` accepts an optional .wasm URL;
+      // wasm-pack's default-export `init` accepts an optional .wasm source;
       // we let it auto-resolve relative to the .js shim. The Node-target
       // build (`--target nodejs`) loads the .wasm synchronously at
       // module-load time and exposes NO default export — only `web` /
       // `bundler` builds need this call.
       if (typeof (mod as { default?: unknown }).default === 'function') {
-        await (mod as { default: () => Promise<unknown> }).default();
+        const init = (mod as { default: (arg?: unknown) => Promise<unknown> })
+          .default;
+        try {
+          // Browser / bundler: default-resolve the .wasm via fetch.
+          await init();
+        } catch (fetchErr) {
+          // Node (incl. vitest): the web-target shim's `init()` fetches the
+          // .wasm by file URL, which Node's fetch refuses. Fall back to
+          // reading + compiling the bytes ourselves and handing them to
+          // init(). Only attempt this where `node:fs` is importable; if it
+          // is not (true browser), rethrow the original fetch error.
+          const compiled = await compileWasmFromFs();
+          if (compiled === undefined) throw fetchErr;
+          await init({ module_or_path: compiled });
+        }
       }
       return mod;
     })();
@@ -129,6 +143,39 @@ export async function loadWasm(): Promise<WasmModule> {
 /// WasmNotBuiltError path. Not part of the public API.
 export function _resetWasmCacheForTest(): void {
   wasmPromise = undefined;
+}
+
+/// Node-only: read + compile the wasm-pack `_bg.wasm` bytes so the web-target
+/// `init()` can be fed a ready module instead of fetching a file URL (which
+/// Node's `fetch` rejects). Returns `undefined` in environments without
+/// `node:fs` (a real browser), where the fetch path is correct anyway.
+async function compileWasmFromFs(): Promise<WebAssembly.Module | undefined> {
+  try {
+    const fs = await import('node:fs/promises');
+    const url = await import('node:url');
+    const path = await import('node:path');
+    // Resolve the .wasm next to the wasm-pack .js shim. From dev (vitest on
+    // src/*.ts) the cwd is the repo root and pkg/ sits there; from the
+    // compiled dist/ output pkg/ is one level up. Try both.
+    const candidates = [
+      path.resolve(process.cwd(), 'pkg', 'metaflux_client_wasm_bg.wasm'),
+      url.fileURLToPath(
+        new URL('../pkg/metaflux_client_wasm_bg.wasm', import.meta.url),
+      ),
+    ];
+    for (const c of candidates) {
+      try {
+        const bytes = await fs.readFile(c);
+        return await WebAssembly.compile(bytes);
+      } catch {
+        // Try the next candidate.
+      }
+    }
+    return undefined;
+  } catch {
+    // `node:fs` unavailable -> not Node; the fetch path is the right one.
+    return undefined;
+  }
 }
 
 // ============================================================================

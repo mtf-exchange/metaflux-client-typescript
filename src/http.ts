@@ -33,6 +33,13 @@ export interface HttpRequestInit {
   /// `application/octet-stream` unless overridden. Used by the
   /// signed-action POST surface that carries msgpack bytes.
   bytes?: Uint8Array;
+  /// Pre-serialized JSON STRING body — sent verbatim (not re-stringified).
+  /// `Content-Type` defaults to `application/json`. Used by the MTF-native
+  /// signed-action path, where the `action` field MUST carry the exact bytes
+  /// that were signed (the server verifies over `serde_json::RawValue`); a
+  /// `JSON.parse`→`JSON.stringify` round-trip would risk reordering / spacing
+  /// drift and break every signature.
+  rawJson?: string;
   /// JWT bearer token (gateway-issued; persisted by the Client class
   /// after `/auth`). Adds `Authorization: Bearer <jwt>`.
   bearer?: string;
@@ -63,7 +70,10 @@ export async function httpRequest<T>(
   const headers: Record<string, string> = { ...(init.headers ?? {}) };
   let body: BodyInit | undefined;
 
-  if (init.json !== undefined) {
+  if (init.rawJson !== undefined) {
+    headers['Content-Type'] = headers['Content-Type'] ?? 'application/json';
+    body = init.rawJson;
+  } else if (init.json !== undefined) {
     headers['Content-Type'] = headers['Content-Type'] ?? 'application/json';
     body = JSON.stringify(init.json);
   } else if (init.bytes !== undefined) {

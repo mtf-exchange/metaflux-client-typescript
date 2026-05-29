@@ -95,6 +95,98 @@ export interface SignedOrder {
   signer: Uint8Array;
 }
 
+/// MTF-native order action shape (snake_case), byte-for-byte mirror of the
+/// server `NativeOrder` (`metaflux/crates/api-node/src/rest/native_action.rs`).
+/// These string/number forms are EXACTLY what rides inside the signed
+/// `action` JSON posted to `POST /exchange/native` — the digest covers the
+/// full object, so every field here is part of the signed bytes.
+///
+/// Field ORDER is load-bearing: the server verifies the signature over the
+/// raw `action` bytes, so the client must emit keys in this exact order and
+/// the same bytes it signed (see `buildNativeOrderAction`).
+export interface NativeOrder {
+  /// `0x`-hex 20-byte owner. MUST equal the signing wallet's address; the
+  /// server authenticates via the recovered signer and requires it to equal
+  /// `owner` (or an approved agent of it).
+  owner: string;
+  /// Target market id (`u32`).
+  market: number;
+  /// Side: `"bid"` (buy) or `"ask"` (sell).
+  side: NativeSide;
+  /// Order kind. Only `"limit"` / `"market"` map server-side today.
+  kind: NativeOrderKind;
+  /// Size in fixed-point tick units (`u64` on the wire).
+  size: number;
+  /// Limit price in fixed-point tick units (`u64` on the wire).
+  limit_px: number;
+  /// Time-in-force.
+  tif: NativeTif;
+  /// Self-trade-prevention mode.
+  stp_mode: NativeStpMode;
+  /// Reduce-only flag.
+  reduce_only: boolean;
+  /// Optional `0x`-hex 32-char (16-byte) client order id. Omitted from the
+  /// signed bytes entirely when absent.
+  cloid?: string;
+  /// Optional builder-code carve. Rides INSIDE the signed action object.
+  builder?: NativeBuilder;
+}
+
+/// MTF-native side string — mirrors the server `NativeSide`.
+export type NativeSide = 'bid' | 'ask';
+
+/// MTF-native order kind — mirrors the server `NativeOrderKind`. Only
+/// `limit` / `market` are mapped server-side; `stop_loss` / `take_profit`
+/// are rejected (triggers not wired).
+export type NativeOrderKind = 'limit' | 'market' | 'stop_loss' | 'take_profit';
+
+/// MTF-native time-in-force — mirrors the server `NativeTif`. `aon` is
+/// rejected server-side (no core equivalent).
+export type NativeTif = 'gtc' | 'ioc' | 'aon' | 'alo';
+
+/// MTF-native self-trade-prevention — mirrors the server `NativeStpMode`.
+/// `reject` is rejected server-side (no core equivalent).
+export type NativeStpMode =
+  | 'cancel_oldest'
+  | 'cancel_newest'
+  | 'cancel_both'
+  | 'reject';
+
+/// MTF-native builder carve — mirrors the server `NativeBuilder`. Rides
+/// inside the signed action bytes.
+export interface NativeBuilder {
+  /// Builder fee in basis points (`u16`).
+  fee: number;
+  /// `0x`-hex 20-byte address credited with the builder fee.
+  user: string;
+}
+
+/// Signed native action envelope posted to `POST /exchange/native`.
+///
+/// `action` is the raw JSON STRING (not a parsed object) so the bytes sent
+/// are byte-identical to the bytes signed — the server recovers the signer
+/// over the exact `action` bytes (`serde_json::value::RawValue`). `signature`
+/// is the `0x`-prefixed 65-byte `r||s||v` secp256k1 signature.
+export interface NativeSignedAction {
+  /// Raw JSON bytes of the action object — what was signed AND what is sent.
+  actionJson: string;
+  /// Per-owner replay nonce bound into the signed digest.
+  nonce: bigint;
+  /// `0x`-prefixed 65-byte recoverable secp256k1 signature.
+  signature: string;
+}
+
+/// Server response to `POST /exchange/native`. Mirrors the node
+/// `ExchangeResponse` (`metaflux/crates/api-node/src/rest/exchange.rs`).
+export interface NativeExchangeAck {
+  /// Whether the action was admitted to the mempool.
+  accepted: boolean;
+  /// Rejection reason, when `accepted` is false.
+  error?: string;
+  /// Mempool depth observed at admission time (diagnostic).
+  mempool_depth: number;
+}
+
 /// Acknowledgement from `submitOrder`. Mirrors `Order` from the CCXT REST
 /// response shape (`api-gateway/src/ccxt/types.rs::Order`); monetary
 /// fields are decimal strings to match what the gateway emits.
