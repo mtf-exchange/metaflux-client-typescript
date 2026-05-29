@@ -182,6 +182,9 @@ export class Client {
       order.sizeE8,
       order.priceE8,
       order.tif,
+      order.stp ?? 0,
+      order.cloid,
+      order.reduceOnly ?? false,
       order.builder,
     );
     const typeHash = await orderTypeHash();
