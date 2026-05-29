@@ -21,6 +21,13 @@ export type Side = 0 | 1;
 /// Other values are reserved.
 export type Tif = 0 | 1 | 2;
 
+/// Self-trade-prevention mode as the MTF wire variant index — matches the
+/// declaration order of `core_state::primitives::StpMode`. The node decodes
+/// the integer into the enum variant; the index ordering is load-bearing.
+/// 0 = CancelNewest (default), 1 = CancelOldest, 2 = CancelBoth,
+/// 3 = DecrementAndCancel.
+export type StpMode = 0 | 1 | 2 | 3;
+
 /// Builder-code carve attached to an order (ADR-012 §L.5.2; mirrors
 /// `core_state::actions::trading::Builder`). When present it is encoded
 /// INSIDE the signed order body (see `encodeLimitOrder` / the WASM
@@ -52,6 +59,19 @@ export interface Order {
   sizeE8: bigint;
   /// Time-in-force on the MTF wire.
   tif: Tif;
+  /// Self-trade-prevention mode (matches `OrderParams.stp: StpMode`). The node
+  /// requires this field on the signed wire (no serde default). Omit to default
+  /// to `0` (CancelNewest) — the encoder fills it in.
+  stp?: StpMode;
+  /// Optional client order id (matches `OrderParams.cloid: Option<Cloid>`,
+  /// `Cloid(u128)`). On the SIGNED wire this is the raw 128-bit integer, so it
+  /// is a `bigint` here (NOT a hex string). Omit for no cloid — the encoder
+  /// skips the key and the node fills `None`.
+  cloid?: bigint;
+  /// Reduce-only flag (matches `OrderParams.reduce_only: bool`). The node
+  /// requires this field on the signed wire (no serde default). Omit to default
+  /// to `false` — the encoder fills it in.
+  reduceOnly?: boolean;
   /// Optional builder-code carve (ADR-012 §L.5.2). Omit for a vanilla
   /// order; when set it rides inside the EIP-712-signed body.
   builder?: Builder;

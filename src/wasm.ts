@@ -16,7 +16,7 @@
 //    promotes that to a typed exception, keeping the Client surface
 //    free of "did this succeed?" branches.
 
-import type { Builder, Side, Tif } from './types.js';
+import type { Builder, Side, StpMode, Tif } from './types.js';
 
 /// Shape of the WASM module after `pkg/` is built. Mirrors the
 /// `#[wasm_bindgen]` exports in `wasm/src/lib.rs`. Kept narrow — we only
@@ -43,6 +43,11 @@ interface WasmModule {
     priceE8Lo: bigint,
     priceE8Hi: bigint,
     tif: number,
+    stp: number,
+    hasCloid: boolean,
+    cloidLo: bigint,
+    cloidHi: bigint,
+    reduceOnly: boolean,
     hasBuilder: boolean,
     builderFee: number,
     builderUser: Uint8Array,
@@ -194,6 +199,16 @@ export async function eip712TypedDataHash(
 /// `priceE8` / `sizeE8` amounts are split into (lo, hi) `bigint` words
 /// for the wasm-bindgen ABI — see `lib.rs::u128_from_parts`.
 ///
+/// `stp` (self-trade-prevention) and `reduceOnly` are REQUIRED on the node's
+/// signed wire (`OrderParams` has no serde default for either); they default
+/// here to `0` (CancelNewest) / `false` so callers can omit them, but are
+/// always emitted into the body.
+///
+/// `cloid` (optional client order id) rides the signed body as the raw 128-bit
+/// integer — the node's `Cloid(u128)` wire form — split into (lo, hi) words for
+/// the wasm-bindgen ABI. Omit for no cloid (the key is skipped; the node fills
+/// `None`).
+///
 /// `builder` (ADR-012 §L.5.2) is optional. When supplied it is encoded
 /// INSIDE the body so the carve is covered by the EIP-712 signature; an
 /// omitted builder produces byte-identical output to the pre-builder
@@ -205,6 +220,9 @@ export async function encodeLimitOrder(
   sizeE8: bigint,
   priceE8: bigint,
   tif: Tif,
+  stp: StpMode = 0,
+  cloid?: bigint,
+  reduceOnly = false,
   builder?: Builder,
 ): Promise<Uint8Array> {
   if (sizeE8 < 0n) throw new RangeError('sizeE8 must be non-negative');
@@ -218,6 +236,19 @@ export async function encodeLimitOrder(
   const sizeHi = (sizeE8 >> 64n) & mask64;
   const priceLo = priceE8 & mask64;
   const priceHi = (priceE8 >> 64n) & mask64;
+
+  // Cloid: optional 128-bit client order id. On the signed wire it is the
+  // raw u128 (node `Cloid(u128)`), split into (lo, hi) for the ABI.
+  let hasCloid = false;
+  let cloidLo = 0n;
+  let cloidHi = 0n;
+  if (cloid !== undefined) {
+    if (cloid < 0n) throw new RangeError('cloid must be non-negative');
+    if (cloid >= 1n << 128n) throw new RangeError('cloid overflows u128');
+    hasCloid = true;
+    cloidLo = cloid & mask64;
+    cloidHi = (cloid >> 64n) & mask64;
+  }
 
   // Builder carve. Validate fee + address shape on the TS side so a
   // malformed carve fails loudly here rather than encoding silently —
@@ -243,6 +274,11 @@ export async function encodeLimitOrder(
     priceLo,
     priceHi,
     tif,
+    stp,
+    hasCloid,
+    cloidLo,
+    cloidHi,
+    reduceOnly,
     hasBuilder,
     builderFee,
     builderUser,

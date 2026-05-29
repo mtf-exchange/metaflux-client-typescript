@@ -253,19 +253,43 @@ pub fn derive_address_from_pubkey(pubkey: &[u8]) -> Vec<u8> {
 ///   little-endian word order: low u64 first, high u64 second, packed
 ///   into a 16-byte little-endian u128 for canonical encoding.
 /// - `tif` is a `u8` mirroring the `Tif` enum.
+/// - `stp` is a `u8` mirroring the `StpMode` enum (0 = CancelNewest [default],
+///   1 = CancelOldest, 2 = CancelBoth, 3 = DecrementAndCancel). REQUIRED on the
+///   wire — `OrderParams.stp` is a non-`Option`, non-`#[serde(default)]` field,
+///   so a missing key fails `from_slice` ("missing field `stp`").
+/// - `reduce_only` is a `bool` mirroring `OrderParams.reduce_only`. REQUIRED on
+///   the wire for the same reason (plain `bool`, no default).
 ///
-/// Sub-account selection, STP mode, cloid, and reduce-only are deferred
-/// in this canonical encoder — the first cut targets `signOrder` for
-/// vanilla limit orders. The TS side enforces defaults; richer encoders
-/// land alongside the corresponding gateway adapter work.
+/// ## Why `u8` for the externally-tagged enums (`side`/`tif`/`stp`)
 ///
-/// `builder` is the only optional field carried so far: it mirrors
-/// `OrderParams.builder: Option<Builder>` (`#[serde(default)]`,
-/// ADR-012 §L.5.2). `None` skips the field entirely so a builder-less
-/// order encodes byte-identically to before this addition (the node's
-/// `#[serde(default)]` fills `None` on the decode side). When present it
-/// rides INSIDE the signed `px || size || tif || builder` body so the
-/// builder carve cannot be tampered post-signature.
+/// The node's `Side`/`Tif`/`StpMode` derive a plain externally-tagged
+/// `Deserialize`. `rmp_serde::to_vec_named` SERIALISES those as the
+/// variant-name STRING (`"Ask"`, `"Gtc"`, `"CancelNewest"`), but the decoder
+/// ALSO accepts an integer = the variant index. We emit the compact `u8`
+/// index form (verified to round-trip into the node enums via a probe against
+/// the `core-state` crate). This is intentional and load-bearing: the index
+/// ordering MUST match the enum declaration order in
+/// `core-state/src/primitives.rs`.
+///
+/// ## Optional fields
+///
+/// - `cloid` mirrors `OrderParams.cloid: Option<Cloid>`. `Cloid` is a
+///   `#[serde(transparent)]` newtype over `u128`, which `rmp_serde` encodes as
+///   a 16-byte big-endian binary blob — so on the SIGNED wire `cloid` is the
+///   raw `u128`, NOT the hex string the higher-level Rust SDK uses at its API
+///   boundary. `OrderParams.cloid` has NO `#[serde(default)]`, but `rmp_serde`
+///   fills a missing `Option` field with `None` regardless, so we
+///   `skip_serializing_if = "Option::is_none"` — a cloid-less order omits the
+///   key and still decodes as `cloid: None` (probe-verified:
+///   `MISSING_CLOID_KEY => Ok(None)`).
+/// - `builder` mirrors `OrderParams.builder: Option<Builder>`
+///   (`#[serde(default)]`, ADR-012 §L.5.2). `None` skips the field entirely so
+///   a builder-less order encodes byte-identically to before this addition.
+///   When present it rides INSIDE the signed body so the builder carve cannot
+///   be tampered post-signature.
+///
+/// Field order here mirrors `OrderParams`; `to_vec_named` emits a named map so
+/// the field NAMES (not order) are what the node decoder keys on.
 #[derive(Serialize)]
 struct LimitOrderBody {
     asset: u32,
@@ -273,6 +297,10 @@ struct LimitOrderBody {
     px: u128,
     size: u128,
     tif: u8,
+    stp: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cloid: Option<u128>,
+    reduce_only: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     builder: Option<BuilderBody>,
 }
@@ -296,6 +324,15 @@ struct BuilderBody {
 /// Returns the msgpack-encoded body — the TS layer wraps that in the
 /// `SignedEnvelope` shape after signing.
 ///
+/// `stp` is the `StpMode` variant index (0 = CancelNewest default). `reduce_only`
+/// is the reduce-only flag. Both are REQUIRED node-side and always encoded.
+///
+/// Cloid (`OrderParams.cloid: Option<Cloid>`): pass `has_cloid = false` for no
+/// client order id (the `cloid` key is omitted — the node fills `None`). When
+/// `has_cloid = true`, `cloid_lo`/`cloid_hi` are the little-endian word halves
+/// of the 128-bit cloid; it rides the signed body as the raw `u128` (the wire
+/// form the node's `Cloid(u128)` decodes), NOT a hex string.
+///
 /// Builder carve (ADR-012 §L.5.2): pass `has_builder = false` for a
 /// vanilla order (encodes identically to a no-builder body — the
 /// `builder` key is omitted). When `has_builder = true`, `builder_fee`
@@ -305,6 +342,7 @@ struct BuilderBody {
 /// silently dropping the field — a dropped builder would be an unsigned
 /// carve, worse than a hard failure.
 #[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
 pub fn encode_limit_order(
     asset: u32,
     side: u8,
@@ -313,12 +351,22 @@ pub fn encode_limit_order(
     price_e8_lo: u64,
     price_e8_hi: u64,
     tif: u8,
+    stp: u8,
+    has_cloid: bool,
+    cloid_lo: u64,
+    cloid_hi: u64,
+    reduce_only: bool,
     has_builder: bool,
     builder_fee: u16,
     builder_user: &[u8],
 ) -> Vec<u8> {
     let size = u128_from_parts(size_e8_lo, size_e8_hi);
     let px = u128_from_parts(price_e8_lo, price_e8_hi);
+    let cloid = if has_cloid {
+        Some(u128_from_parts(cloid_lo, cloid_hi))
+    } else {
+        None
+    };
     let builder = if has_builder {
         let user: [u8; 20] = match builder_user.try_into() {
             Ok(arr) => arr,
@@ -337,6 +385,9 @@ pub fn encode_limit_order(
         px,
         size,
         tif,
+        stp,
+        cloid,
+        reduce_only,
         builder,
     };
     // rmp_serde::to_vec produces the canonical msgpack map (named-field
@@ -544,7 +595,7 @@ mod tests {
         let px_hi = (px >> 64) as u64;
 
         let bytes = encode_limit_order(
-            asset, side, size_lo, size_hi, px_lo, px_hi, tif, false, 0, &[],
+            asset, side, size_lo, size_hi, px_lo, px_hi, tif, 0, false, 0, 0, false, false, 0, &[],
         );
         assert!(!bytes.is_empty(), "encoder should not fail on valid inputs");
 
@@ -562,6 +613,10 @@ mod tests {
             px: u128,
             size: u128,
             tif: u8,
+            stp: u8,
+            #[serde(default)]
+            cloid: Option<u128>,
+            reduce_only: bool,
         }
         let decoded: LimitOrderBodyMirror = rmp_serde::from_slice(&bytes)
             .expect("encoded body must round-trip via rmp_serde::from_slice");
@@ -570,6 +625,76 @@ mod tests {
         assert_eq!(decoded.px, px);
         assert_eq!(decoded.size, size);
         assert_eq!(decoded.tif, tif);
+        assert_eq!(decoded.stp, 0);
+        assert_eq!(decoded.cloid, None);
+        assert!(!decoded.reduce_only);
+    }
+
+    /// The encoded body must carry EXACTLY the node `OrderParams` key set
+    /// (`asset/side/px/size/tif/stp/reduce_only` always; `cloid`/`builder`
+    /// when present). Decoding into a node-shaped mirror that makes `stp` +
+    /// `reduce_only` REQUIRED (no `#[serde(default)]`) proves both keys are on
+    /// the wire — the node's `OrderParams` would otherwise reject the payload
+    /// ("missing field `stp`" / "missing field `reduce_only`").
+    #[test]
+    fn encode_limit_order_carries_required_stp_and_reduce_only() {
+        #[derive(serde::Deserialize, Debug, PartialEq, Eq)]
+        struct OrderParamsMirror {
+            asset: u32,
+            side: u8,
+            px: u128,
+            size: u128,
+            tif: u8,
+            stp: u8,
+            #[serde(default)]
+            cloid: Option<u128>,
+            reduce_only: bool,
+        }
+        // stp = 2 (CancelBoth), reduce_only = true, no cloid.
+        let bytes =
+            encode_limit_order(3, 1, 7, 0, 11, 0, 1, 2, false, 0, 0, true, false, 0, &[]);
+        let decoded: OrderParamsMirror = rmp_serde::from_slice(&bytes)
+            .expect("must decode into a mirror with REQUIRED stp + reduce_only");
+        assert_eq!(decoded.stp, 2);
+        assert!(decoded.reduce_only);
+        assert_eq!(decoded.cloid, None);
+    }
+
+    /// `cloid` rides the signed body as the raw `u128` (the node's
+    /// `Cloid(u128)` wire form), reconstructed from the (lo, hi) ABI pair.
+    #[test]
+    fn encode_limit_order_with_cloid_roundtrips() {
+        #[derive(serde::Deserialize, Debug, PartialEq, Eq)]
+        struct OrderParamsMirror {
+            asset: u32,
+            side: u8,
+            px: u128,
+            size: u128,
+            tif: u8,
+            stp: u8,
+            cloid: Option<u128>,
+            reduce_only: bool,
+        }
+        let cloid: u128 = (1u128 << 64) | 0xDEAD_BEEFu128;
+        let lo = cloid as u64;
+        let hi = (cloid >> 64) as u64;
+        let bytes =
+            encode_limit_order(3, 0, 7, 0, 11, 0, 2, 0, true, lo, hi, false, false, 0, &[]);
+        let decoded: OrderParamsMirror = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(decoded.cloid, Some(cloid));
+        assert_eq!(decoded.stp, 0);
+    }
+
+    /// `has_cloid = false` omits the `cloid` key; a node-shaped mirror with
+    /// `Option<u128>` (no `#[serde(default)]`) still decodes it as `None`
+    /// because rmp_serde fills a missing Option field with None.
+    #[test]
+    fn encode_limit_order_without_cloid_omits_key() {
+        let with_cloid =
+            encode_limit_order(3, 0, 7, 0, 11, 0, 2, 0, true, 1, 0, false, false, 0, &[]);
+        let no_cloid =
+            encode_limit_order(3, 0, 7, 0, 11, 0, 2, 0, false, 0, 0, false, false, 0, &[]);
+        assert!(with_cloid.len() > no_cloid.len(), "cloid key must be omitted");
     }
 
     /// A builder carve must ride INSIDE the encoded body and round-trip
@@ -594,7 +719,7 @@ mod tests {
         }
 
         let user = [0xABu8; 20];
-        let bytes = encode_limit_order(7, 1, 50, 0, 99, 0, 0, true, 5, &user);
+        let bytes = encode_limit_order(7, 1, 50, 0, 99, 0, 0, 0, false, 0, 0, false, true, 5, &user);
         assert!(!bytes.is_empty());
         let decoded: OrderMirror = rmp_serde::from_slice(&bytes)
             .expect("builder body must round-trip");
@@ -614,9 +739,10 @@ mod tests {
         // Mirror that REQUIRES builder to be absent (no #[serde(default)]):
         // if the key were emitted, this decode would still pass, so we also
         // assert the byte length is shorter than the with-builder form.
-        let no_builder = encode_limit_order(7, 1, 50, 0, 99, 0, 0, false, 0, &[]);
+        let no_builder =
+            encode_limit_order(7, 1, 50, 0, 99, 0, 0, 0, false, 0, 0, false, false, 0, &[]);
         let with_builder =
-            encode_limit_order(7, 1, 50, 0, 99, 0, 0, true, 5, &[0xABu8; 20]);
+            encode_limit_order(7, 1, 50, 0, 99, 0, 0, 0, false, 0, 0, false, true, 5, &[0xABu8; 20]);
         assert!(!no_builder.is_empty());
         assert!(with_builder.len() > no_builder.len());
 
@@ -640,7 +766,8 @@ mod tests {
     /// silently drop the carve — a dropped builder would be unsigned.
     #[test]
     fn encode_limit_order_rejects_bad_builder_user_len() {
-        let bad = encode_limit_order(7, 1, 50, 0, 99, 0, 0, true, 5, &[0u8; 19]);
+        let bad =
+            encode_limit_order(7, 1, 50, 0, 99, 0, 0, 0, false, 0, 0, false, true, 5, &[0u8; 19]);
         assert!(bad.is_empty());
     }
 
@@ -649,8 +776,10 @@ mod tests {
     /// agree on every replay.
     #[test]
     fn encode_limit_order_is_deterministic() {
-        let bytes1 = encode_limit_order(1, 0, 100, 0, 200, 0, 0, false, 0, &[]);
-        let bytes2 = encode_limit_order(1, 0, 100, 0, 200, 0, 0, false, 0, &[]);
+        let bytes1 =
+            encode_limit_order(1, 0, 100, 0, 200, 0, 0, 0, false, 0, 0, false, false, 0, &[]);
+        let bytes2 =
+            encode_limit_order(1, 0, 100, 0, 200, 0, 0, 0, false, 0, 0, false, false, 0, &[]);
         assert_eq!(bytes1, bytes2);
     }
 
@@ -658,8 +787,10 @@ mod tests {
     /// against accidental field-order collapse.
     #[test]
     fn encode_limit_order_differs_per_input() {
-        let bytes_bid = encode_limit_order(1, 0, 100, 0, 200, 0, 0, false, 0, &[]);
-        let bytes_ask = encode_limit_order(1, 1, 100, 0, 200, 0, 0, false, 0, &[]);
+        let bytes_bid =
+            encode_limit_order(1, 0, 100, 0, 200, 0, 0, 0, false, 0, 0, false, false, 0, &[]);
+        let bytes_ask =
+            encode_limit_order(1, 1, 100, 0, 200, 0, 0, 0, false, 0, 0, false, false, 0, &[]);
         assert_ne!(bytes_bid, bytes_ask);
     }
 
