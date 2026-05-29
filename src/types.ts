@@ -21,6 +21,20 @@ export type Side = 0 | 1;
 /// Other values are reserved.
 export type Tif = 0 | 1 | 2;
 
+/// Builder-code carve attached to an order (ADR-012 §L.5.2; mirrors
+/// `core_state::actions::trading::Builder`). When present it is encoded
+/// INSIDE the signed order body (see `encodeLimitOrder` / the WASM
+/// `encode_limit_order`), so the carve cannot be tampered post-signature.
+export interface Builder {
+  /// Builder fee rate in basis points (≤ 8, and ≤ the trader's approved
+  /// per-builder ceiling — the node rejects over-cap / unapproved
+  /// builders pre-trade). Charged as an ADDITIONAL fee on the taker.
+  fee: number;
+  /// Builder address credited per fill — `0x`-prefixed 40-char hex
+  /// (20 bytes). The node rejects the zero address.
+  user: string;
+}
+
 /// Pre-signing order parameters. The TS-side amounts use `bigint` rather
 /// than `number` because every monetary value on the MetaFlux wire is a
 /// 128-bit fixed-point integer scaled by 1e8. `number` would silently
@@ -38,6 +52,9 @@ export interface Order {
   sizeE8: bigint;
   /// Time-in-force on the MTF wire.
   tif: Tif;
+  /// Optional builder-code carve (ADR-012 §L.5.2). Omit for a vanilla
+  /// order; when set it rides inside the EIP-712-signed body.
+  builder?: Builder;
 }
 
 /// Order body + signature bundle the client posts to the gateway.

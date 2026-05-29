@@ -16,7 +16,7 @@
 //    promotes that to a typed exception, keeping the Client surface
 //    free of "did this succeed?" branches.
 
-import type { Side, Tif } from './types.js';
+import type { Builder, Side, Tif } from './types.js';
 
 /// Shape of the WASM module after `pkg/` is built. Mirrors the
 /// `#[wasm_bindgen]` exports in `wasm/src/lib.rs`. Kept narrow — we only
@@ -43,6 +43,9 @@ interface WasmModule {
     priceE8Lo: bigint,
     priceE8Hi: bigint,
     tif: number,
+    hasBuilder: boolean,
+    builderFee: number,
+    builderUser: Uint8Array,
   ) => Uint8Array;
   derive_address_from_pubkey: (pubkey: Uint8Array) => Uint8Array;
 }
@@ -190,12 +193,19 @@ export async function eip712TypedDataHash(
 /// Encode the canonical msgpack body for an `order` action. The 128-bit
 /// `priceE8` / `sizeE8` amounts are split into (lo, hi) `bigint` words
 /// for the wasm-bindgen ABI — see `lib.rs::u128_from_parts`.
+///
+/// `builder` (ADR-012 §L.5.2) is optional. When supplied it is encoded
+/// INSIDE the body so the carve is covered by the EIP-712 signature; an
+/// omitted builder produces byte-identical output to the pre-builder
+/// encoder (the `builder` key is skipped, and the node defaults it to
+/// `None`).
 export async function encodeLimitOrder(
   asset: number,
   side: Side,
   sizeE8: bigint,
   priceE8: bigint,
   tif: Tif,
+  builder?: Builder,
 ): Promise<Uint8Array> {
   if (sizeE8 < 0n) throw new RangeError('sizeE8 must be non-negative');
   if (priceE8 < 0n) throw new RangeError('priceE8 must be non-negative');
@@ -208,6 +218,22 @@ export async function encodeLimitOrder(
   const sizeHi = (sizeE8 >> 64n) & mask64;
   const priceLo = priceE8 & mask64;
   const priceHi = (priceE8 >> 64n) & mask64;
+
+  // Builder carve. Validate fee + address shape on the TS side so a
+  // malformed carve fails loudly here rather than encoding silently —
+  // an unsigned or dropped builder would be worse than a thrown error.
+  let hasBuilder = false;
+  let builderFee = 0;
+  let builderUser: Uint8Array = EMPTY_BYTES;
+  if (builder !== undefined) {
+    if (!Number.isInteger(builder.fee) || builder.fee < 0 || builder.fee > 0xffff) {
+      throw new RangeError('builder.fee must be a u16 (0..=65535) in basis points');
+    }
+    builderUser = addressHexToBytes(builder.user);
+    hasBuilder = true;
+    builderFee = builder.fee;
+  }
+
   const wasm = await loadWasm();
   const out = wasm.encode_limit_order(
     asset,
@@ -217,12 +243,42 @@ export async function encodeLimitOrder(
     priceLo,
     priceHi,
     tif,
+    hasBuilder,
+    builderFee,
+    builderUser,
   );
   if (out.length === 0) {
     throw new WasmCallError(
       'encode_limit_order',
-      'msgpack encoder failed (should not happen)',
+      'msgpack encoder failed (invalid builder address length?)',
     );
+  }
+  return out;
+}
+
+/// Shared empty buffer for the no-builder fast path — avoids allocating a
+/// fresh zero-length `Uint8Array` per call.
+const EMPTY_BYTES = new Uint8Array(0);
+
+/// Parse a `0x`-prefixed (or bare) 40-char hex address into 20 raw bytes.
+/// Mirrors `core_state::address::Address::from_hex`. Throws on any
+/// non-hex char or wrong length — a malformed builder address must never
+/// reach the signed body.
+function addressHexToBytes(addr: string): Uint8Array {
+  const hex = addr.startsWith('0x') ? addr.slice(2) : addr;
+  if (hex.length !== 40) {
+    throw new RangeError(
+      `builder.user must be a 20-byte (40 hex char) address, got '${addr}'`,
+    );
+  }
+  // Whole-string hex check up front — `parseInt('1z', 16)` would silently
+  // return 1, so per-byte parsing alone could mask a malformed char.
+  if (!/^[0-9a-fA-F]{40}$/.test(hex)) {
+    throw new RangeError(`builder.user contains a non-hex character: '${addr}'`);
+  }
+  const out = new Uint8Array(20);
+  for (let i = 0; i < 20; i++) {
+    out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   }
   return out;
 }

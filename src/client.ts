@@ -182,6 +182,7 @@ export class Client {
       order.sizeE8,
       order.priceE8,
       order.tif,
+      order.builder,
     );
     const typeHash = await orderTypeHash();
     // message_hash = keccak256(type_hash || payload).
