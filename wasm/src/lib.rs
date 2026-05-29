@@ -258,6 +258,14 @@ pub fn derive_address_from_pubkey(pubkey: &[u8]) -> Vec<u8> {
 /// in this canonical encoder — the first cut targets `signOrder` for
 /// vanilla limit orders. The TS side enforces defaults; richer encoders
 /// land alongside the corresponding gateway adapter work.
+///
+/// `builder` is the only optional field carried so far: it mirrors
+/// `OrderParams.builder: Option<Builder>` (`#[serde(default)]`,
+/// ADR-012 §L.5.2). `None` skips the field entirely so a builder-less
+/// order encodes byte-identically to before this addition (the node's
+/// `#[serde(default)]` fills `None` on the decode side). When present it
+/// rides INSIDE the signed `px || size || tif || builder` body so the
+/// builder carve cannot be tampered post-signature.
 #[derive(Serialize)]
 struct LimitOrderBody {
     asset: u32,
@@ -265,6 +273,20 @@ struct LimitOrderBody {
     px: u128,
     size: u128,
     tif: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    builder: Option<BuilderBody>,
+}
+
+/// Canonical msgpack mirror of `trading::Builder { fee: u16, user: Address }`.
+///
+/// `user` is the raw 20-byte address — `Address` is `#[serde(transparent)]`
+/// over `[u8; 20]` on the node, so the wire form is just the bytes. Field
+/// names (`fee`, `user`) are load-bearing: serde produces a named-field
+/// msgpack map the node's `rmp_serde::from_slice::<Builder>` keys on.
+#[derive(Serialize)]
+struct BuilderBody {
+    fee: u16,
+    user: [u8; 20],
 }
 
 /// Encode a vanilla limit order to its canonical MTF wire bytes.
@@ -273,6 +295,15 @@ struct LimitOrderBody {
 /// rationale for the (lo, hi) `u128` split across the wasm-bindgen ABI.
 /// Returns the msgpack-encoded body — the TS layer wraps that in the
 /// `SignedEnvelope` shape after signing.
+///
+/// Builder carve (ADR-012 §L.5.2): pass `has_builder = false` for a
+/// vanilla order (encodes identically to a no-builder body — the
+/// `builder` key is omitted). When `has_builder = true`, `builder_fee`
+/// is the rate in basis points and `builder_user` MUST be exactly 20
+/// bytes (the raw EVM address). A wrong-length `builder_user` returns an
+/// empty `Vec` (the TS wrapper raises a clean error) rather than
+/// silently dropping the field — a dropped builder would be an unsigned
+/// carve, worse than a hard failure.
 #[wasm_bindgen]
 pub fn encode_limit_order(
     asset: u32,
@@ -282,15 +313,31 @@ pub fn encode_limit_order(
     price_e8_lo: u64,
     price_e8_hi: u64,
     tif: u8,
+    has_builder: bool,
+    builder_fee: u16,
+    builder_user: &[u8],
 ) -> Vec<u8> {
     let size = u128_from_parts(size_e8_lo, size_e8_hi);
     let px = u128_from_parts(price_e8_lo, price_e8_hi);
+    let builder = if has_builder {
+        let user: [u8; 20] = match builder_user.try_into() {
+            Ok(arr) => arr,
+            Err(_) => return Vec::new(),
+        };
+        Some(BuilderBody {
+            fee: builder_fee,
+            user,
+        })
+    } else {
+        None
+    };
     let body = LimitOrderBody {
         asset,
         side,
         px,
         size,
         tif,
+        builder,
     };
     // rmp_serde::to_vec produces the canonical msgpack map (named-field
     // form), matching what `rmp_serde::from_slice::<OrderParams>` on the
@@ -496,7 +543,9 @@ mod tests {
         let px_lo = px as u64;
         let px_hi = (px >> 64) as u64;
 
-        let bytes = encode_limit_order(asset, side, size_lo, size_hi, px_lo, px_hi, tif);
+        let bytes = encode_limit_order(
+            asset, side, size_lo, size_hi, px_lo, px_hi, tif, false, 0, &[],
+        );
         assert!(!bytes.is_empty(), "encoder should not fail on valid inputs");
 
         // Round-trip via rmp_serde into a typed mirror of LimitOrderBody.
@@ -523,13 +572,85 @@ mod tests {
         assert_eq!(decoded.tif, tif);
     }
 
+    /// A builder carve must ride INSIDE the encoded body and round-trip
+    /// into the node-shaped `OrderParams` mirror (with `Option<Builder>`).
+    /// Field names + the (fee: u16, user: [u8;20]) shape are load-bearing.
+    #[test]
+    fn encode_limit_order_with_builder_roundtrips() {
+        #[derive(serde::Deserialize, Debug, PartialEq, Eq)]
+        struct BuilderMirror {
+            fee: u16,
+            user: [u8; 20],
+        }
+        #[derive(serde::Deserialize, Debug, PartialEq, Eq)]
+        struct OrderMirror {
+            asset: u32,
+            side: u8,
+            px: u128,
+            size: u128,
+            tif: u8,
+            #[serde(default)]
+            builder: Option<BuilderMirror>,
+        }
+
+        let user = [0xABu8; 20];
+        let bytes = encode_limit_order(7, 1, 50, 0, 99, 0, 0, true, 5, &user);
+        assert!(!bytes.is_empty());
+        let decoded: OrderMirror = rmp_serde::from_slice(&bytes)
+            .expect("builder body must round-trip");
+        assert_eq!(decoded.asset, 7);
+        assert_eq!(decoded.side, 1);
+        assert_eq!(
+            decoded.builder,
+            Some(BuilderMirror { fee: 5, user })
+        );
+    }
+
+    /// `has_builder = false` must omit the `builder` key entirely — the
+    /// encoding is byte-identical to the pre-builder encoder so existing
+    /// signatures and replay digests do not shift.
+    #[test]
+    fn encode_limit_order_without_builder_omits_key() {
+        // Mirror that REQUIRES builder to be absent (no #[serde(default)]):
+        // if the key were emitted, this decode would still pass, so we also
+        // assert the byte length is shorter than the with-builder form.
+        let no_builder = encode_limit_order(7, 1, 50, 0, 99, 0, 0, false, 0, &[]);
+        let with_builder =
+            encode_limit_order(7, 1, 50, 0, 99, 0, 0, true, 5, &[0xABu8; 20]);
+        assert!(!no_builder.is_empty());
+        assert!(with_builder.len() > no_builder.len());
+
+        // The no-builder body must still decode into the node shape with
+        // builder defaulting to None.
+        #[derive(serde::Deserialize, Debug, PartialEq, Eq)]
+        struct OrderMirror {
+            asset: u32,
+            side: u8,
+            px: u128,
+            size: u128,
+            tif: u8,
+            #[serde(default)]
+            builder: Option<()>,
+        }
+        let decoded: OrderMirror = rmp_serde::from_slice(&no_builder).unwrap();
+        assert_eq!(decoded.builder, None);
+    }
+
+    /// A wrong-length builder address must hard-fail (empty Vec), never
+    /// silently drop the carve — a dropped builder would be unsigned.
+    #[test]
+    fn encode_limit_order_rejects_bad_builder_user_len() {
+        let bad = encode_limit_order(7, 1, 50, 0, 99, 0, 0, true, 5, &[0u8; 19]);
+        assert!(bad.is_empty());
+    }
+
     /// encode_limit_order is deterministic — same inputs always
     /// produce identical bytes. Required so client-and-node digests
     /// agree on every replay.
     #[test]
     fn encode_limit_order_is_deterministic() {
-        let bytes1 = encode_limit_order(1, 0, 100, 0, 200, 0, 0);
-        let bytes2 = encode_limit_order(1, 0, 100, 0, 200, 0, 0);
+        let bytes1 = encode_limit_order(1, 0, 100, 0, 200, 0, 0, false, 0, &[]);
+        let bytes2 = encode_limit_order(1, 0, 100, 0, 200, 0, 0, false, 0, &[]);
         assert_eq!(bytes1, bytes2);
     }
 
@@ -537,8 +658,8 @@ mod tests {
     /// against accidental field-order collapse.
     #[test]
     fn encode_limit_order_differs_per_input() {
-        let bytes_bid = encode_limit_order(1, 0, 100, 0, 200, 0, 0);
-        let bytes_ask = encode_limit_order(1, 1, 100, 0, 200, 0, 0);
+        let bytes_bid = encode_limit_order(1, 0, 100, 0, 200, 0, 0, false, 0, &[]);
+        let bytes_ask = encode_limit_order(1, 1, 100, 0, 200, 0, 0, false, 0, &[]);
         assert_ne!(bytes_bid, bytes_ask);
     }
 

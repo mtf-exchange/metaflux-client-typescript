@@ -24,6 +24,7 @@ export {
 } from './wasm.js';
 export type {
   Order,
+  Builder,
   SignedOrder,
   OrderAck,
   Market,
