@@ -98,7 +98,7 @@ export interface SignedOrder {
 /// MTF-native order action shape (snake_case), byte-for-byte mirror of the
 /// server `NativeOrder` (`metaflux/crates/api-node/src/rest/native_action.rs`).
 /// These string/number forms are EXACTLY what rides inside the signed
-/// `action` JSON posted to `POST /exchange/native` — the digest covers the
+/// `action` JSON posted to `POST /exchange` — the digest covers the
 /// full object, so every field here is part of the signed bytes.
 ///
 /// Field ORDER is load-bearing: the server verifies the signature over the
@@ -161,7 +161,7 @@ export interface NativeBuilder {
   user: string;
 }
 
-/// Signed native action envelope posted to `POST /exchange/native`.
+/// Signed native action envelope posted to `POST /exchange`.
 ///
 /// `action` is the raw JSON STRING (not a parsed object) so the bytes sent
 /// are byte-identical to the bytes signed — the server recovers the signer
@@ -176,7 +176,7 @@ export interface NativeSignedAction {
   signature: string;
 }
 
-/// Server response to `POST /exchange/native`. Mirrors the node
+/// Server response to `POST /exchange`. Mirrors the node
 /// `ExchangeResponse` (`metaflux/crates/api-node/src/rest/exchange.rs`).
 export interface NativeExchangeAck {
   /// Whether the action was admitted to the mempool.

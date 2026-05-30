@@ -37,6 +37,19 @@ export const MTF_CHAIN_ID = 998;
 
 const enc = new TextEncoder();
 
+let nonceClock = 0n;
+
+/// Strictly-increasing replay nonce — at least the current unix-ms, but bumped
+/// past the last issued value so a burst of orders within one millisecond gets
+/// distinct nonces. The server's per-account window tolerates out-of-order
+/// delivery but rejects collisions, so a raw `Date.now()` would drop the
+/// 2nd-and-later order in a same-ms burst.
+export function nextNonce(): bigint {
+  const now = BigInt(Date.now());
+  nonceClock = now > nonceClock ? now : nonceClock + 1n;
+  return nonceClock;
+}
+
 /// Encode a `bigint` as a 32-byte big-endian buffer (uint256 / nonce slot).
 /// The value rides in the low bytes; high bytes are zero. Rejects negatives
 /// and values that overflow 256 bits.
@@ -206,7 +219,7 @@ export async function recoverNativeSigner(
   return `0x${toHex(addr)}`;
 }
 
-/// Assemble the full `POST /exchange/native` request body STRING.
+/// Assemble the full `POST /exchange` request body STRING.
 ///
 /// Hand-built so the `action` field carries the exact signed bytes (no
 /// re-stringify of a parsed object). The body shape is

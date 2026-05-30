@@ -20,6 +20,7 @@ import { httpRequest } from './http.js';
 import {
   buildNativeOrderAction,
   nativeRequestBody,
+  nextNonce,
   recoverNativeSigner,
   signNativeAction,
 } from './native.js';
@@ -217,7 +218,7 @@ export class Client {
   /// DEPRECATED / LEGACY: this targets the old `{payload,signature,signer}` →
   /// `/v1/orders` envelope with a msgpack body and an `Order(...)` typehash.
   /// The server now accepts the MTF-native `{action,nonce,signature}` →
-  /// `/exchange/native` envelope instead — use `submitOrderNative`. Retained
+  /// `/exchange` envelope instead — use `submitOrderNative`. Retained
   /// only for any consumer still on the old gateway adapter.
   ///
   /// Wire shape: POSTs the `SignedOrder` as a msgpack-friendly JSON
@@ -239,7 +240,7 @@ export class Client {
   }
 
   /// Submit an order via the MTF-native signed-action front door
-  /// (`POST /exchange/native`).
+  /// (`POST /exchange`).
   ///
   /// This is the path the server now accepts. It supersedes the legacy
   /// `signOrder` + `submitOrder` flow (msgpack body + `Order(...)` typehash +
@@ -276,7 +277,7 @@ export class Client {
         'submitOrderNative requires a privateKey in ClientOpts (this Client is read-only)',
       );
     }
-    const nonce = opts.nonce ?? BigInt(Date.now());
+    const nonce = opts.nonce ?? nextNonce();
     const actionJson = buildNativeOrderAction(order);
     const signed = await signNativeAction(
       this.privateKey,
@@ -295,7 +296,7 @@ export class Client {
       );
     }
 
-    return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange/native', {
+    return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
       method: 'POST',
       rawJson: nativeRequestBody(signed),
       bearer: this.jwt,
