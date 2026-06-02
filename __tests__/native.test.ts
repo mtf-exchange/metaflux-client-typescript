@@ -30,6 +30,15 @@ const KAT_CHAIN_ID = 998;
 const KAT_DIGEST =
   'bc1fa314ad46f9aa0b146623144ef6f7efff7d43a8998d7bf63ef018c21352f2';
 
+// Cancel KAT — independently derived from the server's `native_action_digest`
+// algorithm (keccak256(0x1901 || domainSep5(998) || structHash)) over the EXACT
+// cancel_order action bytes the TS builder emits. Pins the cancel path to the
+// same digest the server verifies; drift here 401s every cancel.
+const CANCEL_KAT_ACTION_JSON =
+  '{"type":"cancel_order","cancel":{"owner":"0x000000000000000000000000000000000000beef","market":3,"oid":42}}';
+const CANCEL_KAT_DIGEST =
+  'c72482a8bb38728c5f91e84191a0a9f562efb71368fd45f60a759066bd628bf2';
+
 function toHex(bytes: Uint8Array): string {
   let out = '';
   for (const b of bytes) out += b.toString(16).padStart(2, '0');
@@ -131,6 +140,58 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
     );
     expect(toHex(base)).not.toBe(toHex(otherNonce));
     expect(toHex(base)).not.toBe(toHex(otherChain));
+  });
+
+  it('buildNativeCancelAction reproduces the cancel KAT bytes exactly', async () => {
+    const { buildNativeCancelAction } = await import('../src/native.js');
+    const actionJson = buildNativeCancelAction({
+      owner: '0x000000000000000000000000000000000000beef',
+      market: 3,
+      oid: 42,
+    });
+    expect(actionJson).toBe(CANCEL_KAT_ACTION_JSON);
+  });
+
+  it('cancel action digest matches the cross-impl cancel KAT', async () => {
+    const { buildNativeCancelAction, nativeActionDigest } = await import(
+      '../src/native.js'
+    );
+    const actionJson = buildNativeCancelAction({
+      owner: '0x000000000000000000000000000000000000beef',
+      market: 3,
+      oid: 42,
+    });
+    const digest = await nativeActionDigest(actionJson, KAT_NONCE, KAT_CHAIN_ID);
+    expect(toHex(digest)).toBe(CANCEL_KAT_DIGEST);
+  });
+
+  it('cancel sign → recover round-trips to the signing address', async () => {
+    const { signNativeAction, recoverNativeSigner, buildNativeCancelAction } =
+      await import('../src/native.js');
+    const { deriveAddressFromPubkey, recoverPubkey, signSecp256k1, keccak256 } =
+      await import('../src/wasm.js');
+
+    const privKey = new Uint8Array(32).fill(0x42);
+    const probeDigest = await keccak256(new TextEncoder().encode('probe'));
+    const probeSig = await signSecp256k1(privKey, probeDigest);
+    const probePub = await recoverPubkey(probeSig, probeDigest);
+    const ownerBytes = await deriveAddressFromPubkey(probePub);
+    const owner = `0x${toHex(ownerBytes)}`;
+
+    const actionJson = buildNativeCancelAction({ owner, market: 3, oid: 42 });
+    const signed = await signNativeAction(privKey, actionJson, 9n, KAT_CHAIN_ID);
+    const recovered = await recoverNativeSigner(signed, KAT_CHAIN_ID);
+    expect(recovered.toLowerCase()).toBe(owner.toLowerCase());
+  });
+
+  it('cancel without oid or cloid throws', async () => {
+    const { buildNativeCancelAction } = await import('../src/native.js');
+    expect(() =>
+      buildNativeCancelAction({
+        owner: '0x000000000000000000000000000000000000beef',
+        market: 3,
+      }),
+    ).toThrow();
   });
 
   it('nativeRequestBody embeds the action bytes verbatim', async () => {
