@@ -25,7 +25,12 @@ import {
   recoverPubkey,
   signSecp256k1,
 } from './wasm.js';
-import type { NativeBuilder, NativeOrder, NativeSignedAction } from './types.js';
+import type {
+  NativeBuilder,
+  NativeCancel,
+  NativeOrder,
+  NativeSignedAction,
+} from './types.js';
 
 const MTF_DOMAIN_TYPE =
   'EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)';
@@ -179,6 +184,37 @@ function buildBuilder(b: NativeBuilder): string {
   }
   validateAddress(b.user, 'builder.user');
   return `{${jsonStr('fee')}:${b.fee},${jsonStr('user')}:${jsonStr(b.user)}}`;
+}
+
+/// Build the canonical native `cancel_order` action JSON string.
+///
+/// Field order mirrors the server `NativeCancel` exactly
+/// (`metaflux/crates/api-node/src/rest/native_action.rs`): `owner`, `market`,
+/// then `oid` / `cloid` when present. The server's `CancelParams` bridge
+/// cancels by `oid`, so an `oid` is REQUIRED for the cancel to lower
+/// successfully (a `cloid`-only cancel is accepted on the wire but rejected at
+/// lowering with `CancelMissingOid`); we still emit either form so the bytes
+/// stay caller-controlled. The returned string is BOTH signed and sent.
+export function buildNativeCancelAction(cancel: NativeCancel): string {
+  validateAddress(cancel.owner, 'owner');
+  validateMarket(cancel.market);
+  if (cancel.oid === undefined && cancel.cloid === undefined) {
+    throw new RangeError('cancel requires an oid (server cancels by oid)');
+  }
+  const parts: string[] = [
+    `${jsonStr('owner')}:${jsonStr(cancel.owner)}`,
+    `${jsonStr('market')}:${cancel.market}`,
+  ];
+  if (cancel.oid !== undefined) {
+    validateU64(cancel.oid, 'oid');
+    parts.push(`${jsonStr('oid')}:${cancel.oid}`);
+  }
+  if (cancel.cloid !== undefined) {
+    validateCloid(cancel.cloid);
+    parts.push(`${jsonStr('cloid')}:${jsonStr(cancel.cloid)}`);
+  }
+  const cancelJson = `{${parts.join(',')}}`;
+  return `{${jsonStr('type')}:${jsonStr('cancel_order')},${jsonStr('cancel')}:${cancelJson}}`;
 }
 
 /// Sign a pre-built action JSON string with the given private key.

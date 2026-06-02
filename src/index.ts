@@ -15,10 +15,31 @@ export {
   MTF_CHAIN_ID,
   nativeActionDigest,
   buildNativeOrderAction,
+  buildNativeCancelAction,
   signNativeAction,
   recoverNativeSigner,
   nativeRequestBody,
 } from './native.js';
+export {
+  // MTF-native `/info` read API + response types.
+  InfoApi,
+  type NodeInfo,
+  type AccountState,
+  type MarketInfo,
+  type VaultState,
+  type StakingState,
+  type FeeSchedule,
+} from './info.js';
+export {
+  // MTF-native WebSocket client + subscription/channel types.
+  WsClient,
+  WS_CHANNELS,
+  type WsChannel,
+  type WsSubscription,
+  type WsFrame,
+  type WsMessageHandler,
+  type WsConfig,
+} from './ws.js';
 export {
   WasmNotBuiltError,
   WasmCallError,
@@ -44,6 +65,7 @@ export type {
   ErrorEnvelope,
   // MTF-native action types.
   NativeOrder,
+  NativeCancel,
   NativeBuilder,
   NativeSide,
   NativeOrderKind,

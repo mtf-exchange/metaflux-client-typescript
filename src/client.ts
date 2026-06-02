@@ -18,14 +18,18 @@ import {
 } from './wasm.js';
 import { httpRequest } from './http.js';
 import {
+  buildNativeCancelAction,
   buildNativeOrderAction,
   nativeRequestBody,
   nextNonce,
   recoverNativeSigner,
   signNativeAction,
 } from './native.js';
+import { InfoApi } from './info.js';
+import { WsClient, type WsConfig } from './ws.js';
 import type {
   Market,
+  NativeCancel,
   NativeExchangeAck,
   NativeOrder,
   Order,
@@ -142,6 +146,8 @@ export class Client {
   /// Cached gateway-issued JWT (`/auth`). The session is established
   /// lazily on the first authenticated call.
   private jwt: string | undefined;
+  /// MTF-native read API (`POST /info`). Read-only; no key required.
+  readonly info: InfoApi;
 
   constructor(opts: ClientOpts) {
     if (opts.baseUrl.length === 0) {
@@ -153,6 +159,7 @@ export class Client {
     this.baseUrl = opts.baseUrl;
     this.privateKey = opts.privateKey;
     this.chainId = opts.chainId ?? DEFAULT_CHAIN_ID;
+    this.info = new InfoApi(this.baseUrl);
   }
 
   /// Whether this client has a private key available for signing
@@ -303,6 +310,60 @@ export class Client {
     });
   }
 
+  /// Cancel an order via the MTF-native signed-action front door
+  /// (`POST /exchange`).
+  ///
+  /// Same envelope + verification model as `submitOrderNative`: the
+  /// `cancel_order` action JSON is built canonically, signed over the EIP-712
+  /// native digest, and POSTed verbatim. The server cancels by `oid`, so
+  /// `cancel.oid` must be set (a `cloid`-only cancel is rejected at lowering).
+  ///
+  /// `cancel.owner` MUST equal the signing wallet; we recover the signer
+  /// locally and reject a mismatch before hitting the network.
+  async cancelOrderNative(
+    cancel: NativeCancel,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    if (this.privateKey === undefined) {
+      throw new Error(
+        'cancelOrderNative requires a privateKey in ClientOpts (this Client is read-only)',
+      );
+    }
+    const nonce = opts.nonce ?? nextNonce();
+    const actionJson = buildNativeCancelAction(cancel);
+    const signed = await signNativeAction(
+      this.privateKey,
+      actionJson,
+      nonce,
+      opts.chainId,
+    );
+
+    const signer = await recoverNativeSigner(signed, opts.chainId);
+    if (signer.toLowerCase() !== cancel.owner.toLowerCase()) {
+      throw new Error(
+        `cancel.owner ${cancel.owner} != recovered signer ${signer}`,
+      );
+    }
+
+    return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
+      method: 'POST',
+      rawJson: nativeRequestBody(signed),
+      bearer: this.jwt,
+    });
+  }
+
+  /// Open an MTF-native WebSocket connection to `<baseUrl>/ws`.
+  ///
+  /// Derives the `ws(s)://` URL from the client's `http(s)://` base, mounts the
+  /// `/ws` path (the node's upgrade route), and returns a connected
+  /// [`WsClient`]. Register handlers via `ws.onMessage` and subscribe with
+  /// `ws.subscribe({ type: 'l2Book', coin: 'BTC' })`.
+  async connectWs(config: Partial<WsConfig> = {}): Promise<WsClient> {
+    const ws = new WsClient(httpToWsUrl(this.baseUrl), config);
+    await ws.connect();
+    return ws;
+  }
+
   /// `fetchMarkets` — list of all CCXT-compat market descriptors.
   /// Unauthenticated.
   async getMarkets(): Promise<Market[]> {
@@ -360,6 +421,21 @@ function bytesToHex(bytes: Uint8Array, prefix: string = ''): string {
     out += b.toString(16).padStart(2, '0');
   }
   return out;
+}
+
+/// Derive the WS endpoint URL from the client's HTTP base URL: map the scheme
+/// (`http`→`ws`, `https`→`wss`), strip any trailing slash, and append `/ws`
+/// (the node's upgrade route). A base that is already `ws(s)://` is passed
+/// through (only the `/ws` suffix is ensured).
+function httpToWsUrl(baseUrl: string): string {
+  let url = baseUrl;
+  if (url.startsWith('https://')) {
+    url = `wss://${url.slice('https://'.length)}`;
+  } else if (url.startsWith('http://')) {
+    url = `ws://${url.slice('http://'.length)}`;
+  }
+  if (url.endsWith('/')) url = url.slice(0, -1);
+  return url.endsWith('/ws') ? url : `${url}/ws`;
 }
 
 /// Validate that a string is a `0x` + 40 hex chars EVM address.

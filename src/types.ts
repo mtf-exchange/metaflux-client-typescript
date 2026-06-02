@@ -132,6 +132,25 @@ export interface NativeOrder {
   builder?: NativeBuilder;
 }
 
+/// MTF-native `cancel_order` action shape (snake_case), byte-for-byte mirror of
+/// the server `NativeCancel` (`metaflux/crates/api-node/src/rest/native_action.rs`).
+/// Field ORDER is load-bearing for the same reason as `NativeOrder`: the server
+/// verifies the signature over the raw `action` bytes (see
+/// `buildNativeCancelAction`).
+export interface NativeCancel {
+  /// `0x`-hex 20-byte owner. MUST equal the signing wallet's address.
+  owner: string;
+  /// Target market id (`u32`).
+  market: number;
+  /// Server order id (`u64`). REQUIRED for the cancel to lower server-side —
+  /// the core `CancelParams` cancels by `oid`. Omit only if cancelling by
+  /// `cloid` (currently rejected at lowering, but accepted on the wire).
+  oid?: number;
+  /// Optional `0x`-hex 32-char (16-byte) client order id. Omitted from the
+  /// signed bytes entirely when absent.
+  cloid?: string;
+}
+
 /// MTF-native side string — mirrors the server `NativeSide`.
 export type NativeSide = 'bid' | 'ask';
 
