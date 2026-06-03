@@ -9,6 +9,7 @@
 
 export { Client, type ClientOpts } from './client.js';
 export { MetaFluxApiError } from './http.js';
+export { requestFaucet, type FaucetResponse } from './faucet.js';
 export {
   // MTF-native signed-action surface (the path the server now accepts).
   // Exported so power users can build / sign / inspect actions out-of-band.
