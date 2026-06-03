@@ -1,4 +1,4 @@
-// Type definitions for the @metaflux/client surface.
+// Type definitions for the @metaflux-dex/client surface.
 //
 // Shapes mirror the CCXT-compat REST responses emitted by the MetaFlux
 // api-gateway (`metaflux/crates/api-gateway/src/ccxt/types.rs`). The
@@ -195,15 +195,50 @@ export interface NativeSignedAction {
   signature: string;
 }
 
-/// Server response to `POST /exchange`. Mirrors the node
-/// `ExchangeResponse` (`metaflux/crates/api-node/src/rest/exchange.rs`).
+/// Per-order status entry returned by `/exchange` for an order-type action.
+///
+/// Byte-for-byte the node `OrderStatusEntry`
+/// (`metaflux/crates/api-node/src/rest/exchange.rs`): a tagged union selected by
+/// the single present key, one entry per submitted order, in submission order.
+/// `total_sz` / `avg_px` are 8-decimal fixed-point u128 STRINGS (native JSON
+/// numbers lose precision past 2^53); `oid` / `nonce` are JSON numbers.
+export type OrderStatus =
+  /// Posted to the book; not (fully) filled. `cloid` echoed only when supplied.
+  | { resting: { oid: number; cloid?: string } }
+  /// Crossed for `total_sz` at `avg_px`.
+  | { filled: { oid: number; total_sz: string; avg_px: string } }
+  /// This entry was rejected at admission/commit (the rest of a batch may still
+  /// have succeeded).
+  | { error: string }
+  /// Admitted, but no commit observed within the wait window — track via
+  /// `/info` / WS. NOT a fabricated oid.
+  | { pending: { action_hash: string; nonce: number } };
+
+/// Server response to `POST /exchange`. Mirrors the node `ExchangeResponse`
+/// (`metaflux/crates/api-node/src/rest/exchange.rs`).
+///
+/// Two shapes share this struct (the node omits the absent keys):
+/// - **Order-type actions** (`submit_order` / `batch_order` / `cancel_order` /
+///   …) carry `statuses` — the per-order union array. There is NO top-level
+///   `oid`; the order id rides inside each status entry.
+/// - **Every other action** (and admission-time rejections) carries the
+///   admission envelope: `accepted` + `mempool_depth` + (`nonce` / `action_hash`
+///   on success, `error` on rejection).
 export interface NativeExchangeAck {
-  /// Whether the action was admitted to the mempool.
-  accepted: boolean;
+  /// Per-order status union — present only for order-type actions.
+  statuses?: OrderStatus[];
+  /// Whether the action was admitted to the mempool (admission envelope; omitted
+  /// on the order path).
+  accepted?: boolean;
   /// Rejection reason, when `accepted` is false.
   error?: string;
-  /// Mempool depth observed at admission time (diagnostic).
-  mempool_depth: number;
+  /// Mempool depth observed at admission time (diagnostic; admission envelope).
+  mempool_depth?: number;
+  /// Echoed replay nonce (admission envelope).
+  nonce?: number;
+  /// Deterministic action identifier — `0x` + keccak256 of the action bytes;
+  /// matches against commit events (admission envelope).
+  action_hash?: string;
 }
 
 /// Acknowledgement from `submitOrder`. Mirrors `Order` from the CCXT REST
