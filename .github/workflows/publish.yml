@@ -1,0 +1,64 @@
+name: Publish to npm
+
+# Publishes @metaflux-dex/client to the public npm registry.
+#
+# Trigger: a published GitHub Release (tag your release `vX.Y.Z`), or a manual
+# run. The package version is taken from package.json — bump it before
+# releasing or `npm publish` rejects a duplicate version.
+#
+# Requires repository secret NPM_TOKEN: an npm automation token with publish
+# access to the @metaflux-dex scope. (Settings → Secrets and variables →
+# Actions → New repository secret.)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dist_tag:
+        description: "npm dist-tag to publish under"
+        required: false
+        default: latest
+
+permissions:
+  contents: read
+  id-token: write # npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+
+      - name: Add wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build (wasm + ts)
+        run: pnpm run build
+
+      - name: Publish
+        run: pnpm publish --provenance --no-git-checks --tag "${{ github.event.inputs.dist_tag || 'latest' }}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

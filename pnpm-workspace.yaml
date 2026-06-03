@@ -1,0 +1,5 @@
+# pnpm settings (pnpm >= 10 moved built-dependency approval out of the
+# package.json "pnpm" field). esbuild is vitest's transitive build dep; approve
+# its install script so pnpm doesn't print ERR_PNPM_IGNORED_BUILDS.
+allowBuilds:
+  esbuild: true

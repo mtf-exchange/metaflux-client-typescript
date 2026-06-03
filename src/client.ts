@@ -1,4 +1,4 @@
-// `Client` — primary entry point for the @metaflux/client SDK.
+// `Client` — primary entry point for the @metaflux-dex/client SDK.
 //
 // Heavy lifting: order signing (msgpack encode -> EIP-712 hash ->
 // secp256k1 sign -> address derive) runs through WASM. Pure-TS
@@ -6,7 +6,7 @@
 // session bookkeeping.
 //
 // Naming note: exported as `Client` (NOT `MtfClient`) per session
-// direction. Consumers import as `import { Client } from '@metaflux/client'`.
+// direction. Consumers import as `import { Client } from '@metaflux-dex/client'`.
 
 import {
   deriveAddressFromPubkey,
