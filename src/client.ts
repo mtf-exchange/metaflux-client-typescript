@@ -273,8 +273,9 @@ export class Client {
   /// `Date.now()` (unix-ms) — supply an explicit monotonically-increasing
   /// value for back-to-back submissions in the same millisecond.
   ///
-  /// `chainId` defaults to the MTF-native chain id (998), independent of the
-  /// legacy `ClientOpts.chainId` (which is the wrong domain for this path).
+  /// `chainId` defaults to the MTF-native chain id (`MTF_CHAIN_ID` = testnet
+  /// 114514; mainnet is 8964), independent of the legacy `ClientOpts.chainId`
+  /// (which is the wrong domain for this path).
   async submitOrderNative(
     order: NativeOrder,
     opts: { nonce?: bigint; chainId?: number } = {},

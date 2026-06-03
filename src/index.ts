@@ -13,6 +13,8 @@ export {
   // MTF-native signed-action surface (the path the server now accepts).
   // Exported so power users can build / sign / inspect actions out-of-band.
   MTF_CHAIN_ID,
+  MTF_MAINNET_CHAIN_ID,
+  MTF_TESTNET_CHAIN_ID,
   nativeActionDigest,
   buildNativeOrderAction,
   buildNativeCancelAction,

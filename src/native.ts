@@ -36,9 +36,21 @@ const MTF_DOMAIN_TYPE =
   'EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)';
 const MTF_ACTION_TYPE = 'MetaFluxAction(string action,uint64 nonce)';
 
+/// MTF EIP-712 domain chain ids. MetaFlux runs its own verified-unregistered
+/// chain ids, distinct from Hyperliquid's testnet `998` (retired here to avoid
+/// a competitor collision — signing with `998` would land in HL's domain).
+/// The chain id rides in the EIP-712 domain separator and the node enforces
+/// the same value, so a mismatch makes every `POST /exchange` return 401.
+///
+/// - mainnet `8964` (0x2304)
+/// - testnet `114514` (0x1bf52) — the live devnet/testnet runs this.
+export const MTF_MAINNET_CHAIN_ID = 8964;
+export const MTF_TESTNET_CHAIN_ID = 114514;
+
 /// Default MTF chain id (matches `MTF_CHAIN_ID` in the Rust SDK + the server
-/// KAT vector). Pinned to 998 provisionally; configurable post-S10.
-export const MTF_CHAIN_ID = 998;
+/// KAT vector). Aliases the testnet id, since the live devnet/testnet is what
+/// the SDK signs against today.
+export const MTF_CHAIN_ID = MTF_TESTNET_CHAIN_ID;
 
 const enc = new TextEncoder();
 

@@ -58,7 +58,9 @@ console.log(ack.statuses?.[0]);
 ```
 
 The signing flow (EIP-712 over the canonical action bytes, nonce auto-assigned,
-`chainId` defaults to `MTF_CHAIN_ID`) is handled inside `submitOrderNative`. The
+`chainId` defaults to `MTF_CHAIN_ID` = MTF testnet `114514`; mainnet is `8964`,
+exported as `MTF_TESTNET_CHAIN_ID` / `MTF_MAINNET_CHAIN_ID`) is handled inside
+`submitOrderNative`. The
 recovered signer is checked against `owner` locally before the request leaves the
 process. Cancel via `client.cancelOrderNative({ … })`.
 
@@ -106,7 +108,8 @@ already-canonical WASM outputs, so the wire format has a single source of truth.
 - **Signature**: 65-byte recoverable ECDSA, `r (32) || s (32) || v (1)`, where
   `v` is the raw recovery id (0 or 1).
 - **EIP-712 digest**: `keccak256(0x1901 || domain_separator || message_hash)`,
-  `domain = { name: "MetaFlux", version: "1", chainId, verifyingContract: 0x0 }`.
+  `domain = { name: "MetaFlux", version: "1", chainId, verifyingContract: 0x0 }`
+  (`chainId` = testnet `114514` by default, mainnet `8964`).
 - **MTF-native action**: a canonical snake_case JSON action
   (`{"type":"submit_order","order":{…}}`) signed verbatim; the request body is
   `{ action, nonce, signature }` to `POST /exchange`.
