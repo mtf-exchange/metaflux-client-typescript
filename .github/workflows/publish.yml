@@ -10,8 +10,8 @@ name: Publish to npm
 # access to the @metaflux-dex scope. (Settings → Secrets and variables →
 # Actions → New repository secret.)
 #
-# Note: --provenance is intentionally omitted — it requires a PUBLIC repo with
-# OIDC. Re-add it (with `id-token: write`) once the repo is public.
+# Publishes with --provenance (supply-chain attestation); needs a public repo +
+# `id-token: write`, both satisfied here.
 
 on:
   release:
@@ -25,6 +25,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write # npm provenance
 
 jobs:
   publish:
@@ -61,6 +62,6 @@ jobs:
         run: pnpm run build
 
       - name: Publish
-        run: pnpm publish --no-git-checks --tag "${{ github.event.inputs.dist_tag || 'latest' }}"
+        run: pnpm publish --provenance --no-git-checks --tag "${{ github.event.inputs.dist_tag || 'latest' }}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_SECRET }}
