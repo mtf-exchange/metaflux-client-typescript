@@ -358,7 +358,7 @@ export class Client {
   /// Derives the `ws(s)://` URL from the client's `http(s)://` base, mounts the
   /// `/ws` path (the node's upgrade route), and returns a connected
   /// [`WsClient`]. Register handlers via `ws.onMessage` and subscribe with
-  /// `ws.subscribe({ type: 'l2Book', coin: 'BTC' })`.
+  /// `ws.subscribe({ type: 'l2_book', coin: 'BTC' })`.
   async connectWs(config: Partial<WsConfig> = {}): Promise<WsClient> {
     const ws = new WsClient(httpToWsUrl(this.baseUrl), config);
     await ws.connect();

@@ -5,43 +5,45 @@
 // (`metaflux/crates/api-node/src/ws/subscribe.rs` + `fanout.rs`):
 //
 //   client → server:
-//     {"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC"}}
+//     {"method":"subscribe","subscription":{"type":"l2_book","coin":"BTC"}}
 //     {"method":"unsubscribe","subscription":{"type":"trades"}}
 //     {"method":"ping"}
 //   server → client:
 //     {"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{...}}}
-//     {"channel":"l2Book","data":{...}} | {"channel":"error","data":{"error":"..."}}
+//     {"channel":"l2_book","data":{...}} | {"channel":"error","data":{"error":"..."}}
 //
-// Channel names are the EXACT server `Channel::wire_name()` strings (camelCase:
-// `l2Book`, `userEvents`). `coin` is the market symbol string and is optional
-// (e.g. `userEvents` carries none).
+// Channel names are the EXACT server `Channel::wire_name()` strings — snake_case
+// MTF-native (`l2_book`, `user_events`), since this SDK speaks MTF-native to the
+// node per ADR-019. (HL SDKs use HL camelCase against the gateway `/hl/ws`.)
+// `coin` is the market symbol string and is optional (`user_events` carries none).
 //
 // Transport: the standard `WebSocket` global (browser-native; Node ≥ 22 ships
 // it globally, which is the SDK's floor). No `ws` npm dependency — keeping the
 // SDK dependency-free for both runtimes.
 
-/// Channel names exactly as the server's `Channel::from_wire` accepts them.
+/// Channel names exactly as the server's `Channel::from_wire` accepts them
+/// (snake_case MTF-native).
 export type WsChannel =
-  | 'l2Book'
+  | 'l2_book'
   | 'trades'
   | 'bbo'
   | 'fills'
   | 'candles'
-  | 'userEvents';
+  | 'user_events';
 
 /// All known channels — handy for callers that want to subscribe broadly.
 export const WS_CHANNELS: readonly WsChannel[] = [
-  'l2Book',
+  'l2_book',
   'trades',
   'bbo',
   'fills',
   'candles',
-  'userEvents',
+  'user_events',
 ] as const;
 
 /// A subscription request body — the inner `subscription` object of a
 /// subscribe / unsubscribe frame. `coin` is the market symbol (e.g. `"BTC"`)
-/// and is optional per the server (`userEvents` carries none).
+/// and is optional per the server (`user_events` carries none).
 export interface WsSubscription {
   type: WsChannel;
   coin?: string;
@@ -90,9 +92,9 @@ function subKey(s: WsSubscription): string {
 /// Usage:
 /// ```ts
 /// const ws = new WsClient('wss://api.mtf.exchange/ws');
-/// ws.onMessage((f) => { if (f.channel === 'l2Book') handleBook(f.data); });
+/// ws.onMessage((f) => { if (f.channel === 'l2_book') handleBook(f.data); });
 /// await ws.connect();
-/// await ws.subscribe({ type: 'l2Book', coin: 'BTC' });
+/// await ws.subscribe({ type: 'l2_book', coin: 'BTC' });
 /// // ... later
 /// ws.close();
 /// ```

@@ -1,7 +1,7 @@
 // WS client wire-protocol tests — pure TS, no WASM. Drives the WsClient against
 // a minimal in-process WebSocket mock and asserts the EXACT frames the server
-// (`metaflux/crates/api-node/src/ws/subscribe.rs`) parses:
-//   {"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC"}}
+// (`metaflux/crates/api-node/src/ws/subscribe.rs`) parses (snake_case native):
+//   {"method":"subscribe","subscription":{"type":"l2_book","coin":"BTC"}}
 //   {"method":"unsubscribe","subscription":{"type":"trades"}}
 //   {"method":"ping"}
 // and that inbound {"channel","data"} frames fan out to handlers.
@@ -75,9 +75,9 @@ describe('WsClient wire protocol', () => {
     sock.open();
     await p;
 
-    await ws.subscribe({ type: 'l2Book', coin: 'BTC' });
+    await ws.subscribe({ type: 'l2_book', coin: 'BTC' });
     expect(sock.sent).toContain(
-      '{"method":"subscribe","subscription":{"type":"l2Book","coin":"BTC"}}',
+      '{"method":"subscribe","subscription":{"type":"l2_book","coin":"BTC"}}',
     );
     ws.close();
   });
@@ -131,11 +131,11 @@ describe('WsClient wire protocol', () => {
 
     const got: { channel: string; data: unknown }[] = [];
     ws.onMessage((f) => got.push(f));
-    sock.inbound('{"channel":"l2Book","data":{"coin":"BTC","levels":[[],[]]}}');
+    sock.inbound('{"channel":"l2_book","data":{"coin":"BTC","levels":[[],[]]}}');
     sock.inbound('{"channel":"error","data":{"error":"bad channel"}}');
 
     expect(got).toHaveLength(2);
-    expect(got[0]!.channel).toBe('l2Book');
+    expect(got[0]!.channel).toBe('l2_book');
     expect(got[1]!.channel).toBe('error');
     expect((got[1]!.data as { error: string }).error).toBe('bad channel');
     ws.close();
@@ -158,12 +158,12 @@ describe('WsClient wire protocol', () => {
 
   it('exposes the exact server channel names', () => {
     expect([...WS_CHANNELS]).toEqual([
-      'l2Book',
+      'l2_book',
       'trades',
       'bbo',
       'fills',
       'candles',
-      'userEvents',
+      'user_events',
     ]);
   });
 });
