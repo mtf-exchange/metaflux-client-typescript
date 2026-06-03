@@ -26,18 +26,20 @@ if (!wasmBuilt) {
 const KAT_ACTION_JSON =
   '{"type":"submit_order","order":{"owner":"0x000000000000000000000000000000000000beef","market":1,"side":"bid","kind":"limit","size":1000,"limit_px":5000000000000,"tif":"gtc","stp_mode":"cancel_oldest","reduce_only":false}}';
 const KAT_NONCE = 1_700_000_000_000n;
-const KAT_CHAIN_ID = 998;
+// MTF testnet chain id (114514) — the SDK default. The KAT digests below are
+// recomputed for this id; 998 (HL testnet) was retired to avoid a collision.
+const KAT_CHAIN_ID = 114514;
 const KAT_DIGEST =
-  'bc1fa314ad46f9aa0b146623144ef6f7efff7d43a8998d7bf63ef018c21352f2';
+  'f7aa1087f79b30fb3f13a190636d32b32720d5984191992d707e2afbca716e0d';
 
 // Cancel KAT — independently derived from the server's `native_action_digest`
-// algorithm (keccak256(0x1901 || domainSep5(998) || structHash)) over the EXACT
-// cancel_order action bytes the TS builder emits. Pins the cancel path to the
-// same digest the server verifies; drift here 401s every cancel.
+// algorithm (keccak256(0x1901 || domainSep5(114514) || structHash)) over the
+// EXACT cancel_order action bytes the TS builder emits. Pins the cancel path to
+// the same digest the server verifies; drift here 401s every cancel.
 const CANCEL_KAT_ACTION_JSON =
   '{"type":"cancel_order","cancel":{"owner":"0x000000000000000000000000000000000000beef","market":3,"oid":42}}';
 const CANCEL_KAT_DIGEST =
-  'c72482a8bb38728c5f91e84191a0a9f562efb71368fd45f60a759066bd628bf2';
+  'f44e41aeb63b49e4877d948b609d615815851f0c3ff036a42bc0567a125e4d80';
 
 function toHex(bytes: Uint8Array): string {
   let out = '';
@@ -127,11 +129,15 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
 
   it('digest is sensitive to nonce and chainId', async () => {
     const { nativeActionDigest } = await import('../src/native.js');
-    const base = await nativeActionDigest(KAT_ACTION_JSON, KAT_NONCE, 998);
+    const base = await nativeActionDigest(
+      KAT_ACTION_JSON,
+      KAT_NONCE,
+      KAT_CHAIN_ID,
+    );
     const otherNonce = await nativeActionDigest(
       KAT_ACTION_JSON,
       KAT_NONCE + 1n,
-      998,
+      KAT_CHAIN_ID,
     );
     const otherChain = await nativeActionDigest(
       KAT_ACTION_JSON,
