@@ -1,71 +1,87 @@
-# @metaflux/client
+# @metaflux-dex/client
 
-TypeScript client SDK for the MetaFlux (MTF) L1, targeted at the
-MetaFlux web app. CPU-heavy work (secp256k1 signing, keccak256, msgpack
-canonical encoding) is pushed into a wasm-bindgen WASM module — the
-pure-TS surface is a thin, type-safe fetch wrapper.
+TypeScript client SDK for the [MetaFlux (MTF)](https://github.com/mtf-exchange) L1.
+CPU-heavy work (secp256k1 signing, keccak256, msgpack canonical encoding) is
+pushed into a wasm-bindgen WASM module — the pure-TS surface is a thin,
+type-safe `fetch` wrapper that speaks the **MTF-native** protocol directly
+(`POST /info` reads, `POST /exchange` signed writes, `wss://…/ws` streams).
+
+> MetaFlux-native only. HL-compatible and CCXT endpoints live on the gateway;
+> this SDK targets the node/gateway's first-class MTF-native surface.
+
+## Install
+
+```bash
+npm install @metaflux-dex/client
+```
+
+The published package ships the compiled `dist/` (TypeScript) and `pkg/` (WASM)
+artifacts — no Rust toolchain needed to **consume** it. You only need Rust +
+`wasm-pack` to build from source (see [Develop](#develop)).
 
 ## Quickstart
 
-### One-time install
-
-```bash
-# Rust toolchain + wasm-pack (for building the WASM module).
-brew install rust wasm-pack
-
-# npm deps.
-npm install
-```
-
-### Build
-
-```bash
-# Compiles the WASM crate then the TypeScript.
-# Both artifacts go in dist/ + pkg/ at the repo root.
-npm run build
-```
-
-You can also run the steps separately:
-
-```bash
-npm run build:wasm   # cargo + wasm-pack -> pkg/
-npm run build:ts     # tsc              -> dist/
-```
-
-### Test
-
-```bash
-npm test                  # vitest, exercises the WASM surface
-cd wasm && cargo test     # native-target rust tests for the same primitives
-```
-
-## Example usage
-
 ```ts
-import { Client, type Order } from '@metaflux/client';
+import { Client } from '@metaflux-dex/client';
 
 const client = new Client({
   baseUrl: 'http://localhost:8080',
-  // Optional. Without a private key, the Client is read-only.
+  // Optional. Without a private key the Client is read-only.
   privateKey: new Uint8Array(32).fill(0x42),
 });
 
-// Read-only.
-const markets = await client.getMarkets();
-console.log(markets.map((m) => m.symbol));
+// ---- Reads (no key required) — POST /info, {type,data} envelope unwrapped ----
+const markets = await client.info.markets();
+console.log(markets.map((m) => `${m.name} @ ${m.mark_px}`));
 
-// Sign + submit an order.
-const order: Order = {
-  asset: 0,
-  side: 0,                     // 0 = buy, 1 = sell
-  sizeE8: 100_000_000n,        // 1.0 base units (scaled by 1e8)
-  priceE8: 5_000_000_000_000n, // 50000.0 quote per base
-  tif: 0,                      // 0 = GTC, 1 = IOC, 2 = ALO
-};
-const signed = await client.signOrder(order);
-const ack = await client.submitOrder(signed);
-console.log('Order ID:', ack.id);
+const acct = await client.info.accountState(
+  '0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025',
+);
+console.log(acct.account_value, acct.positions);
+
+// ---- Signed order — POST /exchange (MTF-native signed action) ----
+const ack = await client.submitOrderNative({
+  owner: '0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025', // must equal the signer
+  market: 0, // BTC perp (asset id)
+  side: 'bid', // 'bid' = buy, 'ask' = sell
+  kind: 'limit',
+  size: 1_000, // fixed-point tick units
+  limit_px: 5_000_000_000_000, // fixed-point tick units
+  tif: 'gtc', // 'gtc' | 'ioc' | 'aon' | 'alo'
+  stp_mode: 'cancel_newest',
+  reduce_only: false,
+});
+
+// Synchronous per-order status — the oid is assigned at admission.
+// statuses[i] is one of { resting:{oid} } | { filled:{oid,total_sz,avg_px} } | { error }
+console.log(ack.statuses?.[0]);
 ```
+
+The signing flow (EIP-712 over the canonical action bytes, nonce auto-assigned,
+`chainId` defaults to `MTF_CHAIN_ID`) is handled inside `submitOrderNative`. The
+recovered signer is checked against `owner` locally before the request leaves the
+process. Cancel via `client.cancelOrderNative({ … })`.
+
+### WebSocket streams
+
+```ts
+import { WsClient } from '@metaflux-dex/client';
+
+const ws = new WsClient('ws://localhost:8080/ws');
+ws.onMessage((f) => {
+  if (f.channel === 'l2Book') handleBook(f.data);
+});
+await ws.connect();
+await ws.subscribe({ type: 'l2Book', coin: 'BTC' });
+```
+
+### Power-user exports
+
+The barrel also exports the low-level pieces so you can build custom flows —
+`InfoApi` (standalone read client), the `buildNativeOrderAction` /
+`signNativeAction` / `nativeActionDigest` action builders, and the WASM crypto
+primitives (`keccak256`, `signSecp256k1`, `recoverPubkey`, …). See
+[`src/index.ts`](src/index.ts) for the full surface.
 
 ## What's WASM-backed vs pure-TS
 
@@ -77,60 +93,65 @@ console.log('Order ID:', ack.id);
 | msgpack encoding of action bodies  | WASM (`rmp_serde::to_vec_named`)         |
 | EVM address derivation             | WASM (keccak + low-20-bytes slice)       |
 | HTTP fetch wrapper                 | TS                                       |
+| `{type,data}` envelope unwrap      | TS                                       |
 | JSON request/response coercion     | TS                                       |
-| URL/query-string composition       | TS                                       |
-| Base64 / hex encoding for wire     | TS                                       |
-| Type validation (address format)   | TS                                       |
-| JWT bookkeeping                    | TS                                       |
+| WebSocket framing + reconnect      | TS                                       |
 
-The split is intentional: every byte that the gateway/node *parses* is
-produced by Rust running on either side. The TS layer only assembles
-JSON envelopes around already-canonical WASM outputs, so the wire
-format has a single source of truth.
+The split is intentional: every byte the gateway/node *parses* is produced by
+Rust on both sides. The TS layer only assembles JSON envelopes around
+already-canonical WASM outputs, so the wire format has a single source of truth.
 
-## Wire conventions (mirrors the main repo)
+## Wire conventions
 
-- **Signature**: 65-byte recoverable ECDSA, `r (32) || s (32) || v (1)`.
-  `v` is the raw recovery id (0 or 1) — the gateway converts to the
-  EVM `v + 27` convention if it needs to. Source: `consensus/src/signing.rs`
-  in the main metaflux repo.
-- **EIP-712 digest**: `keccak256(0x1901 || domain_separator || message_hash)`
-  with `domain = { name: "MetaFlux", version: "1", chainId: <client opt>, verifyingContract: Address::ZERO }`.
-  Source: `core-state/src/signing.rs`.
-- **Order body**: msgpack-encoded `{ asset, side, px, size, tif }` with
-  named fields. Source: `core-state/src/actions/trading.rs::OrderParams`.
+- **Signature**: 65-byte recoverable ECDSA, `r (32) || s (32) || v (1)`, where
+  `v` is the raw recovery id (0 or 1).
+- **EIP-712 digest**: `keccak256(0x1901 || domain_separator || message_hash)`,
+  `domain = { name: "MetaFlux", version: "1", chainId, verifyingContract: 0x0 }`.
+- **MTF-native action**: a canonical snake_case JSON action
+  (`{"type":"submit_order","order":{…}}`) signed verbatim; the request body is
+  `{ action, nonce, signature }` to `POST /exchange`.
+
+Field shapes are mirrored from the authoritative API spec in
+[`metaflux-knowledges`](https://github.com/mtf-exchange/metaflux-knowledges) and
+the node handlers under `metaflux/crates/api-node/src/rest/`.
+
+## Develop
+
+This repo uses [pnpm](https://pnpm.io) (see `packageManager` in package.json).
+
+```bash
+# Rust toolchain + wasm-pack (to build the WASM module).
+brew install rust wasm-pack
+
+pnpm install
+pnpm build         # wasm-pack -> pkg/, then tsc -> dist/
+pnpm test          # vitest
+pnpm typecheck     # tsc --noEmit
+```
+
+Build the artifacts separately with `pnpm build:wasm` / `pnpm build:ts`.
 
 ## Repository layout
 
 ```
 .
-├── package.json              # @metaflux/client v0.0.1
-├── tsconfig.json             # strict ES2022 ESM
-├── vitest.config.ts          # test runner config
+├── package.json              # @metaflux-dex/client
 ├── src/
 │   ├── index.ts              # public barrel
-│   ├── client.ts             # Client class — main surface
-│   ├── wasm.ts               # WASM loader + typed wrappers
+│   ├── client.ts             # Client class — reads + signed writes
+│   ├── info.ts               # InfoApi — POST /info read methods
+│   ├── info-types.ts         # /info response shapes ({type,data}.data)
+│   ├── native.ts             # MTF-native action build + sign + digest
+│   ├── ws.ts                 # WsClient — subscriptions + reconnect
+│   ├── wasm.ts               # WASM loader + typed crypto wrappers
 │   ├── http.ts               # fetch wrapper + MetaFluxApiError
-│   └── types.ts              # Order / SignedOrder / Market / Position
-├── __tests__/
-│   └── sign.test.ts          # vitest — skips when pkg/ is missing
-├── wasm/
-│   ├── Cargo.toml            # standalone crate, NOT a workspace member
-│   └── src/lib.rs            # wasm-bindgen exports + 15 native tests
+│   └── types.ts              # Order / NativeOrder / acks / shared enums
+├── __tests__/                # vitest: info / native / sign / ws
+├── wasm/                     # standalone wasm-bindgen crate (+ native tests)
 ├── pkg/                      # wasm-pack output (gitignored)
 └── dist/                     # tsc output (gitignored)
 ```
 
-## TODO
+## License
 
-- `getTicker(symbol)`, `getOrderBook(symbol, limit?)`, `getOhlcv(...)`
-  for the rest of the CCXT minimal subset.
-- `/ccxt/auth` JWT bootstrap — currently the Client carries an optional
-  JWT but does not auto-mint one from an EIP-712 envelope. Plumbing
-  lands alongside the gateway's auth endpoint integration.
-- `cancelOrder(id)` / `cancelByCloid(cloid)`.
-- WebSocket client for `watchTicker` / `watchOrderBook` / `watchTrades`.
-- WASM-target test runner (`wasm-pack test --headless --chrome`) — the
-  current native tests cover the wire format, but the WASM ABI itself
-  is exercised only via the vitest suite once `pkg/` is built.
+[MIT](LICENSE) © MetaFlux
