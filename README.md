@@ -73,18 +73,46 @@ await client.setPositionMode({ hedge: true });
 // Perp orders on a hedge account then carry an optional position_side:
 //   submitOrderNative({ owner, market, …, position_side: 'long' })
 // One-way accounts omit it (the default), keeping the signed bytes identical.
+```
 
-// SE-0 spot CLOB (v0 = IOC limit only; limit_px must be > 0):
-await client.submitSpotOrderNative({
-  pair: 200,
+### Spot trading
+
+The spot CLOB (v0 = IOC limit only; `limit_px` must be > 0 on the 1e8 price
+plane) is a separate book from the perp engine, keyed by a numeric **pair id**.
+Discover pairs with `client.info.spotMeta()`, trade with
+`submitSpotOrderNative` / `cancelSpotOrderNative`, and read balances back with
+`client.info.spotClearinghouseState(address)`:
+
+```ts
+// 1. Discover pairs. `name` is derived as "{base}/{quote}" from the token
+//    registry; `id` is the numeric pair id.
+const spotMeta = await client.info.spotMeta();
+const pair = spotMeta.pairs.find((p) => p.name === 'BTC/USDC')!;
+// spotMeta.tokens carries per-token decimals (sz_decimals / wei_decimals).
+
+// 2. Place an IOC limit spot order (signed, POST /exchange).
+const spotAck = await client.submitSpotOrderNative({
+  pair: pair.id,
   side: 'bid',
   size: 10,
   limit_px: 200_000_000, // 1e8 price plane
   tif: 'ioc',
   stp_mode: 'cancel_oldest',
 });
-await client.cancelSpotOrderNative({ pair: 200, oid: 7 });
+
+// 3. Read balances back.
+const spotBals = await client.info.spotClearinghouseState(
+  '0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025',
+);
+for (const b of spotBals.balances) console.log(b.name, b.asset, b.balance);
+
+// 4. Cancel a resting order by oid.
+await client.cancelSpotOrderNative({ pair: pair.id, oid: 7 });
 ```
+
+On the WebSocket `trades` / `candles` / `fills` channels, spot prints carry the
+**numeric pair id** as the `coin` label (e.g. `"101"`), not the display name —
+use `spotMeta()` to map `id` to its `"{base}/{quote}"` name.
 
 ### WebSocket streams
 

@@ -68,6 +68,7 @@ export type {
   // HL-node parity shapes.
   SpotMeta,
   SpotPair,
+  SpotToken,
   SpotClearinghouseState,
   SpotBalance,
   ExchangeStatus,

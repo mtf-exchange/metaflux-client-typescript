@@ -183,7 +183,11 @@ export class InfoApi {
 
   // ── HL-node parity reads ────────────────────────────────────────────────
 
-  /// `spot_meta` — spot pair universe. No parameters.
+  /// `spot_meta` — spot pair universe + token registry. No parameters.
+  ///
+  /// Each pair's `name` is derived as `{base}/{quote}` from the token
+  /// registry; the numeric `id` is the compact `coin` label spot prints carry
+  /// on the WS `trades` / `candles` / `fills` channels.
   async spotMeta(): Promise<SpotMeta> {
     return this.post<SpotMeta>({ type: 'spot_meta' });
   }
