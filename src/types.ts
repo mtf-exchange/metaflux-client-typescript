@@ -130,6 +130,57 @@ export interface NativeOrder {
   cloid?: string;
   /// Optional builder-code carve. Rides INSIDE the signed action object.
   builder?: NativeBuilder;
+  /// HEDGE MODE: target leg (`"long"` / `"short"`). OMITTED on a one-way
+  /// account (the default), REQUIRED on a hedge account — the node validates
+  /// the mode↔side pairing. Left off the signed bytes entirely when absent, so
+  /// a one-way payload stays byte-identical to a pre-hedge SDK.
+  position_side?: NativePositionSide;
+}
+
+/// MTF-native `set_position_mode` action payload — byte-for-byte mirror of the
+/// server `SetPositionModeParams`. Toggles the account between one-way (net,
+/// `hedge:false`) and hedge / two-way (`hedge:true`) position modes. Only legal
+/// while flat on every market (the node rejects a switch with open positions).
+/// Sender-authorized: the recovered signer IS the account, so there is no
+/// `owner` field.
+export interface NativeSetPositionMode {
+  /// `true` = hedge / two-way; `false` = one-way / net.
+  hedge: boolean;
+}
+
+/// MTF-native `spot_order` action shape (SE-0 spot CLOB) — byte-for-byte mirror
+/// of the server `NativeSpotOrder`. Sender-authorized (the signer is the trader,
+/// no `owner`); spot has no positions, so there is no `reduce_only` /
+/// `position_side`. v0 accepts ONLY `tif:"ioc"` with `limit_px > 0` — Gtc / Alo
+/// and a zero (market) price are rejected by the node.
+///
+/// Field ORDER is load-bearing for the signed bytes (see `buildNativeSpotOrderAction`).
+export interface NativeSpotOrder {
+  /// Spot pair id (`u32`); maps identity → asset id.
+  pair: number;
+  /// Side: `"bid"` (buy) or `"ask"` (sell).
+  side: NativeSide;
+  /// Base-asset size in raw lots (`u64` on the wire).
+  size: number;
+  /// Limit price in the 1e8 plane (`u64` on the wire); must be `> 0` in v0.
+  limit_px: number;
+  /// Time-in-force. v0 requires `"ioc"` (defaulted by the builder).
+  tif: NativeTif;
+  /// Self-trade-prevention mode.
+  stp_mode: NativeStpMode;
+  /// Optional `0x`-hex 32-char (16-byte) client order id. Omitted from the
+  /// signed bytes entirely when absent.
+  cloid?: string;
+}
+
+/// MTF-native `spot_cancel` action shape — byte-for-byte mirror of the server
+/// `NativeSpotCancel`. Cancels a resting spot order by `oid` (the node cancels
+/// by `oid`; there is no cancel-by-cloid on this path).
+export interface NativeSpotCancel {
+  /// Spot pair id (`u32`).
+  pair: number;
+  /// Server order id (`u64`) to cancel. REQUIRED.
+  oid: number;
 }
 
 /// MTF-native `cancel_order` action shape (snake_case), byte-for-byte mirror of
@@ -153,6 +204,10 @@ export interface NativeCancel {
 
 /// MTF-native side string — mirrors the server `NativeSide`.
 export type NativeSide = 'bid' | 'ask';
+
+/// MTF-native position-side string (HEDGE MODE) — mirrors the server
+/// `NativePositionSide`. Selects which leg a hedge-account order targets.
+export type NativePositionSide = 'long' | 'short';
 
 /// MTF-native order kind — mirrors the server `NativeOrderKind`. Only
 /// `limit` / `market` are mapped server-side; `stop_loss` / `take_profit`

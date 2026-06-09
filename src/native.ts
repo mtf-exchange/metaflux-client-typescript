@@ -29,7 +29,10 @@ import type {
   NativeBuilder,
   NativeCancel,
   NativeOrder,
+  NativeSetPositionMode,
   NativeSignedAction,
+  NativeSpotCancel,
+  NativeSpotOrder,
 } from './types.js';
 
 const MTF_DOMAIN_TYPE =
@@ -185,6 +188,12 @@ export function buildNativeOrderAction(order: NativeOrder): string {
   if (order.builder !== undefined) {
     parts.push(`${jsonStr('builder')}:${buildBuilder(order.builder)}`);
   }
+  // HEDGE MODE: `position_side` is OMITTED on a one-way account so the signed
+  // bytes stay byte-identical to a pre-hedge SDK; it rides last (after
+  // cloid/builder), matching the server `NativeOrder` field declaration order.
+  if (order.position_side !== undefined) {
+    parts.push(`${jsonStr('position_side')}:${jsonStr(order.position_side)}`);
+  }
   const orderJson = `{${parts.join(',')}}`;
   return `{${jsonStr('type')}:${jsonStr('submit_order')},${jsonStr('order')}:${orderJson}}`;
 }
@@ -227,6 +236,70 @@ export function buildNativeCancelAction(cancel: NativeCancel): string {
   }
   const cancelJson = `{${parts.join(',')}}`;
   return `{${jsonStr('type')}:${jsonStr('cancel_order')},${jsonStr('cancel')}:${cancelJson}}`;
+}
+
+/// Build the canonical native `set_position_mode` action JSON string.
+///
+/// `{"type":"set_position_mode","params":{"hedge":<bool>}}` — toggles the
+/// account between one-way (`false`) and hedge / two-way (`true`). Sender-
+/// authorized: the recovered signer IS the account (no `owner`), so this is
+/// signed exactly like the order builders and POSTed verbatim. The node only
+/// permits the switch while flat on every market.
+export function buildNativeSetPositionModeAction(
+  mode: NativeSetPositionMode,
+): string {
+  if (typeof mode.hedge !== 'boolean') {
+    throw new RangeError('set_position_mode: hedge must be a boolean');
+  }
+  const paramsJson = `{${jsonStr('hedge')}:${mode.hedge ? 'true' : 'false'}}`;
+  return `{${jsonStr('type')}:${jsonStr('set_position_mode')},${jsonStr('params')}:${paramsJson}}`;
+}
+
+/// Build the canonical native `spot_order` action JSON string (SE-0 spot CLOB).
+///
+/// Field order mirrors the server `NativeSpotOrder` exactly. `tif` defaults to
+/// `"ioc"` because v0 accepts ONLY IOC limit orders (`tif:"ioc"` + `limit_px > 0`);
+/// the node rejects Gtc / Alo and a zero (market) price. Sender-authorized (no
+/// `owner`); the returned string is BOTH signed and sent.
+export function buildNativeSpotOrderAction(order: NativeSpotOrder): string {
+  validateMarket(order.pair);
+  validateU64(order.size, 'size');
+  validateU64(order.limit_px, 'limit_px');
+  // v0 constraint: IOC limit only, strictly-positive price. The node enforces
+  // both; we fail loud here so a misconfigured order never reaches the wire.
+  const tif = order.tif ?? 'ioc';
+  if (tif !== 'ioc') {
+    throw new RangeError('spot_order v0 requires tif="ioc" (Gtc/Alo rejected)');
+  }
+  if (order.limit_px <= 0) {
+    throw new RangeError('spot_order v0 requires limit_px > 0 (market px rejected)');
+  }
+  const parts: string[] = [
+    `${jsonStr('pair')}:${order.pair}`,
+    `${jsonStr('side')}:${jsonStr(order.side)}`,
+    `${jsonStr('size')}:${order.size}`,
+    `${jsonStr('limit_px')}:${order.limit_px}`,
+    `${jsonStr('tif')}:${jsonStr(tif)}`,
+    `${jsonStr('stp_mode')}:${jsonStr(order.stp_mode)}`,
+  ];
+  if (order.cloid !== undefined) {
+    validateCloid(order.cloid);
+    parts.push(`${jsonStr('cloid')}:${jsonStr(order.cloid)}`);
+  }
+  const orderJson = `{${parts.join(',')}}`;
+  return `{${jsonStr('type')}:${jsonStr('spot_order')},${jsonStr('order')}:${orderJson}}`;
+}
+
+/// Build the canonical native `spot_cancel` action JSON string.
+///
+/// `{"type":"spot_cancel","cancel":{"pair":<u32>,"oid":<u64>}}`. The node
+/// cancels a resting spot order by `oid`, so `oid` is REQUIRED. Field order
+/// mirrors the server `NativeSpotCancel`; the returned string is signed and sent.
+export function buildNativeSpotCancelAction(cancel: NativeSpotCancel): string {
+  validateMarket(cancel.pair);
+  validateU64(cancel.oid, 'oid');
+  const cancelJson = `{${jsonStr('pair')}:${cancel.pair},${jsonStr('oid')}:${cancel.oid}}`;
+  return `{${jsonStr('type')}:${jsonStr('spot_cancel')},${jsonStr('cancel')}:${cancelJson}}`;
 }
 
 /// Sign a pre-built action JSON string with the given private key.

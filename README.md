@@ -64,6 +64,28 @@ exported as `MTF_TESTNET_CHAIN_ID` / `MTF_MAINNET_CHAIN_ID`) is handled inside
 recovered signer is checked against `owner` locally before the request leaves the
 process. Cancel via `client.cancelOrderNative({ … })`.
 
+Other native actions share the same signed-action envelope but are
+sender-authorized (the signer is the actor, so there is no `owner` to check):
+
+```ts
+// Hedge mode: switch the account to two-way (only legal while flat).
+await client.setPositionMode({ hedge: true });
+// Perp orders on a hedge account then carry an optional position_side:
+//   submitOrderNative({ owner, market, …, position_side: 'long' })
+// One-way accounts omit it (the default), keeping the signed bytes identical.
+
+// SE-0 spot CLOB (v0 = IOC limit only; limit_px must be > 0):
+await client.submitSpotOrderNative({
+  pair: 200,
+  side: 'bid',
+  size: 10,
+  limit_px: 200_000_000, // 1e8 price plane
+  tif: 'ioc',
+  stp_mode: 'cancel_oldest',
+});
+await client.cancelSpotOrderNative({ pair: 200, oid: 7 });
+```
+
 ### WebSocket streams
 
 ```ts
@@ -81,6 +103,8 @@ await ws.subscribe({ type: 'l2Book', coin: 'BTC' });
 
 The barrel also exports the low-level pieces so you can build custom flows —
 `InfoApi` (standalone read client), the `buildNativeOrderAction` /
+`buildNativeCancelAction` / `buildNativeSpotOrderAction` /
+`buildNativeSpotCancelAction` / `buildNativeSetPositionModeAction` /
 `signNativeAction` / `nativeActionDigest` action builders, and the WASM crypto
 primitives (`keccak256`, `signSecp256k1`, `recoverPubkey`, …). See
 [`src/index.ts`](src/index.ts) for the full surface.
