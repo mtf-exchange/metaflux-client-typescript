@@ -378,9 +378,11 @@ export interface Mip3ActiveBids {
 
 /// One spot pair inside `SpotMeta`.
 export interface SpotPair {
-  /// Pair id.
+  /// Numeric pair id — also the compact `coin` label spot prints carry on the
+  /// WS `trades` / `candles` / `fills` channels.
   id: number;
-  /// Pair name (e.g. `"BTC/USDC"`).
+  /// Display name derived as `{base}/{quote}` from the token registry
+  /// (e.g. `"BTC/USDC"`).
   name: string;
   /// Base asset id.
   base: number;
@@ -394,10 +396,24 @@ export interface SpotPair {
   active: boolean;
 }
 
-/// `spot_meta` — spot pair universe.
+/// One token registry entry inside `SpotMeta`.
+export interface SpotToken {
+  /// Token asset id.
+  id: number;
+  /// Human token name (e.g. `"BTC"`).
+  name: string;
+  /// Display / size precision (decimals shown on the spot book).
+  sz_decimals: number;
+  /// Native (ERC-20-style) token decimals (e.g. USDC = 6, BTC = 8).
+  wei_decimals: number;
+}
+
+/// `spot_meta` — spot pair universe + token registry.
 export interface SpotMeta {
-  /// Registered spot pairs.
+  /// Registered spot pairs (token-registration sentinels excluded).
   pairs: SpotPair[];
+  /// Token registry with per-token decimals.
+  tokens: SpotToken[];
 }
 
 /// One spot balance inside `SpotClearinghouseState`.

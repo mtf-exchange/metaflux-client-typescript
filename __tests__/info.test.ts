@@ -213,6 +213,54 @@ describe('InfoApi request shapes', () => {
     });
   });
 
+  it('spotMeta POSTs {"type":"spot_meta"} and unwraps pairs + tokens', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      pairs: [
+        {
+          id: 101,
+          name: 'BTC/USDC',
+          base: 0,
+          quote: 100,
+          taker_fee_bps: 5,
+          min_notional: '1000',
+          active: true,
+        },
+      ],
+      tokens: [
+        { id: 0, name: 'BTC', sz_decimals: 5, wei_decimals: 8 },
+        { id: 100, name: 'USDC', sz_decimals: 2, wei_decimals: 6 },
+      ],
+    };
+    const res = await api.spotMeta();
+    expect(JSON.parse(captured!.body)).toEqual({ type: 'spot_meta' });
+    // `name` is the derived `{base}/{quote}` display name; `id` is the
+    // numeric pair id spot prints carry as `coin` on the WS feeds.
+    expect(res.pairs[0]?.id).toBe(101);
+    expect(res.pairs[0]?.name).toBe('BTC/USDC');
+    expect(res.pairs[0]?.min_notional).toBe('1000');
+    expect(res.tokens).toHaveLength(2);
+    expect(res.tokens[0]?.name).toBe('BTC');
+    expect(res.tokens[1]?.wei_decimals).toBe(6);
+  });
+
+  it('spotClearinghouseState is keyed by 0x address (NOT `user`)', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      address: ADDR,
+      balances: [{ asset: 101, name: 'BTC/USDC', balance: '500' }],
+    };
+    const res = await api.spotClearinghouseState(ADDR);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'spot_clearinghouse_state',
+      address: ADDR,
+    });
+    expect(res.address).toBe(ADDR);
+    expect(res.balances[0]?.asset).toBe(101);
+    // `balance` is a decimal string (truncated toward zero) on the wire.
+    expect(res.balances[0]?.balance).toBe('500');
+  });
+
   it('webData2 is keyed by 0x address', async () => {
     const api = new InfoApi(BASE);
     nextData = {
