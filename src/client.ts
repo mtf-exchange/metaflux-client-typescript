@@ -20,6 +20,9 @@ import { httpRequest } from './http.js';
 import {
   buildNativeCancelAction,
   buildNativeOrderAction,
+  buildNativeSetPositionModeAction,
+  buildNativeSpotCancelAction,
+  buildNativeSpotOrderAction,
   nativeRequestBody,
   nextNonce,
   recoverNativeSigner,
@@ -32,6 +35,9 @@ import type {
   NativeCancel,
   NativeExchangeAck,
   NativeOrder,
+  NativeSetPositionMode,
+  NativeSpotCancel,
+  NativeSpotOrder,
   Order,
   OrderAck,
   Position,
@@ -346,6 +352,77 @@ export class Client {
       );
     }
 
+    return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
+      method: 'POST',
+      rawJson: nativeRequestBody(signed),
+      bearer: this.jwt,
+    });
+  }
+
+  /// Toggle one-way / hedge position mode via `POST /exchange`.
+  ///
+  /// `setPositionMode({ hedge: true })` switches the account to hedge / two-way
+  /// mode; `{ hedge: false }` switches back to one-way / net. Same signed-action
+  /// envelope as the order paths, but SENDER-AUTHORIZED: the recovered signer IS
+  /// the account, so there is no `owner` to cross-check. The node only permits
+  /// the switch while the account is flat on every market (else it 4xxs).
+  ///
+  /// After switching to hedge mode, perp orders MUST carry `position_side`
+  /// (`"long"` / `"short"`); after switching back to one-way they MUST omit it.
+  async setPositionMode(
+    mode: NativeSetPositionMode,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(
+      buildNativeSetPositionModeAction(mode),
+      opts,
+    );
+  }
+
+  /// Submit an SE-0 spot CLOB order via `POST /exchange`.
+  ///
+  /// v0 is IOC-limit only: `tif` defaults to `"ioc"` and `limit_px` must be
+  /// `> 0` (the builder + node both enforce it). Sender-authorized: the signer
+  /// is the trader, so there is no `owner` field and no local owner check.
+  async submitSpotOrderNative(
+    order: NativeSpotOrder,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeSpotOrderAction(order), opts);
+  }
+
+  /// Cancel a resting SE-0 spot order via `POST /exchange`.
+  ///
+  /// Cancels by `(pair, oid)`; the node cancels spot orders by `oid`. Sender-
+  /// authorized, same envelope as the other native actions.
+  async cancelSpotOrderNative(
+    cancel: NativeSpotCancel,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeSpotCancelAction(cancel), opts);
+  }
+
+  /// Sign a pre-built sender-authorized action JSON and POST it to `/exchange`.
+  ///
+  /// Shared by the actions where the recovered signer IS the actor (no `owner`
+  /// to cross-check): `set_position_mode`, `spot_order`, `spot_cancel`. Mirrors
+  /// `submitOrderNative`'s flow minus the owner-vs-signer guard.
+  private async postSenderAuthorized(
+    actionJson: string,
+    opts: { nonce?: bigint; chainId?: number },
+  ): Promise<NativeExchangeAck> {
+    if (this.privateKey === undefined) {
+      throw new Error(
+        'this action requires a privateKey in ClientOpts (this Client is read-only)',
+      );
+    }
+    const nonce = opts.nonce ?? nextNonce();
+    const signed = await signNativeAction(
+      this.privateKey,
+      actionJson,
+      nonce,
+      opts.chainId,
+    );
     return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
       method: 'POST',
       rawJson: nativeRequestBody(signed),
