@@ -28,7 +28,7 @@ if (!wasmBuilt) {
 // "you forgot to build WASM" signal we want.
 describe.skipIf(!wasmBuilt)('WASM crypto round-trips', () => {
   it('keccak256 of empty input matches the Ethereum yellow-paper vector', async () => {
-    const { keccak256 } = await import('../src/wasm.js');
+    const { keccak256 } = await import('../src/wallet/wasm.js');
     const out = await keccak256(new Uint8Array());
     // Canonical empty-keccak digest.
     const expected = Uint8Array.from([
@@ -41,7 +41,7 @@ describe.skipIf(!wasmBuilt)('WASM crypto round-trips', () => {
 
   it('sign + recover returns the signing pubkey', async () => {
     const { keccak256, signSecp256k1, recoverPubkey } = await import(
-      '../src/wasm.js'
+      '../src/wallet/wasm.js'
     );
     const privKey = new Uint8Array(32).fill(0x42);
     const msgHash = await keccak256(
@@ -57,7 +57,7 @@ describe.skipIf(!wasmBuilt)('WASM crypto round-trips', () => {
   });
 
   it('signing is deterministic (RFC 6979)', async () => {
-    const { keccak256, signSecp256k1 } = await import('../src/wasm.js');
+    const { keccak256, signSecp256k1 } = await import('../src/wallet/wasm.js');
     const privKey = new Uint8Array(32).fill(0x11);
     const msgHash = await keccak256(
       new TextEncoder().encode('deterministic'),
@@ -88,7 +88,7 @@ describe.skipIf(!wasmBuilt)('WASM crypto round-trips', () => {
   });
 
   it('encode_limit_order is deterministic for identical inputs', async () => {
-    const { encodeLimitOrder } = await import('../src/wasm.js');
+    const { encodeLimitOrder } = await import('../src/wallet/wasm.js');
     const a = await encodeLimitOrder(1, 0, 100n, 200n, 0);
     const b = await encodeLimitOrder(1, 0, 100n, 200n, 0);
     expect(Array.from(a)).toEqual(Array.from(b));
@@ -96,7 +96,7 @@ describe.skipIf(!wasmBuilt)('WASM crypto round-trips', () => {
 
   it('derive_address_from_pubkey produces a 20-byte address', async () => {
     const { keccak256, signSecp256k1, recoverPubkey, deriveAddressFromPubkey } =
-      await import('../src/wasm.js');
+      await import('../src/wallet/wasm.js');
     const privKey = new Uint8Array(32).fill(0x99);
     const msgHash = await keccak256(new TextEncoder().encode('address-test'));
     const sig = await signSecp256k1(privKey, msgHash);

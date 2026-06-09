@@ -6,7 +6,7 @@
 // caller has authenticated), and (c) translating the gateway's CCXT-
 // compat error envelope `{ "error": "..." }` into a typed exception.
 
-import type { ErrorEnvelope } from './types.js';
+import type { ErrorEnvelope } from '../types/index.js';
 
 /// Thrown when the gateway responds with a non-2xx status. Carries the
 /// status code + the message extracted from `{ "error": "..." }` (or

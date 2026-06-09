@@ -11,7 +11,7 @@
 // synchronously. Devnet / testnet only — mainnet refuses (surfaced as a
 // `MetaFluxApiError`).
 
-import { httpRequest } from './http.js';
+import { httpRequest } from './rest/http.js';
 
 /// Successful faucet response (200). `status` is `"queued"` — the credit is
 /// staged for the next block, so the balance updates after ~1 block rather

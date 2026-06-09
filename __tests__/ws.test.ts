@@ -1,13 +1,14 @@
 // WS client wire-protocol tests — pure TS, no WASM. Drives the WsClient against
-// a minimal in-process WebSocket mock and asserts the EXACT frames the server
-// (`metaflux/crates/api-node/src/ws/subscribe.rs`) parses (snake_case native):
+// a minimal in-process WebSocket mock and asserts the EXACT frames the server's
+// `/ws` endpoint parses (snake_case native, per the KB spec
+// metaflux-knowledges/api/ws/subscriptions.md):
 //   {"method":"subscribe","subscription":{"type":"l2_book","coin":"BTC"}}
 //   {"method":"unsubscribe","subscription":{"type":"trades"}}
 //   {"method":"ping"}
 // and that inbound {"channel","data"} frames fan out to handlers.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { WsClient, WS_CHANNELS } from '../src/ws.js';
+import { WsClient, WS_CHANNELS } from '../src/ws/ws.js';
 
 // Minimal WebSocket stand-in. Records every sent frame; lets the test inject
 // inbound messages and lifecycle events.

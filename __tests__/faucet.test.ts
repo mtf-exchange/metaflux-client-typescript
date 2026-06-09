@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { requestFaucet } from '../src/faucet.js';
-import { MetaFluxApiError } from '../src/http.js';
+import { MetaFluxApiError } from '../src/rest/http.js';
 
 interface Captured {
   url: string;

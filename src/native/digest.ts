@@ -1,8 +1,8 @@
-// MTF-native signed-action digest + envelope construction.
+// MTF-native signed-action digest + envelope construction (signing core).
 //
 // This is the byte-exact TS twin of the Rust SDK reference
 // (`metaflux-client-rust/src/rest/exchange.rs::ActionSignedDigest`) and the
-// server verifier (`metaflux/crates/core-state/src/signing.rs`).
+// server's native-action signature verifier.
 //
 // digest = keccak256(0x1901 || domainSep5 || structHash)
 //   domainSep5 = keccak256(
@@ -16,24 +16,16 @@
 // CRITICAL: the signature is verified over the EXACT `action` bytes the server
 // receives (it parses `action` as `serde_json::value::RawValue`). So the same
 // JSON string MUST be both signed and sent verbatim — never re-stringified
-// from a parsed object. `buildNativeOrderAction` is the single source of those
-// bytes.
+// from a parsed object. The `build*Action` functions in `./actions.js` are the
+// single source of those bytes.
 
 import {
   deriveAddressFromPubkey,
   keccak256,
   recoverPubkey,
   signSecp256k1,
-} from './wasm.js';
-import type {
-  NativeBuilder,
-  NativeCancel,
-  NativeOrder,
-  NativeSetPositionMode,
-  NativeSignedAction,
-  NativeSpotCancel,
-  NativeSpotOrder,
-} from './types.js';
+} from '../wallet/wasm.js';
+import type { NativeSignedAction } from '../types/index.js';
 
 const MTF_DOMAIN_TYPE =
   'EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)';
@@ -73,7 +65,7 @@ export function nextNonce(): bigint {
 /// Encode a `bigint` as a 32-byte big-endian buffer (uint256 / nonce slot).
 /// The value rides in the low bytes; high bytes are zero. Rejects negatives
 /// and values that overflow 256 bits.
-function be32(value: bigint): Uint8Array {
+export function be32(value: bigint): Uint8Array {
   if (value < 0n) throw new RangeError('be32: value must be non-negative');
   if (value >= 1n << 256n) throw new RangeError('be32: value overflows uint256');
   const out = new Uint8Array(32);
@@ -86,7 +78,7 @@ function be32(value: bigint): Uint8Array {
 }
 
 /// Concatenate 32-byte chunks into one buffer.
-function concat32(...chunks: Uint8Array[]): Uint8Array {
+export function concat32(...chunks: Uint8Array[]): Uint8Array {
   const out = new Uint8Array(chunks.length * 32);
   chunks.forEach((c, i) => {
     if (c.length !== 32) {
@@ -98,7 +90,7 @@ function concat32(...chunks: Uint8Array[]): Uint8Array {
 }
 
 /// Compute the 5-field MTF-native EIP-712 domain separator.
-async function domainSeparator(chainId: number): Promise<Uint8Array> {
+export async function domainSeparator(chainId: number): Promise<Uint8Array> {
   const typeHash = await keccak256(enc.encode(MTF_DOMAIN_TYPE));
   const nameHash = await keccak256(enc.encode('MetaFlux'));
   const versionHash = await keccak256(enc.encode('1'));
@@ -141,7 +133,7 @@ export async function nativeActionDigest(
 }
 
 /// Lowercase hex (no `0x`) of a byte buffer.
-function toHex(bytes: Uint8Array): string {
+export function toHex(bytes: Uint8Array): string {
   let out = '';
   for (const b of bytes) out += b.toString(16).padStart(2, '0');
   return out;
@@ -154,152 +146,8 @@ function toHex(bytes: Uint8Array): string {
 /// / cloids and fixed enum tokens, none of which contain characters needing
 /// escaping — but we escape defensively so a malformed input can never inject
 /// raw control bytes into the signed payload.
-function jsonStr(s: string): string {
+export function jsonStr(s: string): string {
   return JSON.stringify(s);
-}
-
-/// Build the canonical native `submit_order` action JSON string.
-///
-/// Field order mirrors the server `NativeOrder` exactly. Optional `cloid` /
-/// `builder` are omitted entirely when absent (matching the server's
-/// `#[serde(default)]` + KAT vector, where neither appears). The returned
-/// string is BOTH what gets signed and what gets sent — do not re-serialize.
-export function buildNativeOrderAction(order: NativeOrder): string {
-  validateAddress(order.owner, 'owner');
-  validateMarket(order.market);
-  validateU64(order.size, 'size');
-  validateU64(order.limit_px, 'limit_px');
-
-  const parts: string[] = [
-    `${jsonStr('owner')}:${jsonStr(order.owner)}`,
-    `${jsonStr('market')}:${order.market}`,
-    `${jsonStr('side')}:${jsonStr(order.side)}`,
-    `${jsonStr('kind')}:${jsonStr(order.kind)}`,
-    `${jsonStr('size')}:${order.size}`,
-    `${jsonStr('limit_px')}:${order.limit_px}`,
-    `${jsonStr('tif')}:${jsonStr(order.tif)}`,
-    `${jsonStr('stp_mode')}:${jsonStr(order.stp_mode)}`,
-    `${jsonStr('reduce_only')}:${order.reduce_only ? 'true' : 'false'}`,
-  ];
-  if (order.cloid !== undefined) {
-    validateCloid(order.cloid);
-    parts.push(`${jsonStr('cloid')}:${jsonStr(order.cloid)}`);
-  }
-  if (order.builder !== undefined) {
-    parts.push(`${jsonStr('builder')}:${buildBuilder(order.builder)}`);
-  }
-  // HEDGE MODE: `position_side` is OMITTED on a one-way account so the signed
-  // bytes stay byte-identical to a pre-hedge SDK; it rides last (after
-  // cloid/builder), matching the server `NativeOrder` field declaration order.
-  if (order.position_side !== undefined) {
-    parts.push(`${jsonStr('position_side')}:${jsonStr(order.position_side)}`);
-  }
-  const orderJson = `{${parts.join(',')}}`;
-  return `{${jsonStr('type')}:${jsonStr('submit_order')},${jsonStr('order')}:${orderJson}}`;
-}
-
-/// Serialize a builder carve in the server-expected `{fee, user}` order.
-function buildBuilder(b: NativeBuilder): string {
-  if (!Number.isInteger(b.fee) || b.fee < 0 || b.fee > 0xffff) {
-    throw new RangeError('builder.fee must be a u16 (0..=65535)');
-  }
-  validateAddress(b.user, 'builder.user');
-  return `{${jsonStr('fee')}:${b.fee},${jsonStr('user')}:${jsonStr(b.user)}}`;
-}
-
-/// Build the canonical native `cancel_order` action JSON string.
-///
-/// Field order mirrors the server `NativeCancel` exactly
-/// (`metaflux/crates/api-node/src/rest/native_action.rs`): `owner`, `market`,
-/// then `oid` / `cloid` when present. The server's `CancelParams` bridge
-/// cancels by `oid`, so an `oid` is REQUIRED for the cancel to lower
-/// successfully (a `cloid`-only cancel is accepted on the wire but rejected at
-/// lowering with `CancelMissingOid`); we still emit either form so the bytes
-/// stay caller-controlled. The returned string is BOTH signed and sent.
-export function buildNativeCancelAction(cancel: NativeCancel): string {
-  validateAddress(cancel.owner, 'owner');
-  validateMarket(cancel.market);
-  if (cancel.oid === undefined && cancel.cloid === undefined) {
-    throw new RangeError('cancel requires an oid (server cancels by oid)');
-  }
-  const parts: string[] = [
-    `${jsonStr('owner')}:${jsonStr(cancel.owner)}`,
-    `${jsonStr('market')}:${cancel.market}`,
-  ];
-  if (cancel.oid !== undefined) {
-    validateU64(cancel.oid, 'oid');
-    parts.push(`${jsonStr('oid')}:${cancel.oid}`);
-  }
-  if (cancel.cloid !== undefined) {
-    validateCloid(cancel.cloid);
-    parts.push(`${jsonStr('cloid')}:${jsonStr(cancel.cloid)}`);
-  }
-  const cancelJson = `{${parts.join(',')}}`;
-  return `{${jsonStr('type')}:${jsonStr('cancel_order')},${jsonStr('cancel')}:${cancelJson}}`;
-}
-
-/// Build the canonical native `set_position_mode` action JSON string.
-///
-/// `{"type":"set_position_mode","params":{"hedge":<bool>}}` — toggles the
-/// account between one-way (`false`) and hedge / two-way (`true`). Sender-
-/// authorized: the recovered signer IS the account (no `owner`), so this is
-/// signed exactly like the order builders and POSTed verbatim. The node only
-/// permits the switch while flat on every market.
-export function buildNativeSetPositionModeAction(
-  mode: NativeSetPositionMode,
-): string {
-  if (typeof mode.hedge !== 'boolean') {
-    throw new RangeError('set_position_mode: hedge must be a boolean');
-  }
-  const paramsJson = `{${jsonStr('hedge')}:${mode.hedge ? 'true' : 'false'}}`;
-  return `{${jsonStr('type')}:${jsonStr('set_position_mode')},${jsonStr('params')}:${paramsJson}}`;
-}
-
-/// Build the canonical native `spot_order` action JSON string (SE-0 spot CLOB).
-///
-/// Field order mirrors the server `NativeSpotOrder` exactly. `tif` defaults to
-/// `"ioc"` because v0 accepts ONLY IOC limit orders (`tif:"ioc"` + `limit_px > 0`);
-/// the node rejects Gtc / Alo and a zero (market) price. Sender-authorized (no
-/// `owner`); the returned string is BOTH signed and sent.
-export function buildNativeSpotOrderAction(order: NativeSpotOrder): string {
-  validateMarket(order.pair);
-  validateU64(order.size, 'size');
-  validateU64(order.limit_px, 'limit_px');
-  // v0 constraint: IOC limit only, strictly-positive price. The node enforces
-  // both; we fail loud here so a misconfigured order never reaches the wire.
-  const tif = order.tif ?? 'ioc';
-  if (tif !== 'ioc') {
-    throw new RangeError('spot_order v0 requires tif="ioc" (Gtc/Alo rejected)');
-  }
-  if (order.limit_px <= 0) {
-    throw new RangeError('spot_order v0 requires limit_px > 0 (market px rejected)');
-  }
-  const parts: string[] = [
-    `${jsonStr('pair')}:${order.pair}`,
-    `${jsonStr('side')}:${jsonStr(order.side)}`,
-    `${jsonStr('size')}:${order.size}`,
-    `${jsonStr('limit_px')}:${order.limit_px}`,
-    `${jsonStr('tif')}:${jsonStr(tif)}`,
-    `${jsonStr('stp_mode')}:${jsonStr(order.stp_mode)}`,
-  ];
-  if (order.cloid !== undefined) {
-    validateCloid(order.cloid);
-    parts.push(`${jsonStr('cloid')}:${jsonStr(order.cloid)}`);
-  }
-  const orderJson = `{${parts.join(',')}}`;
-  return `{${jsonStr('type')}:${jsonStr('spot_order')},${jsonStr('order')}:${orderJson}}`;
-}
-
-/// Build the canonical native `spot_cancel` action JSON string.
-///
-/// `{"type":"spot_cancel","cancel":{"pair":<u32>,"oid":<u64>}}`. The node
-/// cancels a resting spot order by `oid`, so `oid` is REQUIRED. Field order
-/// mirrors the server `NativeSpotCancel`; the returned string is signed and sent.
-export function buildNativeSpotCancelAction(cancel: NativeSpotCancel): string {
-  validateMarket(cancel.pair);
-  validateU64(cancel.oid, 'oid');
-  const cancelJson = `{${jsonStr('pair')}:${cancel.pair},${jsonStr('oid')}:${cancel.oid}}`;
-  return `{${jsonStr('type')}:${jsonStr('spot_cancel')},${jsonStr('cancel')}:${cancelJson}}`;
 }
 
 /// Sign a pre-built action JSON string with the given private key.
@@ -351,27 +199,27 @@ export function nativeRequestBody(signed: NativeSignedAction): string {
 
 // ---- validation helpers (fail loud before anything reaches the signed body) ----
 
-function validateAddress(addr: string, field: string): void {
+export function validateAddress(addr: string, field: string): void {
   const hex = addr.startsWith('0x') ? addr.slice(2) : addr;
   if (hex.length !== 40 || !/^[0-9a-fA-F]{40}$/.test(hex)) {
     throw new RangeError(`${field} must be a 0x-prefixed 20-byte hex address`);
   }
 }
 
-function validateCloid(cloid: string): void {
+export function validateCloid(cloid: string): void {
   const hex = cloid.startsWith('0x') ? cloid.slice(2) : cloid;
   if (hex.length !== 32 || !/^[0-9a-fA-F]{32}$/.test(hex)) {
     throw new RangeError('cloid must be a 0x-prefixed 16-byte hex string');
   }
 }
 
-function validateMarket(market: number): void {
+export function validateMarket(market: number): void {
   if (!Number.isInteger(market) || market < 0 || market > 0xffffffff) {
     throw new RangeError('market must be a u32');
   }
 }
 
-function validateU64(value: number, field: string): void {
+export function validateU64(value: number, field: string): void {
   if (!Number.isInteger(value) || value < 0) {
     throw new RangeError(`${field} must be a non-negative integer`);
   }
@@ -382,7 +230,41 @@ function validateU64(value: number, field: string): void {
   }
 }
 
-function hexToBytes(hex: string): Uint8Array {
+/// Validate a `u32` field passed as a plain `number` (e.g. dst_chain,
+/// window_ms, action-own nonces). Same shape as `validateMarket` but with a
+/// caller-supplied field name for the error message.
+export function validateU32(value: number, field: string): void {
+  if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) {
+    throw new RangeError(`${field} must be a u32`);
+  }
+}
+
+/// Validate a `u16` field passed as a plain `number` (e.g. management_fee_bps).
+export function validateU16(value: number, field: string): void {
+  if (!Number.isInteger(value) || value < 0 || value > 0xffff) {
+    throw new RangeError(`${field} must be a u16 (0..=65535)`);
+  }
+}
+
+/// Validate a `u8` field passed as a plain `number` (e.g. threshold).
+export function validateU8(value: number, field: string): void {
+  if (!Number.isInteger(value) || value < 0 || value > 0xff) {
+    throw new RangeError(`${field} must be a u8 (0..=255)`);
+  }
+}
+
+/// Validate a `u128` field passed as a `bigint`, emitted as a bare unquoted
+/// integer literal on the wire (serde u128 JSON number form). Rejects negatives
+/// and values that overflow 128 bits.
+export function validateU128(value: bigint, field: string): void {
+  if (typeof value !== 'bigint') {
+    throw new RangeError(`${field} must be a bigint`);
+  }
+  if (value < 0n) throw new RangeError(`${field} must be non-negative`);
+  if (value >= 1n << 128n) throw new RangeError(`${field} overflows u128`);
+}
+
+export function hexToBytes(hex: string): Uint8Array {
   if (hex.length % 2 !== 0) throw new RangeError('hex length must be even');
   const out = new Uint8Array(hex.length / 2);
   for (let i = 0; i < out.length; i++) {

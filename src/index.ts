@@ -1,39 +1,54 @@
 // Public barrel — every export consumers see goes through this file.
 //
 // Pinning the public surface here means we can refactor the internal
-// `client.ts` / `wasm.ts` / `http.ts` split without touching anything
-// import-facing. The npm package `exports` map points at the compiled
+// `client.ts` / `wallet/wasm.ts` / `rest/http.ts` split without touching
+// anything import-facing. The npm package `exports` map points at the compiled
 // `dist/index.js`, so consumers write:
 //
 //     import { Client, type Order } from '@metaflux-dex/client';
 
 export { Client, type ClientOpts } from './client.js';
-export { MetaFluxApiError } from './http.js';
+export { MetaFluxApiError } from './rest/http.js';
 export { requestFaucet, type FaucetResponse } from './faucet.js';
 export {
-  // MTF-native signed-action surface (the path the server now accepts).
-  // Exported so power users can build / sign / inspect actions out-of-band.
+  // MTF-native signed-action signing core. Exported so power users can build /
+  // sign / inspect actions out-of-band.
   MTF_CHAIN_ID,
   MTF_MAINNET_CHAIN_ID,
   MTF_TESTNET_CHAIN_ID,
   nativeActionDigest,
+  signNativeAction,
+  recoverNativeSigner,
+  nativeRequestBody,
+} from './native/digest.js';
+export {
+  // MTF-native action builders (the path the server now accepts).
   buildNativeOrderAction,
   buildNativeCancelAction,
   buildNativeSetPositionModeAction,
   buildNativeSpotOrderAction,
   buildNativeSpotCancelAction,
-  signNativeAction,
-  recoverNativeSigner,
-  nativeRequestBody,
-} from './native.js';
+  // New native write actions (vault / portfolio-margin / RFQ / FBA /
+  // cross-chain / encrypted).
+  buildNativeVaultCreateAction,
+  buildNativeVaultDistributeAction,
+  buildNativeVaultWithdrawAction,
+  buildNativePmEnrollAction,
+  buildNativePmUnenrollAction,
+  buildNativePmRebalanceAction,
+  buildNativeRfqRequestAction,
+  buildNativeRfqAcceptAction,
+  buildNativeFbaSubmitAction,
+  buildNativeCrossChainSendAction,
+  buildNativeEncryptedOrderSubmitAction,
+} from './native/actions.js';
 export {
   // MTF-native `/info` read API + the account-ref union (address | account_id).
   InfoApi,
   type AccountRef,
-} from './info.js';
+} from './rest/info.js';
 export type {
-  // MTF-native `/info` response shapes. Source of truth: the node handlers in
-  // `metaflux/crates/api-node/src/rest/info/{reads,markets,hl_parity}.rs` and
+  // MTF-native `/info` response shapes. Source of truth:
   // the KB spec `metaflux-knowledges/api/rest/info.md`. Every field is the exact
   // snake_case key the node emits inside the `{type, data}` envelope's `data`.
   NodeInfo,
@@ -104,7 +119,7 @@ export type {
   WebData2,
   WebData2Clearinghouse,
   WebData2Position,
-} from './info-types.js';
+} from './types/info/index.js';
 export {
   // MTF-native WebSocket client + subscription/channel types.
   WsClient,
@@ -114,7 +129,7 @@ export {
   type WsFrame,
   type WsMessageHandler,
   type WsConfig,
-} from './ws.js';
+} from './ws/ws.js';
 export {
   WasmNotBuiltError,
   WasmCallError,
@@ -127,7 +142,7 @@ export {
   eip712TypedDataHash,
   encodeLimitOrder,
   deriveAddressFromPubkey,
-} from './wasm.js';
+} from './wallet/wasm.js';
 export type {
   Order,
   Builder,
@@ -152,4 +167,16 @@ export type {
   NativeSpotCancel,
   NativeSignedAction,
   NativeExchangeAck,
-} from './types.js';
+  // New native write-action payload types.
+  VaultCreate,
+  VaultDistribute,
+  VaultWithdraw,
+  PmEnroll,
+  PmUnenroll,
+  PmRebalance,
+  RfqRequest,
+  RfqAccept,
+  FbaSubmit,
+  CrossChainSend,
+  EncryptedOrderSubmit,
+} from './types/index.js';

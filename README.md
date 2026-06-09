@@ -114,6 +114,85 @@ On the WebSocket `trades` / `candles` / `fills` channels, spot prints carry the
 **numeric pair id** as the `coin` label (e.g. `"101"`), not the display name —
 use `spotMeta()` to map `id` to its `"{base}/{quote}"` name.
 
+### More native actions
+
+The Client exposes the rest of the MTF-native signed-action surface, all via the
+same `{ action, nonce, signature }` → `POST /exchange` envelope. **Owner-checked**
+actions carry an actor field (`leader` / `user` / `taker` / `owner` / `sender` /
+`submitter`) that must equal the signing wallet (checked locally before the
+request leaves the process); **sender-authorized** actions have no such field —
+the recovered signer is the actor.
+
+- **Vault**: `vaultCreate` (owner-checked), `vaultDistribute` /
+  `vaultWithdraw` (sender-authorized).
+- **Portfolio margin**: `pmEnroll` / `pmUnenroll` (owner-checked),
+  `pmRebalance` (sender-authorized).
+- **RFQ**: `rfqRequest` (owner-checked), `rfqAccept` (sender-authorized).
+- **Frequent-batch auction**: `fbaSubmit` (owner-checked).
+- **Cross-chain**: `crossChainSend` (owner-checked).
+- **Encrypted orders**: `encryptedOrderSubmit` (owner-checked).
+
+```ts
+const me = '0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025'; // the signing wallet
+
+// Vault — owner-checked (vault.leader must equal the signer).
+await client.vaultCreate({
+  leader: me,
+  seed_cents: 100_000, // USD cents
+  management_fee_bps: 200, // 2.00%
+});
+// vault_withdraw `shares` is a u128 -> pass a bigint (a number would lose
+// precision above 2^53). Sender-authorized: no actor field to match.
+await client.vaultWithdraw({ vault_id: 7, shares: 1_000_000n });
+
+// Portfolio margin — enroll is owner-checked on `user`.
+await client.pmEnroll({ user: me });
+
+// RFQ — taker opens a quote window (owner-checked), then accepts a quote.
+await client.rfqRequest({
+  taker: me,
+  market: 0,
+  side: 'bid',
+  size: 1_000,
+  window_ms: 2_000,
+});
+await client.rfqAccept({ rfq_id: 1, mm: me, price: 5_000_000_000_000 });
+
+// Frequent-batch auction — submit into the open batch window.
+await client.fbaSubmit({
+  owner: me,
+  market: 0,
+  side: 'bid',
+  size: 100,
+  limit_px: 5_000_000_000_000,
+  batch_id: 42,
+});
+
+// Cross-chain — `amount` is a u128 (bigint); `nonce` here is the action's own
+// per-sender anti-replay field, distinct from the signing nonce.
+await client.crossChainSend({
+  sender: me,
+  dst_chain: 8453, // Base
+  dst_address: me,
+  asset: 'USDC',
+  amount: 1_000_000n, // 1 USDC at 6 decimals
+  nonce: 1,
+});
+
+// Encrypted order — `ciphertext` is raw bytes (Uint8Array); the SDK emits the
+// serde `Vec<u8>` wire form.
+await client.encryptedOrderSubmit({
+  submitter: me,
+  ciphertext: new Uint8Array([0xab, 0xcd, 0xef]),
+  threshold: 5,
+  target_block: 1_000_000,
+});
+```
+
+Each method takes an optional `{ nonce?, chainId? }` and returns the same
+`NativeExchangeAck`. The matching `buildNative*Action` builders are exported for
+out-of-band signing.
+
 ### WebSocket streams
 
 ```ts
@@ -121,10 +200,10 @@ import { WsClient } from '@metaflux-dex/client';
 
 const ws = new WsClient('ws://localhost:8080/ws');
 ws.onMessage((f) => {
-  if (f.channel === 'l2Book') handleBook(f.data);
+  if (f.channel === 'l2_book') handleBook(f.data);
 });
 await ws.connect();
-await ws.subscribe({ type: 'l2Book', coin: 'BTC' });
+await ws.subscribe({ type: 'l2_book', coin: 'BTC' });
 ```
 
 ### Power-user exports
@@ -132,8 +211,12 @@ await ws.subscribe({ type: 'l2Book', coin: 'BTC' });
 The barrel also exports the low-level pieces so you can build custom flows —
 `InfoApi` (standalone read client), the `buildNativeOrderAction` /
 `buildNativeCancelAction` / `buildNativeSpotOrderAction` /
-`buildNativeSpotCancelAction` / `buildNativeSetPositionModeAction` /
-`signNativeAction` / `nativeActionDigest` action builders, and the WASM crypto
+`buildNativeSpotCancelAction` / `buildNativeSetPositionModeAction` action
+builders (plus the new `buildNativeVaultCreateAction` / `…VaultDistributeAction` /
+`…VaultWithdrawAction` / `…PmEnrollAction` / `…PmUnenrollAction` /
+`…PmRebalanceAction` / `…RfqRequestAction` / `…RfqAcceptAction` /
+`…FbaSubmitAction` / `…CrossChainSendAction` / `…EncryptedOrderSubmitAction`),
+the `signNativeAction` / `nativeActionDigest` signing core, and the WASM crypto
 primitives (`keccak256`, `signSecp256k1`, `recoverPubkey`, …). See
 [`src/index.ts`](src/index.ts) for the full surface.
 
@@ -167,8 +250,7 @@ already-canonical WASM outputs, so the wire format has a single source of truth.
   `{ action, nonce, signature }` to `POST /exchange`.
 
 Field shapes are mirrored from the authoritative API spec in
-[`metaflux-knowledges`](https://github.com/mtf-exchange/metaflux-knowledges) and
-the node handlers under `metaflux/crates/api-node/src/rest/`.
+[`metaflux-knowledges`](https://github.com/mtf-exchange/metaflux-knowledges).
 
 ## Develop
 
@@ -194,14 +276,33 @@ Build the artifacts separately with `pnpm build:wasm` / `pnpm build:ts`.
 ├── src/
 │   ├── index.ts              # public barrel
 │   ├── client.ts             # Client class — reads + signed writes
-│   ├── info.ts               # InfoApi — POST /info read methods
-│   ├── info-types.ts         # /info response shapes ({type,data}.data)
-│   ├── native.ts             # MTF-native action build + sign + digest
-│   ├── ws.ts                 # WsClient — subscriptions + reconnect
-│   ├── wasm.ts               # WASM loader + typed crypto wrappers
-│   ├── http.ts               # fetch wrapper + MetaFluxApiError
-│   └── types.ts              # Order / NativeOrder / acks / shared enums
-├── __tests__/                # vitest: info / native / sign / ws
+│   ├── faucet.ts             # devnet/testnet faucet helper
+│   ├── rest/
+│   │   ├── http.ts           # fetch wrapper + MetaFluxApiError
+│   │   └── info.ts           # InfoApi — POST /info read methods
+│   ├── ws/
+│   │   └── ws.ts             # WsClient — subscriptions + reconnect
+│   ├── wallet/
+│   │   └── wasm.ts           # WASM loader + typed crypto wrappers
+│   ├── native/
+│   │   ├── digest.ts         # signing core — digest / sign / recover / nonce
+│   │   └── actions.ts        # build*Action canonical-JSON builders
+│   └── types/
+│       ├── index.ts          # type re-export barrel
+│       ├── trading.ts        # Order / NativeOrder / acks / shared enums
+│       ├── spot.ts           # NativeSpotOrder / NativeSpotCancel
+│       ├── vault.ts          # vault action payloads
+│       ├── pm.ts             # portfolio-margin action payloads
+│       ├── rfq.ts            # RFQ action payloads
+│       ├── fba.ts            # frequent-batch-auction action payload
+│       ├── cross-chain.ts    # cross-chain action payload
+│       ├── encrypted.ts      # encrypted-order action payload
+│       └── info/             # /info response shapes ({type,data}.data)
+│           ├── index.ts      # re-export barrel
+│           ├── core.ts       # node / account / market / vault / staking / fee
+│           ├── reads.ts      # book / trade / account-history reads
+│           └── hl-parity.ts  # HL-node parity query shapes
+├── __tests__/                # vitest: actions / info / native / sign / ws
 ├── wasm/                     # standalone wasm-bindgen crate (+ native tests)
 ├── pkg/                      # wasm-pack output (gitignored)
 └── dist/                     # tsc output (gitignored)

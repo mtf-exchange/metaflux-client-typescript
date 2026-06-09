@@ -16,7 +16,7 @@
 //    promotes that to a typed exception, keeping the Client surface
 //    free of "did this succeed?" branches.
 
-import type { Builder, Side, StpMode, Tif } from './types.js';
+import type { Builder, Side, StpMode, Tif } from '../types/index.js';
 
 /// Shape of the WASM module after `pkg/` is built. Mirrors the
 /// `#[wasm_bindgen]` exports in `wasm/src/lib.rs`. Kept narrow — we only
@@ -102,11 +102,12 @@ export async function loadWasm(): Promise<WasmModule> {
     wasmPromise = (async () => {
       let mod: WasmModule;
       try {
-        // Path is relative to the *compiled* dist/ output (one level
-        // above pkg/ at the repo root). At dev-mode (vitest running
-        // .ts directly) the same relative path lands on the same
-        // pkg/ directory because vitest cwd is the repo root.
-        const wasmPath = '../pkg/metaflux_client_wasm.js';
+        // Path is relative to this module's *compiled* location
+        // (dist/wallet/wasm.js), two levels above pkg/ at the repo root. At
+        // dev-mode (vitest running .ts directly) the same relative path lands
+        // on the same pkg/ directory because vitest resolves it against the
+        // src/wallet/ source location.
+        const wasmPath = '../../pkg/metaflux_client_wasm.js';
         mod = (await import(/* @vite-ignore */ wasmPath)) as WasmModule;
       } catch (err) {
         throw new WasmNotBuiltError(err);
@@ -155,12 +156,12 @@ async function compileWasmFromFs(): Promise<WebAssembly.Module | undefined> {
     const url = await import('node:url');
     const path = await import('node:path');
     // Resolve the .wasm next to the wasm-pack .js shim. From dev (vitest on
-    // src/*.ts) the cwd is the repo root and pkg/ sits there; from the
-    // compiled dist/ output pkg/ is one level up. Try both.
+    // src/wallet/*.ts) the cwd is the repo root and pkg/ sits there; from the
+    // compiled dist/wallet/ output pkg/ is two levels up. Try both.
     const candidates = [
       path.resolve(process.cwd(), 'pkg', 'metaflux_client_wasm_bg.wasm'),
       url.fileURLToPath(
-        new URL('../pkg/metaflux_client_wasm_bg.wasm', import.meta.url),
+        new URL('../../pkg/metaflux_client_wasm_bg.wasm', import.meta.url),
       ),
     ];
     for (const c of candidates) {

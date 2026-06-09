@@ -1,7 +1,7 @@
-// Type definitions for the @metaflux-dex/client surface.
+// Trading type definitions for the @metaflux-dex/client surface.
 //
 // Shapes mirror the CCXT-compat REST responses emitted by the MetaFlux
-// api-gateway (`metaflux/crates/api-gateway/src/ccxt/types.rs`). The
+// api-gateway and the MTF-native signed-action wire. The
 // monetary-fields-as-decimal-strings convention is load-bearing — CCXT
 // clients pass these straight into `Decimal(value)` and any drift to
 // number-typed fields silently loses precision.
@@ -96,7 +96,7 @@ export interface SignedOrder {
 }
 
 /// MTF-native order action shape (snake_case), byte-for-byte mirror of the
-/// server `NativeOrder` (`metaflux/crates/api-node/src/rest/native_action.rs`).
+/// server `NativeOrder` (per the KB spec metaflux-knowledges/api/rest/exchange.md).
 /// These string/number forms are EXACTLY what rides inside the signed
 /// `action` JSON posted to `POST /exchange` — the digest covers the
 /// full object, so every field here is part of the signed bytes.
@@ -148,43 +148,8 @@ export interface NativeSetPositionMode {
   hedge: boolean;
 }
 
-/// MTF-native `spot_order` action shape (SE-0 spot CLOB) — byte-for-byte mirror
-/// of the server `NativeSpotOrder`. Sender-authorized (the signer is the trader,
-/// no `owner`); spot has no positions, so there is no `reduce_only` /
-/// `position_side`. v0 accepts ONLY `tif:"ioc"` with `limit_px > 0` — Gtc / Alo
-/// and a zero (market) price are rejected by the node.
-///
-/// Field ORDER is load-bearing for the signed bytes (see `buildNativeSpotOrderAction`).
-export interface NativeSpotOrder {
-  /// Spot pair id (`u32`); maps identity → asset id.
-  pair: number;
-  /// Side: `"bid"` (buy) or `"ask"` (sell).
-  side: NativeSide;
-  /// Base-asset size in raw lots (`u64` on the wire).
-  size: number;
-  /// Limit price in the 1e8 plane (`u64` on the wire); must be `> 0` in v0.
-  limit_px: number;
-  /// Time-in-force. v0 requires `"ioc"` (defaulted by the builder).
-  tif: NativeTif;
-  /// Self-trade-prevention mode.
-  stp_mode: NativeStpMode;
-  /// Optional `0x`-hex 32-char (16-byte) client order id. Omitted from the
-  /// signed bytes entirely when absent.
-  cloid?: string;
-}
-
-/// MTF-native `spot_cancel` action shape — byte-for-byte mirror of the server
-/// `NativeSpotCancel`. Cancels a resting spot order by `oid` (the node cancels
-/// by `oid`; there is no cancel-by-cloid on this path).
-export interface NativeSpotCancel {
-  /// Spot pair id (`u32`).
-  pair: number;
-  /// Server order id (`u64`) to cancel. REQUIRED.
-  oid: number;
-}
-
 /// MTF-native `cancel_order` action shape (snake_case), byte-for-byte mirror of
-/// the server `NativeCancel` (`metaflux/crates/api-node/src/rest/native_action.rs`).
+/// the server `NativeCancel` (per the KB spec metaflux-knowledges/api/rest/exchange.md).
 /// Field ORDER is load-bearing for the same reason as `NativeOrder`: the server
 /// verifies the signature over the raw `action` bytes (see
 /// `buildNativeCancelAction`).
@@ -253,7 +218,7 @@ export interface NativeSignedAction {
 /// Per-order status entry returned by `/exchange` for an order-type action.
 ///
 /// Byte-for-byte the node `OrderStatusEntry`
-/// (`metaflux/crates/api-node/src/rest/exchange.rs`): a tagged union selected by
+/// (per the KB spec metaflux-knowledges/api/rest/exchange.md): a tagged union selected by
 /// the single present key, one entry per submitted order, in submission order.
 /// `total_sz` / `avg_px` are 8-decimal fixed-point u128 STRINGS (native JSON
 /// numbers lose precision past 2^53); `oid` / `nonce` are JSON numbers.
@@ -270,7 +235,7 @@ export type OrderStatus =
   | { pending: { action_hash: string; nonce: number } };
 
 /// Server response to `POST /exchange`. Mirrors the node `ExchangeResponse`
-/// (`metaflux/crates/api-node/src/rest/exchange.rs`).
+/// (per the KB spec metaflux-knowledges/api/rest/exchange.md).
 ///
 /// Two shapes share this struct (the node omits the absent keys):
 /// - **Order-type actions** (`submit_order` / `batch_order` / `cancel_order` /
@@ -296,8 +261,8 @@ export interface NativeExchangeAck {
   action_hash?: string;
 }
 
-/// Acknowledgement from `submitOrder`. Mirrors `Order` from the CCXT REST
-/// response shape (`api-gateway/src/ccxt/types.rs::Order`); monetary
+/// Acknowledgement from `submitOrder`. Mirrors `Order` from the gateway's
+/// CCXT-compat REST response shape; monetary
 /// fields are decimal strings to match what the gateway emits.
 export interface OrderAck {
   id: string;

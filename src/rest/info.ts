@@ -1,8 +1,7 @@
 // MTF-native `/info` read API — typed request builders + envelope unwrap.
 //
-// Byte-for-byte mirror of the server dispatcher
-// (`metaflux/crates/api-node/src/rest/info.rs::handle_info`) and the per-handler
-// shapes in `info/{reads,markets,hl_parity}.rs`. Every request is a
+// Byte-for-byte mirror of the server's `/info` dispatcher and per-handler
+// shapes (per the KB spec metaflux-knowledges/api/rest/info.md). Every request is a
 // `POST /info` whose body is `{"type": "<discriminator>", ...params}` —
 // snake_case field names, the exact convention the node decodes. The node's
 // `/info` surface is MTF-native ONLY; the HL `type` aliases (`meta` etc.) live
@@ -23,7 +22,7 @@
 // on this surface.
 //
 // Money magnitudes that can exceed JS `Number.MAX_SAFE_INTEGER` (2^53) are
-// typed `string` in `./info-types.js` to match the node's decimal-string
+// typed `string` in `../types/info/index.js` to match the node's decimal-string
 // encoding; ids / counts / bps stay `number`.
 
 import { httpRequest } from './http.js';
@@ -66,7 +65,7 @@ import type {
   VaultState,
   VaultSummaries,
   WebData2,
-} from './info-types.js';
+} from '../types/info/index.js';
 
 /// The committed `{type, data}` response envelope every `/info` query returns.
 interface InfoEnvelope<T> {
