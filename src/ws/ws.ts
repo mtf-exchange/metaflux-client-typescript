@@ -2,7 +2,7 @@
 //
 // Mirrors the Rust SDK's `WsClient` behavior (reconnect with backoff, replay of
 // active subscriptions, heartbeat ping) and the SERVER wire protocol
-// (`metaflux/crates/api-node/src/ws/subscribe.rs` + `fanout.rs`):
+// (per the KB spec metaflux-knowledges/api/ws/subscriptions.md):
 //
 //   client → server:
 //     {"method":"subscribe","subscription":{"type":"l2_book","coin":"BTC"}}

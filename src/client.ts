@@ -15,22 +15,38 @@ import {
   keccak256,
   recoverPubkey,
   signSecp256k1,
-} from './wasm.js';
-import { httpRequest } from './http.js';
+} from './wallet/wasm.js';
+import { httpRequest } from './rest/http.js';
 import {
   buildNativeCancelAction,
+  buildNativeCrossChainSendAction,
+  buildNativeEncryptedOrderSubmitAction,
+  buildNativeFbaSubmitAction,
   buildNativeOrderAction,
+  buildNativePmEnrollAction,
+  buildNativePmRebalanceAction,
+  buildNativePmUnenrollAction,
+  buildNativeRfqAcceptAction,
+  buildNativeRfqRequestAction,
   buildNativeSetPositionModeAction,
   buildNativeSpotCancelAction,
   buildNativeSpotOrderAction,
+  buildNativeVaultCreateAction,
+  buildNativeVaultDistributeAction,
+  buildNativeVaultWithdrawAction,
+} from './native/actions.js';
+import {
   nativeRequestBody,
   nextNonce,
   recoverNativeSigner,
   signNativeAction,
-} from './native.js';
-import { InfoApi } from './info.js';
-import { WsClient, type WsConfig } from './ws.js';
+} from './native/digest.js';
+import { InfoApi } from './rest/info.js';
+import { WsClient, type WsConfig } from './ws/ws.js';
 import type {
+  CrossChainSend,
+  EncryptedOrderSubmit,
+  FbaSubmit,
   Market,
   NativeCancel,
   NativeExchangeAck,
@@ -40,9 +56,17 @@ import type {
   NativeSpotOrder,
   Order,
   OrderAck,
+  PmEnroll,
+  PmRebalance,
+  PmUnenroll,
   Position,
+  RfqAccept,
+  RfqRequest,
   SignedOrder,
-} from './types.js';
+  VaultCreate,
+  VaultDistribute,
+  VaultWithdraw,
+} from './types/index.js';
 
 /// Options accepted by the `Client` constructor.
 export interface ClientOpts {
@@ -59,10 +83,9 @@ export interface ClientOpts {
   chainId?: number;
 }
 
-/// Default chain ID for the EIP-712 domain. The MetaFlux mainnet ID is
-/// reserved-but-not-yet-assigned (PLAN.md §M.1 — "TBD pre-mainnet, avoid
-/// 999 which is HL"); the devnet default `31337` matches what the
-/// existing core-state tests use.
+/// Default chain ID for the EIP-712 domain. The devnet default `31337`
+/// matches the node's devnet configuration; production deployments
+/// override via `chainId`.
 const DEFAULT_CHAIN_ID = 31337;
 
 /// `keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")`
@@ -402,6 +425,191 @@ export class Client {
     return this.postSenderAuthorized(buildNativeSpotCancelAction(cancel), opts);
   }
 
+  // ── vault actions ─────────────────────────────────────────────────────────
+
+  /// Create a vault via `POST /exchange`. OWNER-CHECKED: `vault.leader` must
+  /// equal the signing wallet. Seeds a new leader vault with a management fee.
+  async vaultCreate(
+    vault: VaultCreate,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postOwnerChecked(
+      buildNativeVaultCreateAction(vault),
+      vault.leader,
+      opts,
+    );
+  }
+
+  /// Distribute vault profits via `POST /exchange`. SENDER-AUTHORIZED — the
+  /// signer is the vault leader; distributes `amount_cents` to followers.
+  async vaultDistribute(
+    params: VaultDistribute,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(
+      buildNativeVaultDistributeAction(params),
+      opts,
+    );
+  }
+
+  /// Withdraw shares from a vault via `POST /exchange`. SENDER-AUTHORIZED — the
+  /// signer is the depositor; redeems `shares` from the vault.
+  async vaultWithdraw(
+    params: VaultWithdraw,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(
+      buildNativeVaultWithdrawAction(params),
+      opts,
+    );
+  }
+
+  // ── portfolio-margin actions ──────────────────────────────────────────────
+
+  /// Enroll an account into portfolio margin via `POST /exchange`.
+  /// OWNER-CHECKED: `params.user` must equal the signing wallet.
+  async pmEnroll(
+    params: PmEnroll,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postOwnerChecked(
+      buildNativePmEnrollAction(params),
+      params.user,
+      opts,
+    );
+  }
+
+  /// Unenroll an account from portfolio margin via `POST /exchange`.
+  /// OWNER-CHECKED: `params.user` must equal the signing wallet.
+  async pmUnenroll(
+    params: PmUnenroll,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postOwnerChecked(
+      buildNativePmUnenrollAction(params),
+      params.user,
+      opts,
+    );
+  }
+
+  /// Trigger a portfolio-margin rebalance via `POST /exchange`.
+  /// SENDER-AUTHORIZED — rebalances the enrolled account `params.user`.
+  async pmRebalance(
+    params: PmRebalance,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(
+      buildNativePmRebalanceAction(params),
+      opts,
+    );
+  }
+
+  // ── RFQ actions ───────────────────────────────────────────────────────────
+
+  /// Open a request-for-quote via `POST /exchange`. OWNER-CHECKED:
+  /// `rfq.taker` must equal the signing wallet.
+  async rfqRequest(
+    rfq: RfqRequest,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postOwnerChecked(
+      buildNativeRfqRequestAction(rfq),
+      rfq.taker,
+      opts,
+    );
+  }
+
+  /// Accept an outstanding RFQ via `POST /exchange`. SENDER-AUTHORIZED — the
+  /// signer is the market maker quoting `price` on `rfq_id`.
+  async rfqAccept(
+    accept: RfqAccept,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeRfqAcceptAction(accept), opts);
+  }
+
+  // ── frequent-batch-auction action ─────────────────────────────────────────
+
+  /// Submit a frequent-batch-auction order via `POST /exchange`. OWNER-CHECKED:
+  /// `submit.owner` must equal the signing wallet.
+  async fbaSubmit(
+    submit: FbaSubmit,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postOwnerChecked(
+      buildNativeFbaSubmitAction(submit),
+      submit.owner,
+      opts,
+    );
+  }
+
+  // ── cross-chain action ────────────────────────────────────────────────────
+
+  /// Send assets cross-chain via `POST /exchange`. OWNER-CHECKED: `msg.sender`
+  /// must equal the signing wallet. (`msg.nonce` is the action's own field,
+  /// distinct from the EIP-712 replay nonce in `opts`.)
+  async crossChainSend(
+    msg: CrossChainSend,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postOwnerChecked(
+      buildNativeCrossChainSendAction(msg),
+      msg.sender,
+      opts,
+    );
+  }
+
+  // ── encrypted-order action ────────────────────────────────────────────────
+
+  /// Submit a threshold-encrypted order via `POST /exchange`. OWNER-CHECKED:
+  /// `encrypted.submitter` must equal the signing wallet.
+  async encryptedOrderSubmit(
+    encrypted: EncryptedOrderSubmit,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postOwnerChecked(
+      buildNativeEncryptedOrderSubmitAction(encrypted),
+      encrypted.submitter,
+      opts,
+    );
+  }
+
+  /// Sign a pre-built owner-checked action JSON and POST it to `/exchange`.
+  ///
+  /// Shared by the actions that carry an actor address (`leader` / `user` /
+  /// `taker` / `owner` / `sender` / `submitter`): we recover the signer locally
+  /// and reject a mismatch before hitting the network, mirroring
+  /// `submitOrderNative`. The server enforces the same.
+  private async postOwnerChecked(
+    actionJson: string,
+    expectedOwner: string,
+    opts: { nonce?: bigint; chainId?: number },
+  ): Promise<NativeExchangeAck> {
+    if (this.privateKey === undefined) {
+      throw new Error(
+        'this action requires a privateKey in ClientOpts (this Client is read-only)',
+      );
+    }
+    const nonce = opts.nonce ?? nextNonce();
+    const signed = await signNativeAction(
+      this.privateKey,
+      actionJson,
+      nonce,
+      opts.chainId,
+    );
+    const signer = await recoverNativeSigner(signed, opts.chainId);
+    if (signer.toLowerCase() !== expectedOwner.toLowerCase()) {
+      throw new Error(
+        `action owner ${expectedOwner} != recovered signer ${signer}`,
+      );
+    }
+    return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
+      method: 'POST',
+      rawJson: nativeRequestBody(signed),
+      bearer: this.jwt,
+    });
+  }
+
   /// Sign a pre-built sender-authorized action JSON and POST it to `/exchange`.
   ///
   /// Shared by the actions where the recovered signer IS the actor (no `owner`
@@ -478,7 +686,7 @@ export class Client {
 /// Encode a `Uint8Array` as a base64url string (no padding).
 ///
 /// Matches the encoding the gateway's `LoginEnvelope.signature` field
-/// expects (see `metaflux/crates/api-gateway/src/ccxt/auth.rs`). We
+/// expects. We
 /// avoid Buffer/global polyfills here because the SDK targets both
 /// node and the browser; manual base64 is small and avoids the
 /// dependency.

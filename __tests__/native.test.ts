@@ -21,8 +21,7 @@ if (!wasmBuilt) {
   );
 }
 
-// EXACT bytes the server hashed in its KAT vector
-// (metaflux/crates/core-state/src/signing.rs::native_action_kat_vector).
+// EXACT bytes the server hashed in its committed native-action KAT vector.
 const KAT_ACTION_JSON =
   '{"type":"submit_order","order":{"owner":"0x000000000000000000000000000000000000beef","market":1,"side":"bid","kind":"limit","size":1000,"limit_px":5000000000000,"tif":"gtc","stp_mode":"cancel_oldest","reduce_only":false}}';
 const KAT_NONCE = 1_700_000_000_000n;
@@ -49,7 +48,7 @@ function toHex(bytes: Uint8Array): string {
 
 describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
   it('matches the cross-impl KAT digest for the fixed reference input', async () => {
-    const { nativeActionDigest } = await import('../src/native.js');
+    const { nativeActionDigest } = await import('../src/native/index.js');
     const digest = await nativeActionDigest(
       KAT_ACTION_JSON,
       KAT_NONCE,
@@ -59,7 +58,7 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
   });
 
   it('buildNativeOrderAction reproduces the KAT action bytes exactly', async () => {
-    const { buildNativeOrderAction } = await import('../src/native.js');
+    const { buildNativeOrderAction } = await import('../src/native/index.js');
     const actionJson = buildNativeOrderAction({
       owner: '0x000000000000000000000000000000000000beef',
       market: 1,
@@ -76,7 +75,7 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
 
   it('built action + digest agrees with the KAT (end-to-end)', async () => {
     const { buildNativeOrderAction, nativeActionDigest } = await import(
-      '../src/native.js'
+      '../src/native/index.js'
     );
     const actionJson = buildNativeOrderAction({
       owner: '0x000000000000000000000000000000000000beef',
@@ -95,9 +94,9 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
 
   it('sign → recover round-trips to the signing address', async () => {
     const { signNativeAction, recoverNativeSigner, buildNativeOrderAction } =
-      await import('../src/native.js');
+      await import('../src/native/index.js');
     const { deriveAddressFromPubkey, recoverPubkey, signSecp256k1, keccak256 } =
-      await import('../src/wasm.js');
+      await import('../src/wallet/wasm.js');
 
     const privKey = new Uint8Array(32).fill(0x42);
     // Derive the signer's own address to use as owner.
@@ -128,7 +127,7 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
   });
 
   it('digest is sensitive to nonce and chainId', async () => {
-    const { nativeActionDigest } = await import('../src/native.js');
+    const { nativeActionDigest } = await import('../src/native/index.js');
     const base = await nativeActionDigest(
       KAT_ACTION_JSON,
       KAT_NONCE,
@@ -149,7 +148,7 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
   });
 
   it('buildNativeCancelAction reproduces the cancel KAT bytes exactly', async () => {
-    const { buildNativeCancelAction } = await import('../src/native.js');
+    const { buildNativeCancelAction } = await import('../src/native/index.js');
     const actionJson = buildNativeCancelAction({
       owner: '0x000000000000000000000000000000000000beef',
       market: 3,
@@ -160,7 +159,7 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
 
   it('cancel action digest matches the cross-impl cancel KAT', async () => {
     const { buildNativeCancelAction, nativeActionDigest } = await import(
-      '../src/native.js'
+      '../src/native/index.js'
     );
     const actionJson = buildNativeCancelAction({
       owner: '0x000000000000000000000000000000000000beef',
@@ -173,9 +172,9 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
 
   it('cancel sign → recover round-trips to the signing address', async () => {
     const { signNativeAction, recoverNativeSigner, buildNativeCancelAction } =
-      await import('../src/native.js');
+      await import('../src/native/index.js');
     const { deriveAddressFromPubkey, recoverPubkey, signSecp256k1, keccak256 } =
-      await import('../src/wasm.js');
+      await import('../src/wallet/wasm.js');
 
     const privKey = new Uint8Array(32).fill(0x42);
     const probeDigest = await keccak256(new TextEncoder().encode('probe'));
@@ -191,7 +190,7 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
   });
 
   it('cancel without oid or cloid throws', async () => {
-    const { buildNativeCancelAction } = await import('../src/native.js');
+    const { buildNativeCancelAction } = await import('../src/native/index.js');
     expect(() =>
       buildNativeCancelAction({
         owner: '0x000000000000000000000000000000000000beef',
@@ -203,7 +202,7 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
   // ---- hedge-mode position_side on the perp order ----
 
   it('one-way order omits position_side (byte-identical to pre-hedge)', async () => {
-    const { buildNativeOrderAction } = await import('../src/native.js');
+    const { buildNativeOrderAction } = await import('../src/native/index.js');
     const base = {
       owner: '0x000000000000000000000000000000000000beef',
       market: 1,
@@ -224,7 +223,7 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
   });
 
   it('hedge order appends position_side last in the order body', async () => {
-    const { buildNativeOrderAction } = await import('../src/native.js');
+    const { buildNativeOrderAction } = await import('../src/native/index.js');
     const long = buildNativeOrderAction({
       owner: '0x000000000000000000000000000000000000beef',
       market: 1,
@@ -261,7 +260,7 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
 
   it('buildNativeSetPositionModeAction emits the canonical params shape', async () => {
     const { buildNativeSetPositionModeAction } = await import(
-      '../src/native.js'
+      '../src/native/index.js'
     );
     expect(buildNativeSetPositionModeAction({ hedge: true })).toBe(
       '{"type":"set_position_mode","params":{"hedge":true}}',
@@ -277,9 +276,9 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
       signNativeAction,
       recoverNativeSigner,
       nativeRequestBody,
-    } = await import('../src/native.js');
+    } = await import('../src/native/index.js');
     const { deriveAddressFromPubkey, recoverPubkey, signSecp256k1, keccak256 } =
-      await import('../src/wasm.js');
+      await import('../src/wallet/wasm.js');
 
     const privKey = new Uint8Array(32).fill(0x42);
     const probeDigest = await keccak256(new TextEncoder().encode('probe'));
@@ -300,7 +299,7 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
   // ---- spot_order ----
 
   it('buildNativeSpotOrderAction emits the canonical order shape', async () => {
-    const { buildNativeSpotOrderAction } = await import('../src/native.js');
+    const { buildNativeSpotOrderAction } = await import('../src/native/index.js');
     expect(
       buildNativeSpotOrderAction({
         pair: 200,
@@ -316,7 +315,7 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
   });
 
   it('spot_order appends cloid when present', async () => {
-    const { buildNativeSpotOrderAction } = await import('../src/native.js');
+    const { buildNativeSpotOrderAction } = await import('../src/native/index.js');
     const json = buildNativeSpotOrderAction({
       pair: 200,
       side: 'ask',
@@ -332,7 +331,7 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
   });
 
   it('spot_order v0 rejects non-ioc tif and a non-positive limit_px', async () => {
-    const { buildNativeSpotOrderAction } = await import('../src/native.js');
+    const { buildNativeSpotOrderAction } = await import('../src/native/index.js');
     expect(() =>
       buildNativeSpotOrderAction({
         pair: 1,
@@ -357,9 +356,9 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
 
   it('spot_order sign → recover round-trips to the signer', async () => {
     const { buildNativeSpotOrderAction, signNativeAction, recoverNativeSigner } =
-      await import('../src/native.js');
+      await import('../src/native/index.js');
     const { deriveAddressFromPubkey, recoverPubkey, signSecp256k1, keccak256 } =
-      await import('../src/wasm.js');
+      await import('../src/wallet/wasm.js');
 
     const privKey = new Uint8Array(32).fill(0x55);
     const probeDigest = await keccak256(new TextEncoder().encode('probe'));
@@ -383,7 +382,7 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
   // ---- spot_cancel ----
 
   it('buildNativeSpotCancelAction emits the canonical cancel shape', async () => {
-    const { buildNativeSpotCancelAction } = await import('../src/native.js');
+    const { buildNativeSpotCancelAction } = await import('../src/native/index.js');
     expect(buildNativeSpotCancelAction({ pair: 200, oid: 7 })).toBe(
       '{"type":"spot_cancel","cancel":{"pair":200,"oid":7}}',
     );
@@ -395,9 +394,9 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
       signNativeAction,
       recoverNativeSigner,
       nativeRequestBody,
-    } = await import('../src/native.js');
+    } = await import('../src/native/index.js');
     const { deriveAddressFromPubkey, recoverPubkey, signSecp256k1, keccak256 } =
-      await import('../src/wasm.js');
+      await import('../src/wallet/wasm.js');
 
     const privKey = new Uint8Array(32).fill(0x66);
     const probeDigest = await keccak256(new TextEncoder().encode('probe'));
@@ -416,7 +415,7 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
 
   it('nativeRequestBody embeds the action bytes verbatim', async () => {
     const { signNativeAction, nativeRequestBody } = await import(
-      '../src/native.js'
+      '../src/native/index.js'
     );
     const privKey = new Uint8Array(32).fill(0x07);
     const signed = await signNativeAction(

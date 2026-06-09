@@ -1,12 +1,12 @@
 // MTF-native /info request-shape + envelope-unwrap tests — pure TS, no WASM.
 // Mocks global fetch and asserts each InfoApi method POSTs the EXACT
-// `{"type": ...}` body the server handler dispatches on
-// (`metaflux/crates/api-node/src/rest/info.rs::handle_info`), keyed by the real
+// `{"type": ...}` body the server's `/info` dispatcher expects
+// (per the KB spec metaflux-knowledges/api/rest/info.md), keyed by the real
 // param (0x address / asset_id / coin / market_id / vault), and that the
 // `{type, data}` envelope is unwrapped to the typed `data`.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { InfoApi } from '../src/info.js';
+import { InfoApi } from '../src/rest/info.js';
 
 interface Captured {
   url: string;

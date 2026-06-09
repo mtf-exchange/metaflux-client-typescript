@@ -30,22 +30,22 @@ name = "metaflux_client_wasm"
 # `Uint8Array` marshalling).
 wasm-bindgen = "0.2"
 
-# secp256k1 ECDSA + recoverable signatures. The same crate used by the
-# consensus crate (see metaflux/crates/consensus/src/signing.rs); keeping
+# secp256k1 ECDSA + recoverable signatures. The same crate the node uses
+# for signing; keeping
 # the wire conventions identical avoids cross-impl drift between client
 # and node.
 k256 = { version = "0.13", features = ["ecdsa", "ecdsa-core"] }
 
 # keccak256 — production hash for every action digest + EIP-712 envelope
-# + EVM address derivation. tiny_keccak matches what core-state/signing.rs
-# uses; sha3 is a similarly minimal alternative that ships keccak via
-# the `Keccak256` type. Picked sha3 here because it has a slightly
+# + EVM address derivation. sha3 ships keccak via the `Keccak256` type
+# and produces the same keccak256 output the node computes. Picked sha3
+# here because it has a slightly
 # friendlier streaming API for wasm-bindgen exports.
 sha3 = "0.10"
 
 # msgpack codec for canonical action encoding. The MetaFlux node ingests
 # `rmp_serde::to_vec(&Action)` bytes inside the SignedEnvelope payload
-# field — see core-state/src/signing.rs's docstring. Keeping the
+# field. Keeping the
 # client-side encoder on the same crate guarantees byte-for-byte parity.
 rmp-serde = "1"
 serde = { version = "1", features = ["derive"] }

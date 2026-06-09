@@ -8,23 +8,23 @@
 //!
 //! - [`keccak256`] — 32-byte keccak digest.
 //! - [`sign_secp256k1`] — recoverable ECDSA signature in canonical
-//!   `r || s || v` 65-byte wire layout (matches the consensus crate at
-//!   `metaflux/crates/consensus/src/signing.rs`).
+//!   `r || s || v` 65-byte wire layout (matches the node's signing wire
+//!   conventions).
 //! - [`recover_pubkey`] — recover the 33-byte compressed SEC1 pubkey
 //!   from a signature + message digest.
 //! - [`eip712_typed_data_hash`] — `keccak256(0x1901 || domain || message)`,
 //!   the canonical EIP-712 envelope hash. The TS layer assembles the
 //!   domain separator and message hash before calling.
 //! - [`encode_limit_order`] — canonical msgpack-encoded body for the
-//!   MetaFlux `order` action (mirrors
-//!   `metaflux/crates/core-state/src/actions/trading.rs::OrderParams`).
+//!   MetaFlux `order` action (mirrors the node's `OrderParams` action
+//!   struct).
 //! - [`derive_address_from_pubkey`] — keccak256 of the uncompressed
 //!   pubkey, low 20 bytes, the standard EVM address derivation.
 //!
 //! ## Why WASM vs pure-TS?
 //!
-//! User direction this session: "包含大量的wasm以提升性能" — push CPU-heavy
-//! work (ECDSA scalar math, keccak compression rounds, msgpack encoding)
+//! Pushes CPU-heavy work (ECDSA scalar math, keccak compression rounds,
+//! msgpack encoding)
 //! out of the V8 interpreter into compiled code. Equally important, it
 //! collapses three wire-format reimplementations (TS, Rust client SDK,
 //! Rust node) to two: the WASM-side encoder is *literally* the same
@@ -62,8 +62,8 @@ use wasm_bindgen::prelude::*;
 
 /// Compute the 32-byte keccak256 digest of `data`.
 ///
-/// Identical to `tiny_keccak::Keccak::v256` used by core-state's
-/// `signing::keccak256`. Result format: a freshly-allocated `Vec<u8>`
+/// Identical to the keccak256 the node uses for every action digest.
+/// Result format: a freshly-allocated `Vec<u8>`
 /// of length 32 (the wasm-bindgen ABI marshals to a `Uint8Array`).
 #[wasm_bindgen]
 pub fn keccak256(data: &[u8]) -> Vec<u8> {
@@ -106,9 +106,8 @@ pub fn eip712_typed_data_hash(domain_separator: &[u8], message_hash: &[u8]) -> V
 ///
 /// Note: `v` is the raw recovery id (`0` or `1`). The EVM convention
 /// adds 27 (so `v ∈ {27, 28}`); the EIP-155 convention adds
-/// `35 + 2*chainId`. The MetaFlux api-gateway and node consume the raw
-/// recovery id form — matching the existing consensus crate
-/// (`metaflux/crates/consensus/src/signing.rs`). Adjust at the wire
+/// `35 + 2*chainId`. The MetaFlux gateway and node consume the raw
+/// recovery id form. Adjust at the wire
 /// boundary if you target an EVM-RPC consumer.
 ///
 /// On invalid input (wrong-length key, malformed scalar) returns an
@@ -238,7 +237,7 @@ pub fn derive_address_from_pubkey(pubkey: &[u8]) -> Vec<u8> {
 
 /// Canonical msgpack body for the `order` action.
 ///
-/// Mirrors `metaflux/crates/core-state/src/actions/trading.rs::OrderParams`
+/// Mirrors the node's `OrderParams`
 /// — the exact struct the node deserialises after stripping the
 /// `SignedEnvelope` wrapper. Field names must match: serde will produce
 /// a msgpack map keyed by the JSON-style names (`asset`, `side`, `px`,
@@ -247,8 +246,7 @@ pub fn derive_address_from_pubkey(pubkey: &[u8]) -> Vec<u8> {
 ///
 /// Numeric encoding:
 /// - `asset` is a `u32` per `AssetId(pub u32)` on the node.
-/// - `side` is a `u8`: 0 = Bid, 1 = Ask. (See `core-state/src/primitives.rs`
-///   for the enum definition the node decodes.)
+/// - `side` is a `u8`: 0 = Bid, 1 = Ask (the node's enum variant order).
 /// - `px` and `size` are 128-bit fixed-point amounts. Wire layout is
 ///   little-endian word order: low u64 first, high u64 second, packed
 ///   into a 16-byte little-endian u128 for canonical encoding.
@@ -266,10 +264,9 @@ pub fn derive_address_from_pubkey(pubkey: &[u8]) -> Vec<u8> {
 /// `Deserialize`. `rmp_serde::to_vec_named` SERIALISES those as the
 /// variant-name STRING (`"Ask"`, `"Gtc"`, `"CancelNewest"`), but the decoder
 /// ALSO accepts an integer = the variant index. We emit the compact `u8`
-/// index form (verified to round-trip into the node enums via a probe against
-/// the `core-state` crate). This is intentional and load-bearing: the index
-/// ordering MUST match the enum declaration order in
-/// `core-state/src/primitives.rs`.
+/// index form (verified to round-trip into the node enums). This is
+/// intentional and load-bearing: the index ordering MUST match the node's
+/// enum declaration order.
 ///
 /// ## Optional fields
 ///
@@ -421,7 +418,7 @@ mod tests {
 
     /// keccak256("") — the canonical empty-input digest from the
     /// Ethereum yellow paper. Locks in that `sha3::Keccak256` matches
-    /// what core-state/signing.rs's `tiny_keccak::Keccak::v256` returns.
+    /// the keccak256 the node computes.
     #[test]
     fn keccak256_empty_known_vector() {
         let expected: [u8; 32] = [
