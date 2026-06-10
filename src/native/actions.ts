@@ -14,6 +14,7 @@ import {
   jsonStr,
   validateAddress,
   validateCloid,
+  validateDecimalString,
   validateMarket,
   validateU8,
   validateU16,
@@ -27,9 +28,15 @@ import type {
   FbaSubmit,
   NativeBuilder,
   NativeCancel,
+  NativeEarnDeposit,
+  NativeEarnWithdraw,
   NativeOrder,
   NativeSetPositionMode,
   NativeSpotCancel,
+  NativeSpotMarginClose,
+  NativeSpotMarginDeposit,
+  NativeSpotMarginOpen,
+  NativeSpotMarginWithdraw,
   NativeSpotOrder,
   PmEnroll,
   PmRebalance,
@@ -335,4 +342,105 @@ export function buildNativeEncryptedOrderSubmitAction(
   const ciphertextJson = `[${Array.from(encrypted.ciphertext).join(',')}]`;
   const encryptedJson = `{${jsonStr('submitter')}:${jsonStr(encrypted.submitter)},${jsonStr('ciphertext')}:${ciphertextJson},${jsonStr('threshold')}:${encrypted.threshold},${jsonStr('target_block')}:${encrypted.target_block}}`;
   return `{${jsonStr('type')}:${jsonStr('encrypted_order_submit')},${jsonStr('encrypted')}:${encryptedJson}}`;
+}
+
+// ============================================================================
+// Spot margin (leveraged spot) + Earn (lending pool) — devnet preview.
+// All SENDER-AUTHORIZED (no owner field; the recovered signer is the actor).
+// Decimal magnitudes (amount / borrow / shares) are emitted as JSON STRINGS;
+// size / limit_px are bare integers on the raw-lot / 1e8 planes. Field order =
+// the server struct declaration order.
+// ============================================================================
+
+/// Build the canonical native `spot_margin_deposit` action JSON string.
+///
+/// `{"type":"spot_margin_deposit","params":{"pair":<u32>,"amount":"<decimal>"}}`.
+/// Posts quote collateral into the `(account, pair)` margin account (margin must
+/// be enabled for the pair). SENDER-AUTHORIZED.
+export function buildNativeSpotMarginDepositAction(
+  params: NativeSpotMarginDeposit,
+): string {
+  validateMarket(params.pair);
+  validateDecimalString(params.amount, 'amount');
+  const paramsJson = `{${jsonStr('pair')}:${params.pair},${jsonStr('amount')}:${jsonStr(params.amount)}}`;
+  return `{${jsonStr('type')}:${jsonStr('spot_margin_deposit')},${jsonStr('params')}:${paramsJson}}`;
+}
+
+/// Build the canonical native `spot_margin_withdraw` action JSON string.
+///
+/// `{"type":"spot_margin_withdraw","params":{"pair":<u32>,"amount":"<decimal>"}}`.
+/// Withdraws free collateral (initial-margin-gated while a position is open).
+/// SENDER-AUTHORIZED.
+export function buildNativeSpotMarginWithdrawAction(
+  params: NativeSpotMarginWithdraw,
+): string {
+  validateMarket(params.pair);
+  validateDecimalString(params.amount, 'amount');
+  const paramsJson = `{${jsonStr('pair')}:${params.pair},${jsonStr('amount')}:${jsonStr(params.amount)}}`;
+  return `{${jsonStr('type')}:${jsonStr('spot_margin_withdraw')},${jsonStr('params')}:${paramsJson}}`;
+}
+
+/// Build the canonical native `spot_margin_open` action JSON string.
+///
+/// `{"type":"spot_margin_open","params":{"pair":<u32>,"size":<u64>,"limit_px":<u64>,"borrow":"<decimal>"}}`.
+/// Borrows quote from the pair's Earn pool and IOC-buys `size` base on leverage;
+/// gated by the initial-margin requirement on the worst-case cost. SENDER-AUTHORIZED.
+export function buildNativeSpotMarginOpenAction(
+  params: NativeSpotMarginOpen,
+): string {
+  validateMarket(params.pair);
+  validateU64(params.size, 'size');
+  validateU64(params.limit_px, 'limit_px');
+  if (params.size <= 0) {
+    throw new RangeError('spot_margin_open requires size > 0');
+  }
+  if (params.limit_px <= 0) {
+    throw new RangeError('spot_margin_open requires limit_px > 0');
+  }
+  validateDecimalString(params.borrow, 'borrow');
+  const paramsJson = `{${jsonStr('pair')}:${params.pair},${jsonStr('size')}:${params.size},${jsonStr('limit_px')}:${params.limit_px},${jsonStr('borrow')}:${jsonStr(params.borrow)}}`;
+  return `{${jsonStr('type')}:${jsonStr('spot_margin_open')},${jsonStr('params')}:${paramsJson}}`;
+}
+
+/// Build the canonical native `spot_margin_close` action JSON string.
+///
+/// `{"type":"spot_margin_close","params":{"pair":<u32>,"limit_px":<u64>}}`.
+/// IOC-sells the held base, repays principal + interest, returns the remainder
+/// (a partial fill keeps the account open). SENDER-AUTHORIZED.
+export function buildNativeSpotMarginCloseAction(
+  params: NativeSpotMarginClose,
+): string {
+  validateMarket(params.pair);
+  validateU64(params.limit_px, 'limit_px');
+  if (params.limit_px <= 0) {
+    throw new RangeError('spot_margin_close requires limit_px > 0');
+  }
+  const paramsJson = `{${jsonStr('pair')}:${params.pair},${jsonStr('limit_px')}:${params.limit_px}}`;
+  return `{${jsonStr('type')}:${jsonStr('spot_margin_close')},${jsonStr('params')}:${paramsJson}}`;
+}
+
+/// Build the canonical native `earn_deposit` action JSON string.
+///
+/// `{"type":"earn_deposit","params":{"asset":<u32>,"amount":"<decimal>"}}`.
+/// Supplies quote into a lending pool for shares (1:1 on a fresh pool, else
+/// priced off NAV; the pool auto-creates on first deposit). SENDER-AUTHORIZED.
+export function buildNativeEarnDepositAction(params: NativeEarnDeposit): string {
+  validateU32(params.asset, 'asset');
+  validateDecimalString(params.amount, 'amount');
+  const paramsJson = `{${jsonStr('asset')}:${params.asset},${jsonStr('amount')}:${jsonStr(params.amount)}}`;
+  return `{${jsonStr('type')}:${jsonStr('earn_deposit')},${jsonStr('params')}:${paramsJson}}`;
+}
+
+/// Build the canonical native `earn_withdraw` action JSON string.
+///
+/// `{"type":"earn_withdraw","params":{"asset":<u32>,"shares":"<decimal>"}}`.
+/// Redeems pool shares back to quote, clamped to the pool's idle liquidity.
+/// SENDER-AUTHORIZED.
+export function buildNativeEarnWithdrawAction(
+  params: NativeEarnWithdraw,
+): string {
+  validateU32(params.asset, 'asset');
+  validateDecimalString(params.shares, 'shares');
+  const paramsJson = `{${jsonStr('asset')}:${params.asset},${jsonStr('shares')}:${jsonStr(params.shares)}}`;
+  return `{${jsonStr('type')}:${jsonStr('earn_withdraw')},${jsonStr('params')}:${paramsJson}}`;
 }

@@ -413,6 +413,147 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
     );
   });
 
+  // ---- spot margin & Earn (devnet preview) ----
+
+  it('buildNativeSpotMarginDepositAction quotes the decimal amount', async () => {
+    const { buildNativeSpotMarginDepositAction } = await import(
+      '../src/native/index.js'
+    );
+    expect(
+      buildNativeSpotMarginDepositAction({ pair: 200, amount: '100' }),
+    ).toBe(
+      '{"type":"spot_margin_deposit","params":{"pair":200,"amount":"100"}}',
+    );
+  });
+
+  it('buildNativeSpotMarginWithdrawAction quotes the decimal amount', async () => {
+    const { buildNativeSpotMarginWithdrawAction } = await import(
+      '../src/native/index.js'
+    );
+    expect(
+      buildNativeSpotMarginWithdrawAction({ pair: 200, amount: '50' }),
+    ).toBe(
+      '{"type":"spot_margin_withdraw","params":{"pair":200,"amount":"50"}}',
+    );
+  });
+
+  it('buildNativeSpotMarginOpenAction emits bare integers + quoted borrow in field order', async () => {
+    const { buildNativeSpotMarginOpenAction } = await import(
+      '../src/native/index.js'
+    );
+    // size / limit_px are bare integers (raw-lot / 1e8 planes); borrow is a
+    // quoted decimal string. Field order = pair, size, limit_px, borrow.
+    expect(
+      buildNativeSpotMarginOpenAction({
+        pair: 200,
+        size: 200,
+        limit_px: 200_000_000,
+        borrow: '400',
+      }),
+    ).toBe(
+      '{"type":"spot_margin_open","params":{"pair":200,"size":200,"limit_px":200000000,"borrow":"400"}}',
+    );
+  });
+
+  it('spot_margin_open rejects a non-positive size / limit_px and a malformed borrow', async () => {
+    const { buildNativeSpotMarginOpenAction } = await import(
+      '../src/native/index.js'
+    );
+    expect(() =>
+      buildNativeSpotMarginOpenAction({
+        pair: 200,
+        size: 0,
+        limit_px: 200_000_000,
+        borrow: '400',
+      }),
+    ).toThrow();
+    expect(() =>
+      buildNativeSpotMarginOpenAction({
+        pair: 200,
+        size: 200,
+        limit_px: 0,
+        borrow: '400',
+      }),
+    ).toThrow();
+    expect(() =>
+      buildNativeSpotMarginOpenAction({
+        pair: 200,
+        size: 200,
+        limit_px: 200_000_000,
+        borrow: 'abc',
+      }),
+    ).toThrow();
+    // zero / negative borrow are rejected too.
+    expect(() =>
+      buildNativeSpotMarginOpenAction({
+        pair: 200,
+        size: 200,
+        limit_px: 200_000_000,
+        borrow: '0',
+      }),
+    ).toThrow();
+  });
+
+  it('buildNativeSpotMarginCloseAction emits the canonical close shape', async () => {
+    const { buildNativeSpotMarginCloseAction } = await import(
+      '../src/native/index.js'
+    );
+    expect(
+      buildNativeSpotMarginCloseAction({ pair: 200, limit_px: 200_000_000 }),
+    ).toBe(
+      '{"type":"spot_margin_close","params":{"pair":200,"limit_px":200000000}}',
+    );
+  });
+
+  it('buildNativeEarnDepositAction emits asset + quoted amount', async () => {
+    const { buildNativeEarnDepositAction } = await import(
+      '../src/native/index.js'
+    );
+    expect(buildNativeEarnDepositAction({ asset: 100, amount: '5000' })).toBe(
+      '{"type":"earn_deposit","params":{"asset":100,"amount":"5000"}}',
+    );
+  });
+
+  it('buildNativeEarnWithdrawAction keeps fractional shares as a quoted string', async () => {
+    const { buildNativeEarnWithdrawAction } = await import(
+      '../src/native/index.js'
+    );
+    expect(
+      buildNativeEarnWithdrawAction({ asset: 100, shares: '1234.5' }),
+    ).toBe('{"type":"earn_withdraw","params":{"asset":100,"shares":"1234.5"}}');
+  });
+
+  it('spot_margin_open sign → recover round-trips + body embeds verbatim', async () => {
+    const {
+      buildNativeSpotMarginOpenAction,
+      signNativeAction,
+      recoverNativeSigner,
+      nativeRequestBody,
+    } = await import('../src/native/index.js');
+    const { deriveAddressFromPubkey, recoverPubkey, signSecp256k1, keccak256 } =
+      await import('../src/wallet/wasm.js');
+
+    const privKey = new Uint8Array(32).fill(0x77);
+    const probeDigest = await keccak256(new TextEncoder().encode('probe'));
+    const probeSig = await signSecp256k1(privKey, probeDigest);
+    const probePub = await recoverPubkey(probeSig, probeDigest);
+    const owner = `0x${toHex(await deriveAddressFromPubkey(probePub))}`;
+
+    const actionJson = buildNativeSpotMarginOpenAction({
+      pair: 200,
+      size: 200,
+      limit_px: 200_000_000,
+      borrow: '400',
+    });
+    const signed = await signNativeAction(privKey, actionJson, 11n, KAT_CHAIN_ID);
+    expect(signed.actionJson).toBe(actionJson); // sent == signed
+    const recovered = await recoverNativeSigner(signed, KAT_CHAIN_ID);
+    expect(recovered.toLowerCase()).toBe(owner.toLowerCase());
+    expect(nativeRequestBody(signed).includes(`"action":${actionJson}`)).toBe(
+      true,
+    );
+  });
+
   it('nativeRequestBody embeds the action bytes verbatim', async () => {
     const { signNativeAction, nativeRequestBody } = await import(
       '../src/native/index.js'

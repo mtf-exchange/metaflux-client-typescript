@@ -28,7 +28,16 @@ export type {
   NativeExchangeAck,
   OrderStatus,
 } from './trading.js';
-export type { NativeSpotOrder, NativeSpotCancel } from './spot.js';
+export type {
+  NativeSpotOrder,
+  NativeSpotCancel,
+  NativeSpotMarginDeposit,
+  NativeSpotMarginWithdraw,
+  NativeSpotMarginOpen,
+  NativeSpotMarginClose,
+  NativeEarnDeposit,
+  NativeEarnWithdraw,
+} from './spot.js';
 export type { VaultCreate, VaultDistribute, VaultWithdraw } from './vault.js';
 export type { PmEnroll, PmUnenroll, PmRebalance } from './pm.js';
 export type { RfqRequest, RfqAccept } from './rfq.js';

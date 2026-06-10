@@ -20,6 +20,8 @@ import { httpRequest } from './rest/http.js';
 import {
   buildNativeCancelAction,
   buildNativeCrossChainSendAction,
+  buildNativeEarnDepositAction,
+  buildNativeEarnWithdrawAction,
   buildNativeEncryptedOrderSubmitAction,
   buildNativeFbaSubmitAction,
   buildNativeOrderAction,
@@ -30,6 +32,10 @@ import {
   buildNativeRfqRequestAction,
   buildNativeSetPositionModeAction,
   buildNativeSpotCancelAction,
+  buildNativeSpotMarginCloseAction,
+  buildNativeSpotMarginDepositAction,
+  buildNativeSpotMarginOpenAction,
+  buildNativeSpotMarginWithdrawAction,
   buildNativeSpotOrderAction,
   buildNativeVaultCreateAction,
   buildNativeVaultDistributeAction,
@@ -49,10 +55,16 @@ import type {
   FbaSubmit,
   Market,
   NativeCancel,
+  NativeEarnDeposit,
+  NativeEarnWithdraw,
   NativeExchangeAck,
   NativeOrder,
   NativeSetPositionMode,
   NativeSpotCancel,
+  NativeSpotMarginClose,
+  NativeSpotMarginDeposit,
+  NativeSpotMarginOpen,
+  NativeSpotMarginWithdraw,
   NativeSpotOrder,
   Order,
   OrderAck,
@@ -423,6 +435,83 @@ export class Client {
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
     return this.postSenderAuthorized(buildNativeSpotCancelAction(cancel), opts);
+  }
+
+  // ── spot margin & Earn actions (devnet preview) ───────────────────────────
+  //
+  // Leveraged spot borrows quote from the Earn lending pool. All SENDER-
+  // AUTHORIZED (the signer is the actor). Each returns the 202 admission ack,
+  // NOT a synchronous oid; observe committed state via `/info` `spot_margin_state`
+  // / `earn_state`. Preview: forced-liquidation settlement is not yet wired and
+  // per-pair maintenance ratios are still being calibrated.
+
+  /// Post quote collateral into a spot-margin account via `POST /exchange`.
+  /// Margin must be enabled for the pair (else the node rejects).
+  async spotMarginDeposit(
+    params: NativeSpotMarginDeposit,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(
+      buildNativeSpotMarginDepositAction(params),
+      opts,
+    );
+  }
+
+  /// Withdraw free collateral from a spot-margin account via `POST /exchange`.
+  /// Full while flat; initial-margin-gated while a position is open.
+  async spotMarginWithdraw(
+    params: NativeSpotMarginWithdraw,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(
+      buildNativeSpotMarginWithdrawAction(params),
+      opts,
+    );
+  }
+
+  /// Open a leveraged spot position via `POST /exchange`: borrow quote from the
+  /// pair's Earn pool and IOC-buy base. Gated by the initial-margin requirement.
+  async spotMarginOpen(
+    params: NativeSpotMarginOpen,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(
+      buildNativeSpotMarginOpenAction(params),
+      opts,
+    );
+  }
+
+  /// Close a leveraged spot position via `POST /exchange`: IOC-sell the held
+  /// base, repay principal + interest, return the remainder (partial keeps open).
+  async spotMarginClose(
+    params: NativeSpotMarginClose,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(
+      buildNativeSpotMarginCloseAction(params),
+      opts,
+    );
+  }
+
+  /// Supply quote into an Earn lending pool for shares via `POST /exchange`.
+  /// 1:1 on a fresh pool, else priced off NAV; the pool auto-creates.
+  async earnDeposit(
+    params: NativeEarnDeposit,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeEarnDepositAction(params), opts);
+  }
+
+  /// Redeem Earn pool shares back to quote via `POST /exchange`. The payout is
+  /// clamped to the pool's idle liquidity (`supplied − borrowed`).
+  async earnWithdraw(
+    params: NativeEarnWithdraw,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(
+      buildNativeEarnWithdrawAction(params),
+      opts,
+    );
   }
 
   // ── vault actions ─────────────────────────────────────────────────────────
