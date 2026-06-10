@@ -28,6 +28,13 @@ export {
   buildNativeSetPositionModeAction,
   buildNativeSpotOrderAction,
   buildNativeSpotCancelAction,
+  // Spot margin (leveraged spot) + Earn (lending pool) — devnet preview.
+  buildNativeSpotMarginDepositAction,
+  buildNativeSpotMarginWithdrawAction,
+  buildNativeSpotMarginOpenAction,
+  buildNativeSpotMarginCloseAction,
+  buildNativeEarnDepositAction,
+  buildNativeEarnWithdrawAction,
   // New native write actions (vault / portfolio-margin / RFQ / FBA /
   // cross-chain / encrypted).
   buildNativeVaultCreateAction,
@@ -165,6 +172,12 @@ export type {
   NativeSetPositionMode,
   NativeSpotOrder,
   NativeSpotCancel,
+  NativeSpotMarginDeposit,
+  NativeSpotMarginWithdraw,
+  NativeSpotMarginOpen,
+  NativeSpotMarginClose,
+  NativeEarnDeposit,
+  NativeEarnWithdraw,
   NativeSignedAction,
   NativeExchangeAck,
   // New native write-action payload types.

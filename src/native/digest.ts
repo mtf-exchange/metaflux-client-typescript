@@ -264,6 +264,34 @@ export function validateU128(value: bigint, field: string): void {
   if (value >= 1n << 128n) throw new RangeError(`${field} overflows u128`);
 }
 
+/// Validate a decimal magnitude passed as a string and emitted as a JSON
+/// **string** on the wire (e.g. spot-margin `amount` / `borrow`, Earn
+/// `shares`). The server decodes these as a fixed-point `Decimal`, so they must
+/// be JSON strings to preserve fractional precision past 2^53. Accepts an
+/// optional sign, integer and/or fractional parts; rejects empty / malformed
+/// input and (by default) non-positive values.
+export function validateDecimalString(
+  value: string,
+  field: string,
+  opts: { allowZero?: boolean; allowNegative?: boolean } = {},
+): void {
+  if (typeof value !== 'string') {
+    throw new RangeError(`${field} must be a decimal string`);
+  }
+  if (!/^-?(?:\d+\.?\d*|\.\d+)$/.test(value)) {
+    throw new RangeError(`${field} must be a decimal string, got '${value}'`);
+  }
+  const negative = value.startsWith('-');
+  if (negative && !opts.allowNegative) {
+    throw new RangeError(`${field} must be non-negative`);
+  }
+  // Reject a pure-zero magnitude (e.g. "0", "0.0", "-0.00") unless allowed.
+  const isZero = /^-?0*\.?0*$/.test(value);
+  if (isZero && !opts.allowZero) {
+    throw new RangeError(`${field} must be greater than zero`);
+  }
+}
+
 export function hexToBytes(hex: string): Uint8Array {
   if (hex.length % 2 !== 0) throw new RangeError('hex length must be even');
   const out = new Uint8Array(hex.length / 2);

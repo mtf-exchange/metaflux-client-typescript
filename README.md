@@ -114,6 +114,39 @@ On the WebSocket `trades` / `candles` / `fills` channels, spot prints carry the
 **numeric pair id** as the `coin` label (e.g. `"101"`), not the display name —
 use `spotMeta()` to map `id` to its `"{base}/{quote}"` name.
 
+### Spot margin & Earn (devnet preview)
+
+Leveraged spot borrows quote (USDC) from the **Earn** lending pool. It is
+**available on devnet (preview)**: the full deposit → borrow → leveraged-buy →
+close loop works, but forced-liquidation settlement is not yet wired and per-pair
+maintenance ratios are still being calibrated — don't treat it as production-ready.
+All six actions are **sender-authorized** (the signer is the actor) and return the
+`202 Accepted` admission ack, not a synchronous `oid`; observe committed state by
+posting `/info` `spot_margin_state` / `earn_state`. Decimal amounts (`amount` /
+`borrow` / `shares`) are passed as **strings**; `size` / `limit_px` are integers
+on the raw-lot / 1e8 planes.
+
+```ts
+// Supply side: a lender funds the pool (asset = the pair's quote token id).
+await client.earnDeposit({ asset: pair.quote, amount: '5000' });
+
+// Borrow side: post collateral, then open a leveraged long.
+await client.spotMarginDeposit({ pair: pair.id, amount: '100' });
+await client.spotMarginOpen({
+  pair: pair.id,
+  size: 200,
+  limit_px: 200_000_000,
+  borrow: '400',
+});
+
+// Read the position over POST /info { type: 'spot_margin_state', user }, then
+// close it (sells the held base, repays principal + interest, returns the rest).
+await client.spotMarginClose({ pair: pair.id, limit_px: 200_000_000 });
+
+// Lender exits — clamped to idle liquidity (supplied − borrowed).
+await client.earnWithdraw({ asset: pair.quote, shares: '1234.5' });
+```
+
 ### More native actions
 
 The Client exposes the rest of the MTF-native signed-action surface, all via the
@@ -123,6 +156,9 @@ actions carry an actor field (`leader` / `user` / `taker` / `owner` / `sender` /
 request leaves the process); **sender-authorized** actions have no such field —
 the recovered signer is the actor.
 
+- **Spot margin & Earn** (devnet preview, all sender-authorized):
+  `spotMarginDeposit` / `spotMarginWithdraw` / `spotMarginOpen` /
+  `spotMarginClose`, and the lending supply side `earnDeposit` / `earnWithdraw`.
 - **Vault**: `vaultCreate` (owner-checked), `vaultDistribute` /
   `vaultWithdraw` (sender-authorized).
 - **Portfolio margin**: `pmEnroll` / `pmUnenroll` (owner-checked),
@@ -290,7 +326,7 @@ Build the artifacts separately with `pnpm build:wasm` / `pnpm build:ts`.
 │   └── types/
 │       ├── index.ts          # type re-export barrel
 │       ├── trading.ts        # Order / NativeOrder / acks / shared enums
-│       ├── spot.ts           # NativeSpotOrder / NativeSpotCancel
+│       ├── spot.ts           # NativeSpotOrder / NativeSpotCancel + spot-margin / Earn
 │       ├── vault.ts          # vault action payloads
 │       ├── pm.ts             # portfolio-margin action payloads
 │       ├── rfq.ts            # RFQ action payloads
