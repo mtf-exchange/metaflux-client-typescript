@@ -184,6 +184,71 @@ describe('InfoApi request shapes', () => {
     });
   });
 
+  it('candle is keyed by coin SYMBOL + interval (NOT a numeric asset id)', async () => {
+    const api = new InfoApi(BASE);
+    nextData = [];
+    await api.candle('BTC', '1m');
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'candle',
+      coin: 'BTC',
+      interval: '1m',
+    });
+  });
+
+  it('candle includes start_time/end_time ONLY when provided', async () => {
+    const api = new InfoApi(BASE);
+    nextData = [];
+    // start_time only.
+    await api.candle('BTC', '1m', 1_700_000_000_000);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'candle',
+      coin: 'BTC',
+      interval: '1m',
+      start_time: 1_700_000_000_000,
+    });
+    // both bounds.
+    await api.candle('BTC', '1m', 1_700_000_000_000, 1_700_000_999_999);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'candle',
+      coin: 'BTC',
+      interval: '1m',
+      start_time: 1_700_000_000_000,
+      end_time: 1_700_000_999_999,
+    });
+  });
+
+  it('candle decodes the gateway bar array through the envelope', async () => {
+    const api = new InfoApi(BASE);
+    nextData = [
+      {
+        coin: 'BTC',
+        interval: '1m',
+        open_time: 1_700_000_040_000,
+        close_time: 1_700_000_099_999,
+        open: '67000.00',
+        close: '67042.50',
+        high: '67080.00',
+        low: '66990.00',
+        volume: '12.5',
+        num_trades: 37,
+      },
+    ];
+    const bars = await api.candle('BTC', '1m');
+    expect(Array.isArray(bars)).toBe(true);
+    expect(bars).toHaveLength(1);
+    expect(bars[0]?.coin).toBe('BTC');
+    expect(bars[0]?.interval).toBe('1m');
+    expect(bars[0]?.close).toBe('67042.50');
+    // OHLC / volume are decimal strings (whole-USDC plane); times + count
+    // are JSON numbers.
+    expect(typeof bars[0]?.open).toBe('string');
+    expect(typeof bars[0]?.volume).toBe('string');
+    expect(typeof bars[0]?.num_trades).toBe('number');
+    expect(typeof bars[0]?.open_time).toBe('number');
+    expect(bars[0]?.open_time).toBe(1_700_000_040_000);
+    expect(bars[0]?.num_trades).toBe(37);
+  });
+
   it('activeAssetData is keyed by address + asset_id', async () => {
     const api = new InfoApi(BASE);
     nextData = {

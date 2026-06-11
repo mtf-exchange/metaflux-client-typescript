@@ -29,6 +29,7 @@ export type {
   UserFills,
   FundingHistory,
   FundingSample,
+  Candle,
   BlockInfo,
   Agents,
   AgentEntry,
