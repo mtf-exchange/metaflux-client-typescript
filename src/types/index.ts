@@ -27,6 +27,15 @@ export type {
   NativeSignedAction,
   NativeExchangeAck,
   OrderStatus,
+  // Order-management actions.
+  OrderGrouping,
+  Modify,
+  BatchModify,
+  BatchOrder,
+  BatchCancel,
+  CancelByCloid,
+  ScheduleCancel,
+  CancelAllOrders,
 } from './trading.js';
 export type {
   NativeSpotOrder,
@@ -38,9 +47,33 @@ export type {
   NativeEarnDeposit,
   NativeEarnWithdraw,
 } from './spot.js';
-export type { VaultCreate, VaultDistribute, VaultWithdraw } from './vault.js';
-export type { PmEnroll, PmUnenroll, PmRebalance } from './pm.js';
-export type { RfqRequest, RfqAccept } from './rfq.js';
-export type { FbaSubmit } from './fba.js';
-export type { CrossChainSend } from './cross-chain.js';
-export type { EncryptedOrderSubmit } from './encrypted.js';
+export type {
+  UpdateLeverage,
+  UpdateIsolatedMargin,
+  TopUpIsolatedOnlyMargin,
+  UserPortfolioMargin,
+  SetDisplayName,
+  SetReferrer,
+  ApproveAgent,
+  ApproveBuilderFee,
+  ConvertToMultiSigUser,
+  UserDexAbstraction,
+  UserSetAbstraction,
+  AgentSetAbstraction,
+  PriorityBid,
+} from './account.js';
+export type { TokenDelegate, ClaimRewards, LinkStakingUser } from './staking.js';
+export type { TwapOrder, TwapCancel } from './twap.js';
+export type {
+  SetMetaliquidityWhitelist,
+  RegisterMetaliquidityOperator,
+} from './governance.js';
+export type { MbChain, MbWithdraw } from './meta-bridge.js';
+export type {
+  VaultKind,
+  CreateVault,
+  VaultTransfer,
+  VaultModify,
+  VaultWithdraw,
+} from './vault.js';
+export type { SubmitEncryptedOrder } from './encrypted.js';

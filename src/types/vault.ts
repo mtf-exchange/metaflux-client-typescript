@@ -1,40 +1,55 @@
-// MTF-native vault action types (mirror the Rust client `rest/exchange.rs`).
+// MTF-native vault action payload types.
 //
-// Field ORDER is load-bearing for the signed bytes — it matches the Rust struct
-// declaration order (see the `buildNativeVault*Action` builders).
+// Sender-authorized: the recovered signer is the leader / follower. Decimal
+// magnitudes (`amount` / `shares`) ride the wire as JSON strings.
 
-/// MTF-native `vault_create` action payload.
-///
-/// `{"type":"vault_create","vault":{leader, seed_cents, management_fee_bps}}`.
-/// OWNER-CHECKED: `leader` must equal the signing wallet.
-export interface VaultCreate {
-  /// `0x`-hex 20-byte vault leader. MUST equal the signing wallet.
-  leader: string;
-  /// Initial seed deposit, USD cents (`u64`).
-  seed_cents: number;
-  /// Leader management fee in basis points (`u16`, 0..=65535).
-  management_fee_bps: number;
+/// Kind of vault created by [`CreateVault`]. PascalCase to match the node's
+/// vault-kind enum.
+export type VaultKind = 'User' | 'Metaliquidity';
+
+/// `create_vault` — create a new vault. The signing wallet becomes the leader.
+export interface CreateVault {
+  /// Display name.
+  name: string;
+  /// Follower withdrawal lock period in seconds (`u64`).
+  lock_period_secs: number;
+  /// Optional parent vault id (`u64`).
+  parent?: number;
+  /// Vault kind. Defaults to `"User"` when omitted.
+  kind?: VaultKind;
 }
 
-/// MTF-native `vault_distribute` action payload.
-///
-/// `{"type":"vault_distribute","params":{vault_id, amount_cents}}`.
-/// SENDER-AUTHORIZED (no owner field).
-export interface VaultDistribute {
+/// `vault_transfer` — leader moves capital into (`deposit: true`) or out of
+/// (`deposit: false`) a vault.
+export interface VaultTransfer {
   /// Target vault id (`u64`).
   vault_id: number;
-  /// Amount to distribute, USD cents (`u64`).
-  amount_cents: number;
+  /// `true` = deposit (leader → vault), `false` = withdraw (vault → leader).
+  deposit: boolean;
+  /// Amount in USD as a decimal string.
+  amount: string;
 }
 
-/// MTF-native `vault_withdraw` action payload.
-///
-/// `{"type":"vault_withdraw","params":{vault_id, shares}}`.
-/// SENDER-AUTHORIZED (no owner field).
+/// `vault_modify` — leader updates vault configuration. An omitted field is
+/// left unchanged.
+export interface VaultModify {
+  /// Target vault id (`u64`).
+  vault_id: number;
+  /// New display name.
+  new_name?: string;
+  /// New lock period in seconds (`u64`).
+  new_lock_period_secs?: number;
+  /// New management fee in bps (`u16`).
+  new_management_fee_bps?: number;
+  /// New paused flag.
+  new_paused?: boolean;
+}
+
+/// `vault_withdraw` — follower redeems shares from a vault (subject to the
+/// per-vault lock).
 export interface VaultWithdraw {
   /// Target vault id (`u64`).
   vault_id: number;
-  /// Share count to withdraw — a `u128` emitted as a bare unquoted integer
-  /// (serde u128 JSON number form). Validated `>= 0n` and `< 2n**128n`.
-  shares: bigint;
+  /// Shares to redeem, as a decimal string.
+  shares: string;
 }

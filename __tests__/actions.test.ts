@@ -1,9 +1,7 @@
-// New native write-action builders — JSON-shape pins + sign/recover round-trips.
-//
-// Covers the vault / portfolio-margin / RFQ / FBA / cross-chain / encrypted
-// actions added alongside the directory restructure. OWNER-CHECKED actions
-// assert the recovered signer equals the actor field; SENDER-AUTHORIZED actions
-// assert the JSON shape + a stable recovered address.
+// Real-node native write-action builders — JSON-shape pins + a sign/recover
+// round-trip. Covers a representative slice of the reconciled /exchange surface
+// (vaults, leverage/margin, TWAP, staking, MetaBridge, encrypted, batch). The
+// 5 original builders are byte-pinned separately in `native.test.ts`.
 
 import { describe, expect, it } from 'vitest';
 import { existsSync } from 'node:fs';
@@ -16,6 +14,8 @@ const wasmBuilt = existsSync(resolve(pkgDir, 'metaflux_client_wasm.js'));
 
 // MTF testnet chain id (114514) — the SDK default.
 const KAT_CHAIN_ID = 114514;
+
+const ADDR = '0x000000000000000000000000000000000000beef';
 
 function toHex(bytes: Uint8Array): string {
   let out = '';
@@ -33,158 +33,189 @@ async function signerAddress(privKey: Uint8Array): Promise<string> {
   return `0x${toHex(await deriveAddressFromPubkey(probePub))}`;
 }
 
-describe.skipIf(!wasmBuilt)('new native write-action builders', () => {
-  // ---- vault_create (OWNER-CHECKED) ----
-
-  it('buildNativeVaultCreateAction emits the canonical vault shape', async () => {
-    const { buildNativeVaultCreateAction } = await import(
-      '../src/native/index.js'
-    );
+describe('real native write-action builders (JSON shape)', () => {
+  it('create_vault: omits parent, defaults kind to "User"', async () => {
+    const { buildNativeCreateVaultAction } = await import('../src/native/actions.js');
     expect(
-      buildNativeVaultCreateAction({
-        leader: '0x000000000000000000000000000000000000beef',
-        seed_cents: 100_000,
-        management_fee_bps: 200,
+      buildNativeCreateVaultAction({ name: 'mlp', lock_period_secs: 604800 }),
+    ).toBe(
+      '{"type":"create_vault","params":{"name":"mlp","lock_period_secs":604800,"kind":"User"}}',
+    );
+  });
+
+  it('create_vault: emits parent + explicit kind', async () => {
+    const { buildNativeCreateVaultAction } = await import('../src/native/actions.js');
+    expect(
+      buildNativeCreateVaultAction({
+        name: 'v',
+        lock_period_secs: 1,
+        parent: 3,
+        kind: 'Metaliquidity',
       }),
     ).toBe(
-      '{"type":"vault_create","vault":{"leader":"0x000000000000000000000000000000000000beef","seed_cents":100000,"management_fee_bps":200}}',
+      '{"type":"create_vault","params":{"name":"v","lock_period_secs":1,"parent":3,"kind":"Metaliquidity"}}',
     );
   });
 
-  it('vault_create sign → recover round-trips to the leader', async () => {
-    const { buildNativeVaultCreateAction, signNativeAction, recoverNativeSigner } =
-      await import('../src/native/index.js');
-    const privKey = new Uint8Array(32).fill(0x42);
-    const leader = await signerAddress(privKey);
-    const actionJson = buildNativeVaultCreateAction({
-      leader,
-      seed_cents: 100_000,
-      management_fee_bps: 200,
-    });
-    const signed = await signNativeAction(privKey, actionJson, 1n, KAT_CHAIN_ID);
-    const recovered = await recoverNativeSigner(signed, KAT_CHAIN_ID);
-    expect(recovered.toLowerCase()).toBe(leader.toLowerCase());
+  it('vault_withdraw: shares as a decimal string', async () => {
+    const { buildNativeVaultWithdrawAction } = await import('../src/native/actions.js');
+    expect(buildNativeVaultWithdrawAction({ vault_id: 7, shares: '250.5' })).toBe(
+      '{"type":"vault_withdraw","params":{"vault_id":7,"shares":"250.5"}}',
+    );
   });
 
-  // ---- vault_withdraw (SENDER-AUTHORIZED, u128 shares) ----
+  it('update_leverage: snake_case integers + bool', async () => {
+    const { buildNativeUpdateLeverageAction } = await import('../src/native/actions.js');
+    expect(
+      buildNativeUpdateLeverageAction({ asset: 2, leverage: 10, is_isolated: true }),
+    ).toBe(
+      '{"type":"update_leverage","params":{"asset":2,"leverage":10,"is_isolated":true}}',
+    );
+  });
 
-  it('buildNativeVaultWithdrawAction emits shares as a bare u128 integer', async () => {
-    const { buildNativeVaultWithdrawAction } = await import(
-      '../src/native/index.js'
+  it('update_isolated_margin: signed delta as a string', async () => {
+    const { buildNativeUpdateIsolatedMarginAction } = await import(
+      '../src/native/actions.js'
     );
     expect(
-      buildNativeVaultWithdrawAction({
-        vault_id: 7,
-        shares: 340282366920938463463374607431768211455n, // 2^128 - 1
-      }),
+      buildNativeUpdateIsolatedMarginAction({ asset: 1, delta: '-12.5' }),
     ).toBe(
-      '{"type":"vault_withdraw","params":{"vault_id":7,"shares":340282366920938463463374607431768211455}}',
+      '{"type":"update_isolated_margin","params":{"asset":1,"delta":"-12.5"}}',
     );
   });
 
-  it('vault_withdraw rejects a u128 overflow', async () => {
-    const { buildNativeVaultWithdrawAction } = await import(
-      '../src/native/index.js'
+  it('twap_order: full slice shape', async () => {
+    const { buildNativeTwapOrderAction } = await import('../src/native/actions.js');
+    expect(
+      buildNativeTwapOrderAction({
+        market: 4,
+        side: 'ask',
+        total_size: 1000,
+        slice_count: 10,
+        delay_ms: 500,
+        reduce_only: true,
+      }),
+    ).toBe(
+      '{"type":"twap_order","params":{"market":4,"side":"ask","total_size":1000,"slice_count":10,"delay_ms":500,"reduce_only":true}}',
+    );
+  });
+
+  it('token_delegate: decimal amount + bool', async () => {
+    const { buildNativeTokenDelegateAction } = await import('../src/native/actions.js');
+    expect(
+      buildNativeTokenDelegateAction({
+        validator: ADDR,
+        amount: '100.5',
+        is_undelegate: false,
+      }),
+    ).toBe(
+      `{"type":"token_delegate","params":{"validator":"${ADDR}","amount":"100.5","is_undelegate":false}}`,
+    );
+  });
+
+  it('mb_withdraw: PascalCase chain + 20-byte dst_addr', async () => {
+    const { buildNativeMbWithdrawAction } = await import('../src/native/actions.js');
+    const dst = '0xabababababababababababababababababababab';
+    expect(
+      buildNativeMbWithdrawAction({ chain: 'Base', asset: 0, amount: 1000000, dst_addr: dst }),
+    ).toBe(
+      `{"type":"mb_withdraw","params":{"chain":"Base","asset":0,"amount":1000000,"dst_addr":"${dst}"}}`,
+    );
+  });
+
+  it('submit_encrypted_order: ciphertext + 32-byte commitment as byte arrays', async () => {
+    const { buildNativeSubmitEncryptedOrderAction } = await import(
+      '../src/native/actions.js'
+    );
+    const commitment = '[' + new Array(32).fill(0).join(',') + ']';
+    expect(
+      buildNativeSubmitEncryptedOrderAction({
+        ciphertext: new Uint8Array([1, 2, 255]),
+        commitment: new Uint8Array(32),
+        threshold: 2,
+        target_block: 100,
+        reveal_deadline_ms: 5000,
+      }),
+    ).toBe(
+      `{"type":"submit_encrypted_order","params":{"ciphertext":[1,2,255],"commitment":${commitment},"threshold":2,"target_block":100,"reveal_deadline_ms":5000}}`,
+    );
+  });
+
+  it('submit_encrypted_order: rejects a non-32-byte commitment', async () => {
+    const { buildNativeSubmitEncryptedOrderAction } = await import(
+      '../src/native/actions.js'
     );
     expect(() =>
-      buildNativeVaultWithdrawAction({ vault_id: 1, shares: 1n << 128n }),
+      buildNativeSubmitEncryptedOrderAction({
+        ciphertext: new Uint8Array([1]),
+        commitment: new Uint8Array(16),
+        threshold: 1,
+        target_block: 1,
+        reveal_deadline_ms: 1,
+      }),
     ).toThrow();
   });
 
-  it('vault_withdraw sign → recover yields a stable address', async () => {
-    const { buildNativeVaultWithdrawAction, signNativeAction, recoverNativeSigner } =
+  it('batch_order: array of order bodies + default grouping', async () => {
+    const { buildNativeBatchOrderAction } = await import('../src/native/actions.js');
+    expect(
+      buildNativeBatchOrderAction({
+        orders: [
+          {
+            owner: ADDR,
+            market: 1,
+            side: 'bid',
+            kind: 'limit',
+            size: 1000,
+            limit_px: 5000,
+            tif: 'gtc',
+            stp_mode: 'cancel_oldest',
+            reduce_only: false,
+          },
+        ],
+      }),
+    ).toBe(
+      `{"type":"batch_order","params":{"orders":[{"owner":"${ADDR}","market":1,"side":"bid","kind":"limit","size":1000,"limit_px":5000,"tif":"gtc","stp_mode":"cancel_oldest","reduce_only":false}],"grouping":"na"}}`,
+    );
+  });
+
+  it('cancel_all_orders: empty params when no asset filter', async () => {
+    const { buildNativeCancelAllOrdersAction } = await import(
+      '../src/native/actions.js'
+    );
+    expect(buildNativeCancelAllOrdersAction()).toBe(
+      '{"type":"cancel_all_orders","params":{}}',
+    );
+  });
+});
+
+describe.skipIf(!wasmBuilt)('real native write-action sign → recover', () => {
+  it('update_leverage round-trips to the signer (sender-authorized)', async () => {
+    const { buildNativeUpdateLeverageAction, signNativeAction, recoverNativeSigner } =
       await import('../src/native/index.js');
-    const privKey = new Uint8Array(32).fill(0x55);
+    const privKey = new Uint8Array(32).fill(0x42);
     const expected = await signerAddress(privKey);
-    const actionJson = buildNativeVaultWithdrawAction({
-      vault_id: 7,
-      shares: 1000n,
+    const actionJson = buildNativeUpdateLeverageAction({
+      asset: 1,
+      leverage: 10,
+      is_isolated: false,
     });
-    const signed = await signNativeAction(privKey, actionJson, 2n, KAT_CHAIN_ID);
+    const signed = await signNativeAction(privKey, actionJson, 1n, KAT_CHAIN_ID);
     const recovered = await recoverNativeSigner(signed, KAT_CHAIN_ID);
     expect(recovered.toLowerCase()).toBe(expected.toLowerCase());
   });
 
-  // ---- pm_enroll (OWNER-CHECKED) ----
-
-  it('buildNativePmEnrollAction emits the canonical params shape', async () => {
-    const { buildNativePmEnrollAction } = await import('../src/native/index.js');
-    expect(
-      buildNativePmEnrollAction({
-        user: '0x000000000000000000000000000000000000beef',
-      }),
-    ).toBe(
-      '{"type":"pm_enroll","params":{"user":"0x000000000000000000000000000000000000beef"}}',
-    );
-  });
-
-  it('pm_enroll sign → recover round-trips to the user', async () => {
-    const { buildNativePmEnrollAction, signNativeAction, recoverNativeSigner } =
+  it('create_vault round-trips to the signer (the leader)', async () => {
+    const { buildNativeCreateVaultAction, signNativeAction, recoverNativeSigner } =
       await import('../src/native/index.js');
-    const privKey = new Uint8Array(32).fill(0x66);
-    const user = await signerAddress(privKey);
-    const actionJson = buildNativePmEnrollAction({ user });
-    const signed = await signNativeAction(privKey, actionJson, 3n, KAT_CHAIN_ID);
-    const recovered = await recoverNativeSigner(signed, KAT_CHAIN_ID);
-    expect(recovered.toLowerCase()).toBe(user.toLowerCase());
-  });
-
-  // ---- cross_chain_send (OWNER-CHECKED, u128 amount) ----
-
-  it('buildNativeCrossChainSendAction emits the canonical msg shape', async () => {
-    const { buildNativeCrossChainSendAction } = await import(
-      '../src/native/index.js'
-    );
-    expect(
-      buildNativeCrossChainSendAction({
-        sender: '0x000000000000000000000000000000000000beef',
-        dst_chain: 8964,
-        dst_address: '0x000000000000000000000000000000000000cafe',
-        asset: 'USDC',
-        amount: 1000000n,
-        nonce: 5,
-      }),
-    ).toBe(
-      '{"type":"cross_chain_send","msg":{"sender":"0x000000000000000000000000000000000000beef","dst_chain":8964,"dst_address":"0x000000000000000000000000000000000000cafe","asset":"USDC","amount":1000000,"nonce":5}}',
-    );
-  });
-
-  it('cross_chain_send sign → recover round-trips to the sender', async () => {
-    const {
-      buildNativeCrossChainSendAction,
-      signNativeAction,
-      recoverNativeSigner,
-    } = await import('../src/native/index.js');
-    const privKey = new Uint8Array(32).fill(0x77);
-    const sender = await signerAddress(privKey);
-    const actionJson = buildNativeCrossChainSendAction({
-      sender,
-      dst_chain: 8964,
-      dst_address: '0x000000000000000000000000000000000000cafe',
-      asset: 'USDC',
-      amount: 1000000n,
-      nonce: 5,
+    const privKey = new Uint8Array(32).fill(0x55);
+    const expected = await signerAddress(privKey);
+    const actionJson = buildNativeCreateVaultAction({
+      name: 'mlp',
+      lock_period_secs: 604800,
     });
-    const signed = await signNativeAction(privKey, actionJson, 4n, KAT_CHAIN_ID);
+    const signed = await signNativeAction(privKey, actionJson, 2n, KAT_CHAIN_ID);
     const recovered = await recoverNativeSigner(signed, KAT_CHAIN_ID);
-    expect(recovered.toLowerCase()).toBe(sender.toLowerCase());
-  });
-
-  // ---- encrypted_order_submit (OWNER-CHECKED, Vec<u8> ciphertext) ----
-
-  it('buildNativeEncryptedOrderSubmitAction emits ciphertext as a byte array', async () => {
-    const { buildNativeEncryptedOrderSubmitAction } = await import(
-      '../src/native/index.js'
-    );
-    expect(
-      buildNativeEncryptedOrderSubmitAction({
-        submitter: '0x000000000000000000000000000000000000beef',
-        ciphertext: new Uint8Array([1, 2, 255]),
-        threshold: 3,
-        target_block: 1000,
-      }),
-    ).toBe(
-      '{"type":"encrypted_order_submit","encrypted":{"submitter":"0x000000000000000000000000000000000000beef","ciphertext":[1,2,255],"threshold":3,"target_block":1000}}',
-    );
+    expect(recovered.toLowerCase()).toBe(expected.toLowerCase());
   });
 });

@@ -18,27 +18,49 @@ import {
 } from './wallet/wasm.js';
 import { httpRequest } from './rest/http.js';
 import {
+  buildNativeAgentSetAbstractionAction,
+  buildNativeApproveAgentAction,
+  buildNativeApproveBuilderFeeAction,
+  buildNativeBatchCancelAction,
+  buildNativeBatchModifyAction,
+  buildNativeBatchOrderAction,
   buildNativeCancelAction,
-  buildNativeCrossChainSendAction,
+  buildNativeCancelAllOrdersAction,
+  buildNativeCancelByCloidAction,
+  buildNativeClaimRewardsAction,
+  buildNativeConvertToMultiSigUserAction,
+  buildNativeCreateVaultAction,
   buildNativeEarnDepositAction,
   buildNativeEarnWithdrawAction,
-  buildNativeEncryptedOrderSubmitAction,
-  buildNativeFbaSubmitAction,
+  buildNativeLinkStakingUserAction,
+  buildNativeMbWithdrawAction,
+  buildNativeModifyAction,
   buildNativeOrderAction,
-  buildNativePmEnrollAction,
-  buildNativePmRebalanceAction,
-  buildNativePmUnenrollAction,
-  buildNativeRfqAcceptAction,
-  buildNativeRfqRequestAction,
+  buildNativePriorityBidAction,
+  buildNativeRegisterMetaliquidityOperatorAction,
+  buildNativeScheduleCancelAction,
+  buildNativeSetDisplayNameAction,
+  buildNativeSetMetaliquidityWhitelistAction,
   buildNativeSetPositionModeAction,
+  buildNativeSetReferrerAction,
   buildNativeSpotCancelAction,
   buildNativeSpotMarginCloseAction,
   buildNativeSpotMarginDepositAction,
   buildNativeSpotMarginOpenAction,
   buildNativeSpotMarginWithdrawAction,
   buildNativeSpotOrderAction,
-  buildNativeVaultCreateAction,
-  buildNativeVaultDistributeAction,
+  buildNativeSubmitEncryptedOrderAction,
+  buildNativeTokenDelegateAction,
+  buildNativeTopUpIsolatedOnlyMarginAction,
+  buildNativeTwapCancelAction,
+  buildNativeTwapOrderAction,
+  buildNativeUpdateIsolatedMarginAction,
+  buildNativeUpdateLeverageAction,
+  buildNativeUserDexAbstractionAction,
+  buildNativeUserPortfolioMarginAction,
+  buildNativeUserSetAbstractionAction,
+  buildNativeVaultModifyAction,
+  buildNativeVaultTransferAction,
   buildNativeVaultWithdrawAction,
 } from './native/actions.js';
 import {
@@ -50,10 +72,21 @@ import {
 import { InfoApi } from './rest/info.js';
 import { WsClient, type WsConfig } from './ws/ws.js';
 import type {
-  CrossChainSend,
-  EncryptedOrderSubmit,
-  FbaSubmit,
+  AgentSetAbstraction,
+  ApproveAgent,
+  ApproveBuilderFee,
+  BatchCancel,
+  BatchModify,
+  BatchOrder,
+  CancelAllOrders,
+  CancelByCloid,
+  ClaimRewards,
+  ConvertToMultiSigUser,
+  CreateVault,
+  LinkStakingUser,
   Market,
+  MbWithdraw,
+  Modify,
   NativeCancel,
   NativeEarnDeposit,
   NativeEarnWithdraw,
@@ -68,15 +101,26 @@ import type {
   NativeSpotOrder,
   Order,
   OrderAck,
-  PmEnroll,
-  PmRebalance,
-  PmUnenroll,
   Position,
-  RfqAccept,
-  RfqRequest,
+  PriorityBid,
+  RegisterMetaliquidityOperator,
+  ScheduleCancel,
+  SetDisplayName,
+  SetMetaliquidityWhitelist,
+  SetReferrer,
   SignedOrder,
-  VaultCreate,
-  VaultDistribute,
+  SubmitEncryptedOrder,
+  TokenDelegate,
+  TopUpIsolatedOnlyMargin,
+  TwapCancel,
+  TwapOrder,
+  UpdateIsolatedMargin,
+  UpdateLeverage,
+  UserDexAbstraction,
+  UserPortfolioMargin,
+  UserSetAbstraction,
+  VaultModify,
+  VaultTransfer,
   VaultWithdraw,
 } from './types/index.js';
 
@@ -514,189 +558,335 @@ export class Client {
     );
   }
 
-  // ── vault actions ─────────────────────────────────────────────────────────
+  // ── order management ──────────────────────────────
 
-  /// Create a vault via `POST /exchange`. OWNER-CHECKED: `vault.leader` must
-  /// equal the signing wallet. Seeds a new leader vault with a management fee.
-  async vaultCreate(
-    vault: VaultCreate,
+  /// Cancel a resting order by its client order id via `POST /exchange`.
+  async cancelByCloid(
+    params: CancelByCloid,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postOwnerChecked(
-      buildNativeVaultCreateAction(vault),
-      vault.leader,
+    return this.postSenderAuthorized(buildNativeCancelByCloidAction(params), opts);
+  }
+
+  /// Amend a resting order's price and/or size in place via `POST /exchange`.
+  async modify(
+    params: Modify,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeModifyAction(params), opts);
+  }
+
+  /// Apply N modifications under one signature via `POST /exchange`.
+  async batchModify(
+    params: BatchModify,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeBatchModifyAction(params), opts);
+  }
+
+  /// Place N orders under one signature via `POST /exchange`. Each order's
+  /// `owner` must equal the signing wallet; the batch returns the admission
+  /// envelope (not per-order statuses).
+  async batchOrder(
+    batch: BatchOrder,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postBatchOwnerChecked(
+      buildNativeBatchOrderAction(batch),
+      batch.orders.map((o) => o.owner),
       opts,
     );
   }
 
-  /// Distribute vault profits via `POST /exchange`. SENDER-AUTHORIZED — the
-  /// signer is the vault leader; distributes `amount_cents` to followers.
-  async vaultDistribute(
-    params: VaultDistribute,
+  /// Apply N cancels under one signature via `POST /exchange`. Each cancel's
+  /// `owner` must equal the signing wallet.
+  async batchCancel(
+    batch: BatchCancel,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postBatchOwnerChecked(
+      buildNativeBatchCancelAction(batch),
+      batch.cancels.map((c) => c.owner),
+      opts,
+    );
+  }
+
+  /// Schedule a cancel-all of the sender's open orders at a future block.
+  async scheduleCancel(
+    params: ScheduleCancel,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeScheduleCancelAction(params), opts);
+  }
+
+  /// Cancel all of the sender's open orders (optionally one asset) via
+  /// `POST /exchange`.
+  async cancelAllOrders(
+    params: CancelAllOrders = {},
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeCancelAllOrdersAction(params), opts);
+  }
+
+  // ── TWAP ──────────────────────────────────────
+
+  /// Submit a sliced (TWAP) order via `POST /exchange`.
+  async twapOrder(
+    params: TwapOrder,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeTwapOrderAction(params), opts);
+  }
+
+  /// Cancel a running TWAP parent by id via `POST /exchange`.
+  async twapCancel(
+    params: TwapCancel,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeTwapCancelAction(params), opts);
+  }
+
+  // ── leverage & margin ──────────────────────────
+
+  /// Set per-asset leverage (and optionally flip to isolated) via `POST /exchange`.
+  async updateLeverage(
+    params: UpdateLeverage,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeUpdateLeverageAction(params), opts);
+  }
+
+  /// Add or remove isolated margin on an open position via `POST /exchange`.
+  async updateIsolatedMargin(
+    params: UpdateIsolatedMargin,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
     return this.postSenderAuthorized(
-      buildNativeVaultDistributeAction(params),
+      buildNativeUpdateIsolatedMarginAction(params),
       opts,
     );
   }
 
-  /// Withdraw shares from a vault via `POST /exchange`. SENDER-AUTHORIZED — the
-  /// signer is the depositor; redeems `shares` from the vault.
+  /// Top up the margin of a strict-isolated-only position via `POST /exchange`.
+  async topUpIsolatedOnlyMargin(
+    params: TopUpIsolatedOnlyMargin,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(
+      buildNativeTopUpIsolatedOnlyMarginAction(params),
+      opts,
+    );
+  }
+
+  /// Enroll into or out of portfolio margin via `POST /exchange`.
+  async userPortfolioMargin(
+    params: UserPortfolioMargin,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(
+      buildNativeUserPortfolioMarginAction(params),
+      opts,
+    );
+  }
+
+  // ── account & agent settings ───────────────────
+
+  /// Set the account display name via `POST /exchange`.
+  async setDisplayName(
+    params: SetDisplayName,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeSetDisplayNameAction(params), opts);
+  }
+
+  /// Set the account referrer (one-time) via `POST /exchange`.
+  async setReferrer(
+    params: SetReferrer,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeSetReferrerAction(params), opts);
+  }
+
+  /// Approve an agent wallet to sign on this account's behalf via `POST /exchange`.
+  async approveAgent(
+    params: ApproveAgent,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeApproveAgentAction(params), opts);
+  }
+
+  /// Approve a builder fee ceiling (`max_bps`; `0` revokes) via `POST /exchange`.
+  async approveBuilderFee(
+    params: ApproveBuilderFee,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(
+      buildNativeApproveBuilderFeeAction(params),
+      opts,
+    );
+  }
+
+  /// Convert the account to an M-of-N multisig via `POST /exchange`.
+  async convertToMultiSigUser(
+    params: ConvertToMultiSigUser,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(
+      buildNativeConvertToMultiSigUserAction(params),
+      opts,
+    );
+  }
+
+  /// Toggle the account's DEX-abstraction opt-in flag via `POST /exchange`.
+  async userDexAbstraction(
+    params: UserDexAbstraction,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(
+      buildNativeUserDexAbstractionAction(params),
+      opts,
+    );
+  }
+
+  /// Set a self-scoped abstraction config value via `POST /exchange`.
+  async userSetAbstraction(
+    params: UserSetAbstraction,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(
+      buildNativeUserSetAbstractionAction(params),
+      opts,
+    );
+  }
+
+  /// As an approved agent, set an abstraction config value for `params.user`
+  /// via `POST /exchange`.
+  async agentSetAbstraction(
+    params: AgentSetAbstraction,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(
+      buildNativeAgentSetAbstractionAction(params),
+      opts,
+    );
+  }
+
+  /// Pay a priority fee (bps) for block-front placement via `POST /exchange`.
+  async priorityBid(
+    params: PriorityBid,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativePriorityBidAction(params), opts);
+  }
+
+  // ── staking ──────────────────────────────────
+
+  /// Delegate stake to a validator, or queue an undelegation, via `POST /exchange`.
+  async tokenDelegate(
+    params: TokenDelegate,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeTokenDelegateAction(params), opts);
+  }
+
+  /// Claim accrued staking rewards via `POST /exchange`.
+  async claimRewards(
+    params: ClaimRewards = {},
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeClaimRewardsAction(params), opts);
+  }
+
+  /// Alias another account as this account's staking target via `POST /exchange`.
+  async linkStakingUser(
+    params: LinkStakingUser,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeLinkStakingUserAction(params), opts);
+  }
+
+  // ── encrypted orders ───────────────────────────
+
+  /// Submit a threshold-encrypted order ciphertext via `POST /exchange`.
+  async submitEncryptedOrder(
+    params: SubmitEncryptedOrder,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(
+      buildNativeSubmitEncryptedOrderAction(params),
+      opts,
+    );
+  }
+
+  // ── vaults ───────────────────────────────────
+
+  /// Create a new vault via `POST /exchange`. The signing wallet becomes the
+  /// leader. SENDER-AUTHORIZED.
+  async createVault(
+    params: CreateVault,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeCreateVaultAction(params), opts);
+  }
+
+  /// Leader moves capital into / out of a vault via `POST /exchange`.
+  async vaultTransfer(
+    params: VaultTransfer,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeVaultTransferAction(params), opts);
+  }
+
+  /// Leader updates vault configuration via `POST /exchange`.
+  async vaultModify(
+    params: VaultModify,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeVaultModifyAction(params), opts);
+  }
+
+  /// Follower redeems shares from a vault via `POST /exchange`. SENDER-AUTHORIZED.
   async vaultWithdraw(
     params: VaultWithdraw,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(
-      buildNativeVaultWithdrawAction(params),
-      opts,
-    );
+    return this.postSenderAuthorized(buildNativeVaultWithdrawAction(params), opts);
   }
 
-  // ── portfolio-margin actions ──────────────────────────────────────────────
+  // ── MetaBridge ───────────────────────────────
 
-  /// Enroll an account into portfolio margin via `POST /exchange`.
-  /// OWNER-CHECKED: `params.user` must equal the signing wallet.
-  async pmEnroll(
-    params: PmEnroll,
+  /// Withdraw cross-collateral to a destination chain via `POST /exchange`.
+  async mbWithdraw(
+    params: MbWithdraw,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postOwnerChecked(
-      buildNativePmEnrollAction(params),
-      params.user,
-      opts,
-    );
+    return this.postSenderAuthorized(buildNativeMbWithdrawAction(params), opts);
   }
 
-  /// Unenroll an account from portfolio margin via `POST /exchange`.
-  /// OWNER-CHECKED: `params.user` must equal the signing wallet.
-  async pmUnenroll(
-    params: PmUnenroll,
-    opts: { nonce?: bigint; chainId?: number } = {},
-  ): Promise<NativeExchangeAck> {
-    return this.postOwnerChecked(
-      buildNativePmUnenrollAction(params),
-      params.user,
-      opts,
-    );
-  }
+  // ── governance / operator ─────────────────────
 
-  /// Trigger a portfolio-margin rebalance via `POST /exchange`.
-  /// SENDER-AUTHORIZED — rebalances the enrolled account `params.user`.
-  async pmRebalance(
-    params: PmRebalance,
+  /// Set a metaliquidity-provider whitelist membership (validator-authorized)
+  /// via `POST /exchange`.
+  async setMetaliquidityWhitelist(
+    params: SetMetaliquidityWhitelist,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
     return this.postSenderAuthorized(
-      buildNativePmRebalanceAction(params),
+      buildNativeSetMetaliquidityWhitelistAction(params),
       opts,
     );
   }
 
-  // ── RFQ actions ───────────────────────────────────────────────────────────
-
-  /// Open a request-for-quote via `POST /exchange`. OWNER-CHECKED:
-  /// `rfq.taker` must equal the signing wallet.
-  async rfqRequest(
-    rfq: RfqRequest,
+  /// Register or revoke an external strategy operator for a vault
+  /// (vault-leader-authorized) via `POST /exchange`.
+  async registerMetaliquidityOperator(
+    params: RegisterMetaliquidityOperator,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postOwnerChecked(
-      buildNativeRfqRequestAction(rfq),
-      rfq.taker,
+    return this.postSenderAuthorized(
+      buildNativeRegisterMetaliquidityOperatorAction(params),
       opts,
     );
-  }
-
-  /// Accept an outstanding RFQ via `POST /exchange`. SENDER-AUTHORIZED — the
-  /// signer is the market maker quoting `price` on `rfq_id`.
-  async rfqAccept(
-    accept: RfqAccept,
-    opts: { nonce?: bigint; chainId?: number } = {},
-  ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeRfqAcceptAction(accept), opts);
-  }
-
-  // ── frequent-batch-auction action ─────────────────────────────────────────
-
-  /// Submit a frequent-batch-auction order via `POST /exchange`. OWNER-CHECKED:
-  /// `submit.owner` must equal the signing wallet.
-  async fbaSubmit(
-    submit: FbaSubmit,
-    opts: { nonce?: bigint; chainId?: number } = {},
-  ): Promise<NativeExchangeAck> {
-    return this.postOwnerChecked(
-      buildNativeFbaSubmitAction(submit),
-      submit.owner,
-      opts,
-    );
-  }
-
-  // ── cross-chain action ────────────────────────────────────────────────────
-
-  /// Send assets cross-chain via `POST /exchange`. OWNER-CHECKED: `msg.sender`
-  /// must equal the signing wallet. (`msg.nonce` is the action's own field,
-  /// distinct from the EIP-712 replay nonce in `opts`.)
-  async crossChainSend(
-    msg: CrossChainSend,
-    opts: { nonce?: bigint; chainId?: number } = {},
-  ): Promise<NativeExchangeAck> {
-    return this.postOwnerChecked(
-      buildNativeCrossChainSendAction(msg),
-      msg.sender,
-      opts,
-    );
-  }
-
-  // ── encrypted-order action ────────────────────────────────────────────────
-
-  /// Submit a threshold-encrypted order via `POST /exchange`. OWNER-CHECKED:
-  /// `encrypted.submitter` must equal the signing wallet.
-  async encryptedOrderSubmit(
-    encrypted: EncryptedOrderSubmit,
-    opts: { nonce?: bigint; chainId?: number } = {},
-  ): Promise<NativeExchangeAck> {
-    return this.postOwnerChecked(
-      buildNativeEncryptedOrderSubmitAction(encrypted),
-      encrypted.submitter,
-      opts,
-    );
-  }
-
-  /// Sign a pre-built owner-checked action JSON and POST it to `/exchange`.
-  ///
-  /// Shared by the actions that carry an actor address (`leader` / `user` /
-  /// `taker` / `owner` / `sender` / `submitter`): we recover the signer locally
-  /// and reject a mismatch before hitting the network, mirroring
-  /// `submitOrderNative`. The server enforces the same.
-  private async postOwnerChecked(
-    actionJson: string,
-    expectedOwner: string,
-    opts: { nonce?: bigint; chainId?: number },
-  ): Promise<NativeExchangeAck> {
-    if (this.privateKey === undefined) {
-      throw new Error(
-        'this action requires a privateKey in ClientOpts (this Client is read-only)',
-      );
-    }
-    const nonce = opts.nonce ?? nextNonce();
-    const signed = await signNativeAction(
-      this.privateKey,
-      actionJson,
-      nonce,
-      opts.chainId,
-    );
-    const signer = await recoverNativeSigner(signed, opts.chainId);
-    if (signer.toLowerCase() !== expectedOwner.toLowerCase()) {
-      throw new Error(
-        `action owner ${expectedOwner} != recovered signer ${signer}`,
-      );
-    }
-    return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
-      method: 'POST',
-      rawJson: nativeRequestBody(signed),
-      bearer: this.jwt,
-    });
   }
 
   /// Sign a pre-built sender-authorized action JSON and POST it to `/exchange`.
@@ -720,6 +910,40 @@ export class Client {
       nonce,
       opts.chainId,
     );
+    return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
+      method: 'POST',
+      rawJson: nativeRequestBody(signed),
+      bearer: this.jwt,
+    });
+  }
+
+  /// Sign a pre-built batch action whose inner orders / cancels each carry an
+  /// `owner`, and POST it to `/exchange`. Recovers the signer once and rejects
+  /// unless EVERY inner `owner` equals it (the node sets the sender to the
+  /// recovered signer for all of them).
+  private async postBatchOwnerChecked(
+    actionJson: string,
+    owners: string[],
+    opts: { nonce?: bigint; chainId?: number },
+  ): Promise<NativeExchangeAck> {
+    if (this.privateKey === undefined) {
+      throw new Error(
+        'this action requires a privateKey in ClientOpts (this Client is read-only)',
+      );
+    }
+    const nonce = opts.nonce ?? nextNonce();
+    const signed = await signNativeAction(
+      this.privateKey,
+      actionJson,
+      nonce,
+      opts.chainId,
+    );
+    const signer = await recoverNativeSigner(signed, opts.chainId);
+    for (const owner of owners) {
+      if (signer.toLowerCase() !== owner.toLowerCase()) {
+        throw new Error(`batch item owner ${owner} != recovered signer ${signer}`);
+      }
+    }
     return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
       method: 'POST',
       rawJson: nativeRequestBody(signed),
