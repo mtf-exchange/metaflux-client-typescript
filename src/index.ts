@@ -56,9 +56,16 @@ export {
   buildNativeVaultTransferAction,
   buildNativeVaultModifyAction,
   buildNativeVaultWithdrawAction,
+  buildNativeVaultDistributeAction,
   buildNativeMbWithdrawAction,
   buildNativeSetMetaliquidityWhitelistAction,
   buildNativeRegisterMetaliquidityOperatorAction,
+  // RFQ / FBA / cross-chain / encrypted (forward-compat) builders.
+  buildNativeRfqRequestAction,
+  buildNativeRfqAcceptAction,
+  buildNativeFbaSubmitAction,
+  buildNativeCrossChainSendAction,
+  buildNativeEncryptedOrderSubmitAction,
   // Spot CLOB + spot margin (leveraged spot) + Earn (lending pool).
   buildNativeSpotOrderAction,
   buildNativeSpotCancelAction,
@@ -85,6 +92,7 @@ export type {
   Tier,
   MarginMode,
   MarketInfo,
+  MarketKind,
   Funding,
   VaultState,
   StakingState,
@@ -156,6 +164,7 @@ export {
   type WsFrame,
   type WsMessageHandler,
   type WsConfig,
+  type WsSigner,
   type AllMids,
   type ActiveAssetCtx,
 } from './ws/ws.js';
@@ -234,16 +243,24 @@ export type {
   LinkStakingUser,
   // Encrypted orders.
   SubmitEncryptedOrder,
+  EncryptedOrderSubmit,
   // Vaults.
   VaultKind,
   CreateVault,
   VaultTransfer,
   VaultModify,
   VaultWithdraw,
+  VaultDistribute,
   // MetaBridge.
   MbChain,
   MbWithdraw,
   // Governance / operator.
   SetMetaliquidityWhitelist,
   RegisterMetaliquidityOperator,
+  // RFQ / FBA / cross-chain (forward-compat).
+  CoreSide,
+  RfqRequest,
+  RfqAccept,
+  FbaSubmit,
+  CrossChainSend,
 } from './types/index.js';

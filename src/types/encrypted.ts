@@ -19,3 +19,26 @@ export interface SubmitEncryptedOrder {
   /// (`u64`).
   reveal_deadline_ms: number;
 }
+
+/// `encrypted_order_submit` — submit a threshold-encrypted order under the
+/// node's `evm_integration` `EncryptedOrderSubmitParams`. The action envelope
+/// wraps this under the key **`encrypted`**.
+///
+/// DISTINCT from `SubmitEncryptedOrder`: that 5-field type backs the *different*
+/// `submit_encrypted_order` tag (key `params`, the real bridged handler). This
+/// 3-field type has **no** `threshold` / `target_block`.
+///
+/// Forward-compat: the node currently answers this tag with `UnsupportedAction`
+/// on the public `/exchange` path; the SDK emits the byte-correct shape the core
+/// handler will accept once the bridge lands.
+export interface EncryptedOrderSubmit {
+  /// Threshold-encrypted order bytes (node decoder bounds this at 4096).
+  /// Emitted as a JSON array of byte numbers — pass a `Uint8Array`.
+  ciphertext: Uint8Array;
+  /// 32-byte `keccak(plaintext‖salt)` commitment. Emitted as a JSON array of
+  /// 32 byte numbers — pass a 32-byte `Uint8Array`.
+  commitment: Uint8Array;
+  /// Absolute consensus-time ms by which a valid plaintext must be revealed
+  /// (`u64`).
+  reveal_deadline_ms: number;
+}

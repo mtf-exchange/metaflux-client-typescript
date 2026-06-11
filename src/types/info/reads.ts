@@ -5,18 +5,30 @@
 // Money magnitudes that can exceed 2^53 are typed `string`.
 
 /// One resting order inside an `OpenOrders` response.
+///
+/// `px` is x1e8 fixed-point (positive canonical price for **both** sides);
+/// `size` is raw lots (`whole × 10^sz_decimals`). `side` is lowercase
+/// `"bid"`/`"ask"`. `oid` / `market_id` / `inserted_at_ms` are bare integers.
+///
+/// LIVE GATEWAY GAP: a resting order currently reads back with `oid: 0` and
+/// `inserted_at_ms: 0` even though it is on the book — so an order is NOT
+/// reliably cancellable by the `oid` from this snapshot, and it carries no
+/// `cloid`. Until the gateway populates `oid`, the oid-independent workaround
+/// for reconcile / ghost-sweep is the `cancel_all_orders` exchange action
+/// (`Client.cancelAllOrders`, keyed by account / asset) rather than per-oid
+/// cancels.
 export interface OpenOrder {
-  /// Server order id.
+  /// Server order id. See the note: currently `0` on the gateway.
   oid: number;
   /// Asset / market id the order rests on.
   market_id: number;
-  /// Order side.
+  /// Order side, lowercase `"bid"` / `"ask"`.
   side: 'bid' | 'ask';
-  /// Resting price, fixed-point decimal string.
+  /// Resting price, x1e8 fixed-point decimal string.
   px: string;
-  /// Remaining size, fixed-point decimal string.
+  /// Remaining size, raw lots (`whole × 10^sz_decimals`) decimal string.
   size: string;
-  /// Insertion timestamp (consensus ms).
+  /// Insertion timestamp (consensus ms). See the note: currently `0`.
   inserted_at_ms: number;
 }
 

@@ -30,14 +30,19 @@ import {
   buildNativeClaimRewardsAction,
   buildNativeConvertToMultiSigUserAction,
   buildNativeCreateVaultAction,
+  buildNativeCrossChainSendAction,
   buildNativeEarnDepositAction,
   buildNativeEarnWithdrawAction,
+  buildNativeEncryptedOrderSubmitAction,
+  buildNativeFbaSubmitAction,
   buildNativeLinkStakingUserAction,
   buildNativeMbWithdrawAction,
   buildNativeModifyAction,
   buildNativeOrderAction,
   buildNativePriorityBidAction,
   buildNativeRegisterMetaliquidityOperatorAction,
+  buildNativeRfqAcceptAction,
+  buildNativeRfqRequestAction,
   buildNativeScheduleCancelAction,
   buildNativeSetDisplayNameAction,
   buildNativeSetMetaliquidityWhitelistAction,
@@ -59,6 +64,7 @@ import {
   buildNativeUserDexAbstractionAction,
   buildNativeUserPortfolioMarginAction,
   buildNativeUserSetAbstractionAction,
+  buildNativeVaultDistributeAction,
   buildNativeVaultModifyAction,
   buildNativeVaultTransferAction,
   buildNativeVaultWithdrawAction,
@@ -83,6 +89,9 @@ import type {
   ClaimRewards,
   ConvertToMultiSigUser,
   CreateVault,
+  CrossChainSend,
+  EncryptedOrderSubmit,
+  FbaSubmit,
   LinkStakingUser,
   Market,
   MbWithdraw,
@@ -104,6 +113,8 @@ import type {
   Position,
   PriorityBid,
   RegisterMetaliquidityOperator,
+  RfqAccept,
+  RfqRequest,
   ScheduleCancel,
   SetDisplayName,
   SetMetaliquidityWhitelist,
@@ -119,6 +130,7 @@ import type {
   UserDexAbstraction,
   UserPortfolioMargin,
   UserSetAbstraction,
+  VaultDistribute,
   VaultModify,
   VaultTransfer,
   VaultWithdraw,
@@ -689,6 +701,28 @@ export class Client {
     );
   }
 
+  /// Enroll the signing account into portfolio margin via `POST /exchange`.
+  ///
+  /// Convenience wrapper over `userPortfolioMargin({ enroll: true })`. The node's
+  /// `pm_enroll` action tag is an unmapped stub, so this deliberately emits the
+  /// bridged `user_portfolio_margin` action (NOT a `pm_enroll` tag).
+  async pmEnroll(
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.userPortfolioMargin({ enroll: true }, opts);
+  }
+
+  /// Unenroll the signing account from portfolio margin via `POST /exchange`.
+  ///
+  /// Convenience wrapper over `userPortfolioMargin({ enroll: false })`. The
+  /// node's `pm_unenroll` action tag is an unmapped stub, so this deliberately
+  /// emits the bridged `user_portfolio_margin` action (NOT a `pm_unenroll` tag).
+  async pmUnenroll(
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.userPortfolioMargin({ enroll: false }, opts);
+  }
+
   // ── account & agent settings ───────────────────
 
   /// Set the account display name via `POST /exchange`.
@@ -853,6 +887,20 @@ export class Client {
     return this.postSenderAuthorized(buildNativeVaultWithdrawAction(params), opts);
   }
 
+  /// Follower deposits USD into a vault, minting shares at the current NAV, via
+  /// `POST /exchange` (`vault_distribute`). The deposit rides the `pnl` field
+  /// (legacy node name) as a positive decimal string. SENDER-AUTHORIZED.
+  ///
+  /// Forward-compat: the node currently returns `UnsupportedAction` for this tag
+  /// on `/exchange` until it bridges the handler; the SDK emits the byte-correct
+  /// wire shape so it goes live the moment the bridge lands.
+  async vaultDistribute(
+    params: VaultDistribute,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeVaultDistributeAction(params), opts);
+  }
+
   // ── MetaBridge ───────────────────────────────
 
   /// Withdraw cross-collateral to a destination chain via `POST /exchange`.
@@ -885,6 +933,67 @@ export class Client {
   ): Promise<NativeExchangeAck> {
     return this.postSenderAuthorized(
       buildNativeRegisterMetaliquidityOperatorAction(params),
+      opts,
+    );
+  }
+
+  // ── RFQ / FBA / cross-chain / encrypted (forward-compat) ──────────────────
+  //
+  // The node recognizes these action tags but currently lowers them to
+  // `UnsupportedAction` on the public `/exchange` path (the real handlers run
+  // on the EVM core-writer path). The SDK emits the byte-correct wire shape each
+  // core param struct expects, so these become live the moment the node bridges
+  // them — no SDK change required. All SENDER-AUTHORIZED (the recovered signer
+  // is the taker / submitter).
+
+  /// Open an RFQ session as a taker (`rfq_request`) via `POST /exchange`.
+  /// Wrapper key is `rfq`; `side` is PascalCase; the `limit_px` / `stp_group`
+  /// keys are always present (`null` when absent).
+  async rfqRequest(
+    params: RfqRequest,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeRfqRequestAction(params), opts);
+  }
+
+  /// Cross against a specific resting RFQ quote (`rfq_accept`) via
+  /// `POST /exchange`. Wrapper key is `accept`.
+  async rfqAccept(
+    params: RfqAccept,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeRfqAcceptAction(params), opts);
+  }
+
+  /// Submit an order into a market's frequent-batch-auction pool (`fba_submit`)
+  /// via `POST /exchange`. Wrapper key is `submit`; the price field is `price`
+  /// (NOT `limit_px`); `side` is PascalCase; `stp_group` key is always present.
+  async fbaSubmit(
+    params: FbaSubmit,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeFbaSubmitAction(params), opts);
+  }
+
+  /// Initiate a chain-agnostic cross-chain transfer (`cross_chain_send`) via
+  /// `POST /exchange`. Wrapper key is `msg`; `recipient` is a 32-byte array and
+  /// `amount` is a bare number (NOT hex).
+  async crossChainSend(
+    params: CrossChainSend,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(buildNativeCrossChainSendAction(params), opts);
+  }
+
+  /// Submit a threshold-encrypted order via the `encrypted_order_submit` tag
+  /// (`POST /exchange`). Wrapper key is `encrypted`; only 3 fields — DISTINCT
+  /// from `submitEncryptedOrder` (5 fields, key `params`, a different handler).
+  async encryptedOrderSubmit(
+    params: EncryptedOrderSubmit,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postSenderAuthorized(
+      buildNativeEncryptedOrderSubmitAction(params),
       opts,
     );
   }
@@ -956,9 +1065,18 @@ export class Client {
   /// Derives the `ws(s)://` URL from the client's `http(s)://` base, mounts the
   /// `/ws` path (the node's upgrade route), and returns a connected
   /// [`WsClient`]. Register handlers via `ws.onMessage` and subscribe with
-  /// `ws.subscribe({ type: 'l2_book', coin: 'BTC' })`.
+  /// `ws.subscribe({ type: 'l2_book', coin: '1' })`.
+  ///
+  /// If this client holds a private key, the returned `WsClient` is seeded with
+  /// a signer so it can POST signed exchange actions over the socket
+  /// (`ws.submitOrder` / `ws.cancelOrder` / `ws.postAction`) — signed against
+  /// the MTF-native chain id (`MTF_CHAIN_ID`), the same domain the REST
+  /// `/exchange` path uses. A read-only client yields a WS client that can still
+  /// subscribe and `postInfo`, but not `postAction`.
   async connectWs(config: Partial<WsConfig> = {}): Promise<WsClient> {
-    const ws = new WsClient(httpToWsUrl(this.baseUrl), config);
+    const signer =
+      this.privateKey !== undefined ? { privateKey: this.privateKey } : undefined;
+    const ws = new WsClient(httpToWsUrl(this.baseUrl), config, signer);
     await ws.connect();
     return ws;
   }
