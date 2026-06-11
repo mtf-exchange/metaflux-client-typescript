@@ -8,7 +8,7 @@
 // and that inbound {"channel","data"} frames fan out to handlers.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { WsClient, WS_CHANNELS } from '../src/ws/ws.js';
+import { WsClient, WS_CHANNELS, type WsFrame } from '../src/ws/ws.js';
 
 // Minimal WebSocket stand-in. Records every sent frame; lets the test inject
 // inbound messages and lifecycle events.
@@ -157,7 +157,7 @@ describe('WsClient wire protocol', () => {
     ws.close();
   });
 
-  it('exposes the exact server channel names', () => {
+  it('exposes the exact 17 native gateway channel names', () => {
     expect([...WS_CHANNELS]).toEqual([
       'l2_book',
       'bbo',
@@ -173,7 +173,131 @@ describe('WsClient wire protocol', () => {
       'user_fundings',
       'user_twap_slice_fills',
       'user_twap_history',
+      'account_state',
+      'spot_state',
       'active_asset_data',
     ]);
+  });
+
+  it('subscribe helpers format coin as a decimal asset-id string', async () => {
+    const ws = new WsClient('wss://x/ws', { autoReconnect: false });
+    const p = ws.connect();
+    const sock = MockSocket.instances[0]!;
+    sock.open();
+    await p;
+
+    await ws.subscribeL2Book(1);
+    expect(sock.sent).toContain(
+      '{"method":"subscribe","subscription":{"type":"l2_book","coin":"1"}}',
+    );
+    await ws.subscribeCandles(7, '5m');
+    expect(sock.sent).toContain(
+      '{"method":"subscribe","subscription":{"type":"candles","coin":"7","interval":"5m"}}',
+    );
+    await ws.subscribeAllMids();
+    expect(sock.sent).toContain(
+      '{"method":"subscribe","subscription":{"type":"all_mids"}}',
+    );
+    ws.close();
+  });
+
+  it('postInfo correlates the response by id and unwraps payload', async () => {
+    const ws = new WsClient('wss://x/ws', { autoReconnect: false });
+    const p = ws.connect();
+    const sock = MockSocket.instances[0]!;
+    sock.open();
+    await p;
+
+    const reply = ws.postInfo({ type: 'node_info' });
+    // The frame went out as a `post` with id 1 and the info request payload.
+    const frame = JSON.parse(sock.sent[sock.sent.length - 1]!) as {
+      method: string;
+      id: number;
+      request: { type: string; payload: unknown };
+    };
+    expect(frame.method).toBe('post');
+    expect(frame.id).toBe(1);
+    expect(frame.request.type).toBe('info');
+    expect(frame.request.payload).toEqual({ type: 'node_info' });
+
+    // The node echoes the id and wraps `{type, payload}`; post() returns payload.
+    sock.inbound(
+      `{"channel":"post","data":{"id":1,"response":{"type":"info","payload":{"network":"devnet"}}}}`,
+    );
+    expect(await reply).toEqual({ network: 'devnet' });
+    // A `post` frame is consumed by the correlator, not fanned out to handlers.
+    ws.close();
+  });
+
+  it('postInfo surfaces a {type:"error"} response as a rejection', async () => {
+    const ws = new WsClient('wss://x/ws', { autoReconnect: false });
+    const p = ws.connect();
+    const sock = MockSocket.instances[0]!;
+    sock.open();
+    await p;
+
+    const reply = ws.postInfo({ type: 'bogus' });
+    const id = (
+      JSON.parse(sock.sent[sock.sent.length - 1]!) as { id: number }
+    ).id;
+    sock.inbound(
+      `{"channel":"post","data":{"id":${id},"response":{"type":"error","payload":"no such query"}}}`,
+    );
+    await expect(reply).rejects.toThrow(/no such query/);
+    ws.close();
+  });
+
+  it('post frames are not fanned out to subscription handlers', async () => {
+    const ws = new WsClient('wss://x/ws', { autoReconnect: false });
+    const p = ws.connect();
+    const sock = MockSocket.instances[0]!;
+    sock.open();
+    await p;
+
+    const got: WsFrame[] = [];
+    ws.onMessage((f) => got.push(f));
+    // No pending post with this id — the correlator drops it; handlers never see it.
+    sock.inbound(
+      '{"channel":"post","data":{"id":999,"response":{"type":"info","payload":{}}}}',
+    );
+    expect(got).toHaveLength(0);
+    ws.close();
+  });
+
+  it('postAction / submitOrder throw without a signer', async () => {
+    const ws = new WsClient('wss://x/ws', { autoReconnect: false });
+    const p = ws.connect();
+    MockSocket.instances[0]!.open();
+    await p;
+    await expect(
+      ws.postAction('{"type":"set_position_mode","params":{"hedge":true}}'),
+    ).rejects.toThrow(/WsSigner/);
+    ws.close();
+  });
+
+  it('subscriptionResponse / error / bare-pong inbound frames all decode', async () => {
+    const ws = new WsClient('wss://x/ws', { autoReconnect: false });
+    const p = ws.connect();
+    const sock = MockSocket.instances[0]!;
+    sock.open();
+    await p;
+
+    const got: WsFrame[] = [];
+    ws.onMessage((f) => got.push(f));
+    // camelCase ack channel; error carries data.error; pong is a bare frame.
+    sock.inbound(
+      '{"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{"type":"l2_book","coin":"1"}}}',
+    );
+    sock.inbound('{"channel":"error","data":{"error":"bad channel"}}');
+    sock.inbound('{"channel":"pong"}');
+
+    expect(got.map((f) => f.channel)).toEqual([
+      'subscriptionResponse',
+      'error',
+      'pong',
+    ]);
+    // The bare pong has no `data` — passthrough leaves it `undefined`, no crash.
+    expect(got[2]!.data).toBeUndefined();
+    ws.close();
   });
 });

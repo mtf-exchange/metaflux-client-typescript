@@ -53,3 +53,24 @@ export interface VaultWithdraw {
   /// Shares to redeem, as a decimal string.
   shares: string;
 }
+
+/// `vault_distribute` — a follower deposits USD into a vault and receives shares
+/// at the current NAV (subject to the per-vault withdrawal lock). Mirrors the
+/// node's `core_state` `VaultDistributeParams`; the action envelope wraps this
+/// under the key **`params`**.
+///
+/// **Trap:** the deposit-amount field is named **`pnl`** (a legacy name on the
+/// node), NOT `amount`/`deposit`. It is a positive USD amount encoded as a
+/// decimal string (the SDK's decimal-on-the-wire convention, matching
+/// `vault_transfer` / `vault_withdraw`).
+///
+/// Forward-compat: the node currently answers this tag with `UnsupportedAction`
+/// on the public `/exchange` path; the SDK emits the byte-correct shape the core
+/// handler will accept once the bridge lands.
+export interface VaultDistribute {
+  /// Target vault id (`u64`). Serializes as a bare JSON number.
+  vault_id: number;
+  /// Deposit amount in USD as a positive decimal string. Node field name is
+  /// `pnl` (legacy) — do NOT rename.
+  pnl: string;
+}

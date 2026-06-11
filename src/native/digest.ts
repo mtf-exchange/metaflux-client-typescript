@@ -264,6 +264,18 @@ export function validateU128(value: bigint, field: string): void {
   if (value >= 1n << 128n) throw new RangeError(`${field} overflows u128`);
 }
 
+/// Validate an `i128` field passed as a `bigint`, emitted as a bare unquoted
+/// integer literal on the wire (serde i128 JSON number form). Accepts the full
+/// signed-128-bit range `[-2^127, 2^127)`.
+export function validateI128(value: bigint, field: string): void {
+  if (typeof value !== 'bigint') {
+    throw new RangeError(`${field} must be a bigint`);
+  }
+  if (value < -(1n << 127n) || value >= 1n << 127n) {
+    throw new RangeError(`${field} overflows i128`);
+  }
+}
+
 /// Validate a decimal magnitude passed as a string and emitted as a JSON
 /// **string** on the wire (e.g. spot-margin `amount` / `borrow`, Earn
 /// `shares`). The server decodes these as a fixed-point `Decimal`, so they must

@@ -97,22 +97,28 @@ export interface Funding {
   next_payment_ts: number;
 }
 
+/// Market kind. The deployed gateway emits lowercase `"perp"` / `"spot"`.
+export type MarketKind = 'perp' | 'spot';
+
 /// `market_info` / `markets` element — rich per-market metadata.
 ///
-/// `mark_px` is the on-book mark in the 1e8 fixed-point plane; `oracle_px` is
-/// the index price in the whole-USDC plane. Both are `"0"` when unset. (These
-/// two price fields are emitted by the node `market_record` builder; they are
-/// not yet listed in the KB field table but are part of the live wire shape.)
+/// `mark_px` and `oracle_px` are whole-USDC decimal strings (tick-snapped;
+/// `"0"` fallback). `sz_decimals` is load-bearing for size encoding — raw
+/// order/position `size` = `whole_units × 10^sz_decimals`, NOT derivable from
+/// `step_size`.
 export interface MarketInfo {
   /// Canonical asset id.
   asset_id: number;
   /// Human-readable market name (e.g. `"BTC"`).
   name: string;
-  /// Market kind — currently always `"Perp"`.
-  kind: string;
-  /// On-book mark price, 1e8 fixed-point as a decimal string.
+  /// Market kind — lowercase `"perp"` / `"spot"`.
+  kind: MarketKind;
+  /// Size precision: raw order/position `size` = `whole_units × 10^sz_decimals`.
+  /// Load-bearing for size encoding — NOT derivable from `step_size`.
+  sz_decimals: number;
+  /// Mark price, whole-USDC plane as a decimal string (`"0"` fallback).
   mark_px: string;
-  /// Oracle/index price, whole-USDC plane as a decimal string.
+  /// Oracle/index price, whole-USDC plane as a decimal string (`"0"` fallback).
   oracle_px: string;
   /// Tick size (smallest price increment), fixed-point string.
   tick_size: string;
@@ -201,14 +207,23 @@ export interface FeeTier {
 }
 
 /// `fee_schedule` — protocol fee schedule. Fee rates are decimal bps strings;
-/// `burn_ratio` is a decimal fraction string (`"0.30"` = 30%).
+/// `burn_ratio` is a decimal fraction string in `[0, 1]` (`"0.8"` = 80%) — NOT
+/// bps, do not scale it by 10000. `tiers[0]` is the authoritative carrier of
+/// maker/taker when the top-level pair is absent.
 export interface FeeSchedule {
-  /// Volume-tier ladder.
+  /// Top-level base maker fee, decimal bps string. Present on the deployed
+  /// gateway; ABSENT from a node built from current source — fall back to
+  /// `tiers[0].maker_bps` when `undefined`.
+  maker_bps?: string;
+  /// Top-level base taker fee, decimal bps string. See `maker_bps`.
+  taker_bps?: string;
+  /// Volume-tier ladder (authoritative carrier of maker/taker).
   tiers: FeeTier[];
-  /// Builder rebate, decimal bps string.
+  /// Max additional builder-code rebate, decimal bps string.
   builder_rebate_bps: string;
-  /// Fraction of fees burned, decimal fraction string.
+  /// Burn fraction of the non-referrer remainder, decimal fraction string in
+  /// `[0, 1]` (NOT bps).
   burn_ratio: string;
-  /// Referrer share, decimal bps string.
+  /// Referrer share of the base taker take, decimal bps string.
   referrer_share_bps: string;
 }

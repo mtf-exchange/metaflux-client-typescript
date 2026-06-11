@@ -11,6 +11,7 @@ export type {
   Tier,
   MarginMode,
   MarketInfo,
+  MarketKind,
   Funding,
   VaultState,
   StakingState,

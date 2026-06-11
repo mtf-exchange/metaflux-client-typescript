@@ -189,6 +189,137 @@ describe('real native write-action builders (JSON shape)', () => {
   });
 });
 
+describe('forward-compat write-action builders (RFQ / FBA / cross-chain / encrypted / vault_distribute)', () => {
+  it('vault_distribute: pnl as a decimal string, vault_id as a number', async () => {
+    const { buildNativeVaultDistributeAction } = await import(
+      '../src/native/actions.js'
+    );
+    expect(buildNativeVaultDistributeAction({ vault_id: 42, pnl: '1000.5' })).toBe(
+      '{"type":"vault_distribute","params":{"vault_id":42,"pnl":"1000.5"}}',
+    );
+  });
+
+  it('rfq_request: wrapper key `rfq`, PascalCase side, null optional keys present', async () => {
+    const { buildNativeRfqRequestAction } = await import('../src/native/actions.js');
+    expect(
+      buildNativeRfqRequestAction({
+        market: 7,
+        side: 'Bid',
+        size: 1000n,
+        limit_px: null,
+        expiry_ms: 0,
+        stp_group: null,
+      }),
+    ).toBe(
+      '{"type":"rfq_request","rfq":{"market":7,"side":"Bid","size":1000,"limit_px":null,"expiry_ms":0,"stp_group":null}}',
+    );
+  });
+
+  it('rfq_request: emits present limit_px (i128) + stp_group', async () => {
+    const { buildNativeRfqRequestAction } = await import('../src/native/actions.js');
+    expect(
+      buildNativeRfqRequestAction({
+        market: 1,
+        side: 'Ask',
+        size: 5n,
+        limit_px: -3n,
+        expiry_ms: 1700000000000,
+        stp_group: 9,
+      }),
+    ).toBe(
+      '{"type":"rfq_request","rfq":{"market":1,"side":"Ask","size":5,"limit_px":-3,"expiry_ms":1700000000000,"stp_group":9}}',
+    );
+  });
+
+  it('rfq_request: rejects a snake_case side token', async () => {
+    const { buildNativeRfqRequestAction } = await import('../src/native/actions.js');
+    expect(() =>
+      buildNativeRfqRequestAction({
+        market: 1,
+        // @ts-expect-error — snake_case is not a CoreSide.
+        side: 'bid',
+        size: 1n,
+        limit_px: null,
+        expiry_ms: 0,
+        stp_group: null,
+      }),
+    ).toThrow();
+  });
+
+  it('rfq_accept: wrapper key `accept`', async () => {
+    const { buildNativeRfqAcceptAction } = await import('../src/native/actions.js');
+    expect(
+      buildNativeRfqAcceptAction({ rfq_id: 5, quote_idx: 0, size: 1000n }),
+    ).toBe('{"type":"rfq_accept","accept":{"rfq_id":5,"quote_idx":0,"size":1000}}');
+  });
+
+  it('fba_submit: wrapper key `submit`, `price` (not limit_px), null stp_group present', async () => {
+    const { buildNativeFbaSubmitAction } = await import('../src/native/actions.js');
+    expect(
+      buildNativeFbaSubmitAction({
+        market: 7,
+        side: 'Ask',
+        size: 1000n,
+        price: 5000000000n,
+        stp_group: null,
+      }),
+    ).toBe(
+      '{"type":"fba_submit","submit":{"market":7,"side":"Ask","size":1000,"price":5000000000,"stp_group":null}}',
+    );
+  });
+
+  it('cross_chain_send: wrapper key `msg`, 32-byte recipient array, numeric amount', async () => {
+    const { buildNativeCrossChainSendAction } = await import(
+      '../src/native/actions.js'
+    );
+    const recipient = '[' + new Array(32).fill(7).join(',') + ']';
+    expect(
+      buildNativeCrossChainSendAction({
+        dst_chain_id: 8453,
+        recipient: new Uint8Array(32).fill(7),
+        token: 1,
+        amount: 1000000n,
+        nonce: 7,
+      }),
+    ).toBe(
+      `{"type":"cross_chain_send","msg":{"dst_chain_id":8453,"recipient":${recipient},"token":1,"amount":1000000,"nonce":7}}`,
+    );
+  });
+
+  it('cross_chain_send: rejects a non-32-byte recipient', async () => {
+    const { buildNativeCrossChainSendAction } = await import(
+      '../src/native/actions.js'
+    );
+    expect(() =>
+      buildNativeCrossChainSendAction({
+        dst_chain_id: 1,
+        recipient: new Uint8Array(20),
+        token: 1,
+        amount: 1n,
+        nonce: 1,
+      }),
+    ).toThrow();
+  });
+
+  it('encrypted_order_submit: wrapper key `encrypted`, 3 fields only', async () => {
+    const { buildNativeEncryptedOrderSubmitAction } = await import(
+      '../src/native/actions.js'
+    );
+    const commitment = '[' + new Array(32).fill(0).join(',') + ']';
+    const out = buildNativeEncryptedOrderSubmitAction({
+      ciphertext: new Uint8Array([1, 2, 255]),
+      commitment: new Uint8Array(32),
+      reveal_deadline_ms: 123,
+    });
+    expect(out).toBe(
+      `{"type":"encrypted_order_submit","encrypted":{"ciphertext":[1,2,255],"commitment":${commitment},"reveal_deadline_ms":123}}`,
+    );
+    // Distinct from submit_encrypted_order: no threshold / target_block keys.
+    expect(out).not.toContain('threshold');
+    expect(out).not.toContain('target_block');
+  });
+});
+
 describe.skipIf(!wasmBuilt)('real native write-action sign → recover', () => {
   it('update_leverage round-trips to the signer (sender-authorized)', async () => {
     const { buildNativeUpdateLeverageAction, signNativeAction, recoverNativeSigner } =
@@ -215,6 +346,26 @@ describe.skipIf(!wasmBuilt)('real native write-action sign → recover', () => {
       lock_period_secs: 604800,
     });
     const signed = await signNativeAction(privKey, actionJson, 2n, KAT_CHAIN_ID);
+    const recovered = await recoverNativeSigner(signed, KAT_CHAIN_ID);
+    expect(recovered.toLowerCase()).toBe(expected.toLowerCase());
+  });
+
+  it('rfq_request (forward-compat) signs over its exact bytes and recovers the signer', async () => {
+    const { buildNativeRfqRequestAction, signNativeAction, recoverNativeSigner } =
+      await import('../src/native/index.js');
+    const privKey = new Uint8Array(32).fill(0x66);
+    const expected = await signerAddress(privKey);
+    const actionJson = buildNativeRfqRequestAction({
+      market: 7,
+      side: 'Bid',
+      size: 1000n,
+      limit_px: null,
+      expiry_ms: 0,
+      stp_group: null,
+    });
+    const signed = await signNativeAction(privKey, actionJson, 3n, KAT_CHAIN_ID);
+    // The signed envelope carries the EXACT builder bytes (raw, not re-parsed).
+    expect(signed.actionJson).toBe(actionJson);
     const recovered = await recoverNativeSigner(signed, KAT_CHAIN_ID);
     expect(recovered.toLowerCase()).toBe(expected.toLowerCase());
   });
