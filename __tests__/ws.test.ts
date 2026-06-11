@@ -160,11 +160,20 @@ describe('WsClient wire protocol', () => {
   it('exposes the exact server channel names', () => {
     expect([...WS_CHANNELS]).toEqual([
       'l2_book',
-      'trades',
       'bbo',
-      'fills',
+      'trades',
+      'active_asset_ctx',
+      'all_mids',
       'candles',
+      'fills',
       'user_events',
+      'order_updates',
+      'notifications',
+      'ledger_updates',
+      'user_fundings',
+      'user_twap_slice_fills',
+      'user_twap_history',
+      'active_asset_data',
     ]);
   });
 });
