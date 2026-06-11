@@ -156,6 +156,8 @@ export {
   type WsFrame,
   type WsMessageHandler,
   type WsConfig,
+  type AllMids,
+  type ActiveAssetCtx,
 } from './ws/ws.js';
 export {
   WasmNotBuiltError,
