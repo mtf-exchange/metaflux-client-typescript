@@ -1,14 +1,13 @@
 // MTF-native signed-action builders — hand-built canonical snake_case JSON.
 //
 // Each `build*Action(payload): string` produces the EXACT bytes that are BOTH
-// signed (`signNativeAction`) and POSTed verbatim (`nativeRequestBody`). Field
-// ORDER is load-bearing: it mirrors the server struct declaration order so the
-// recovered-over-`RawValue` signature matches byte-for-byte. Never re-stringify
-// a parsed object — the digest covers these exact bytes.
+// signed (`signNativeAction`) and POSTed verbatim (`nativeRequestBody`). The
+// same string is signed and sent, so the server verifies the signature over
+// identical bytes (it parses `action` as `serde_json::value::RawValue`); never
+// re-stringify a parsed object.
 //
 // The 5 original builders (submit_order / cancel_order / set_position_mode /
-// spot_order / spot_cancel) are byte-pinned by `__tests__/native.test.ts`; the
-// 11 new actions mirror the Rust client `rest/exchange.rs`.
+// spot_order / spot_cancel) are byte-pinned by `__tests__/native.test.ts`.
 
 import {
   jsonStr,
@@ -20,12 +19,22 @@ import {
   validateU16,
   validateU32,
   validateU64,
-  validateU128,
 } from './digest.js';
 import type {
-  CrossChainSend,
-  EncryptedOrderSubmit,
-  FbaSubmit,
+  AgentSetAbstraction,
+  ApproveAgent,
+  ApproveBuilderFee,
+  BatchCancel,
+  BatchModify,
+  BatchOrder,
+  CancelAllOrders,
+  CancelByCloid,
+  ClaimRewards,
+  ConvertToMultiSigUser,
+  CreateVault,
+  LinkStakingUser,
+  MbWithdraw,
+  Modify,
   NativeBuilder,
   NativeCancel,
   NativeEarnDeposit,
@@ -38,13 +47,24 @@ import type {
   NativeSpotMarginOpen,
   NativeSpotMarginWithdraw,
   NativeSpotOrder,
-  PmEnroll,
-  PmRebalance,
-  PmUnenroll,
-  RfqAccept,
-  RfqRequest,
-  VaultCreate,
-  VaultDistribute,
+  PriorityBid,
+  RegisterMetaliquidityOperator,
+  ScheduleCancel,
+  SetDisplayName,
+  SetMetaliquidityWhitelist,
+  SetReferrer,
+  SubmitEncryptedOrder,
+  TokenDelegate,
+  TopUpIsolatedOnlyMargin,
+  TwapCancel,
+  TwapOrder,
+  UpdateIsolatedMargin,
+  UpdateLeverage,
+  UserDexAbstraction,
+  UserPortfolioMargin,
+  UserSetAbstraction,
+  VaultModify,
+  VaultTransfer,
   VaultWithdraw,
 } from '../types/index.js';
 
@@ -99,13 +119,12 @@ function buildBuilder(b: NativeBuilder): string {
 
 /// Build the canonical native `cancel_order` action JSON string.
 ///
-/// Field order mirrors the server `NativeCancel` exactly
-/// (per the KB spec metaflux-knowledges/api/rest/exchange.md): `owner`, `market`,
-/// then `oid` / `cloid` when present. The server's `CancelParams` bridge
-/// cancels by `oid`, so an `oid` is REQUIRED for the cancel to lower
-/// successfully (a `cloid`-only cancel is accepted on the wire but rejected at
-/// lowering with `CancelMissingOid`); we still emit either form so the bytes
-/// stay caller-controlled. The returned string is BOTH signed and sent.
+/// Field order mirrors the server `NativeCancel`: `owner`, `market`, then `oid`
+/// / `cloid` when present. The server's `CancelParams` bridge cancels by `oid`,
+/// so an `oid` is REQUIRED for the cancel to lower successfully (a `cloid`-only
+/// cancel is accepted on the wire but rejected at lowering with
+/// `CancelMissingOid`); we still emit either form so the bytes stay
+/// caller-controlled. The returned string is BOTH signed and sent.
 export function buildNativeCancelAction(cancel: NativeCancel): string {
   validateAddress(cancel.owner, 'owner');
   validateMarket(cancel.market);
@@ -145,7 +164,7 @@ export function buildNativeSetPositionModeAction(
   return `{${jsonStr('type')}:${jsonStr('set_position_mode')},${jsonStr('params')}:${paramsJson}}`;
 }
 
-/// Build the canonical native `spot_order` action JSON string (SE-0 spot CLOB).
+/// Build the canonical native `spot_order` action JSON string (spot CLOB).
 ///
 /// Field order mirrors the server `NativeSpotOrder` exactly. `tif` defaults to
 /// `"ioc"` because v0 accepts ONLY IOC limit orders (`tif:"ioc"` + `limit_px > 0`);
@@ -193,155 +212,510 @@ export function buildNativeSpotCancelAction(cancel: NativeSpotCancel): string {
 }
 
 // ============================================================================
-// New native write actions (mirror the Rust client `rest/exchange.rs`).
-// Each hand-builds its canonical snake_case JSON; field order = the Rust struct
-// declaration order. OWNER-CHECKED actions carry an actor address the recovered
-// signer must equal; SENDER-AUTHORIZED actions carry no such field.
+// Real node /exchange write actions. Each hand-builds canonical snake_case JSON
+// (the same string is signed and POSTed). All are sender-authorized (no `owner`
+// field) except the inner orders/cancels of batch_order / batch_cancel, which
+// carry an `owner` the client checks against the recovered signer.
 // ============================================================================
 
-/// Build the canonical native `vault_create` action JSON string.
-///
-/// `{"type":"vault_create","vault":{leader, seed_cents, management_fee_bps}}`.
-/// OWNER-CHECKED: `leader` must equal the signing wallet.
-export function buildNativeVaultCreateAction(vault: VaultCreate): string {
-  validateAddress(vault.leader, 'leader');
-  validateU64(vault.seed_cents, 'seed_cents');
-  validateU16(vault.management_fee_bps, 'management_fee_bps');
-  const vaultJson = `{${jsonStr('leader')}:${jsonStr(vault.leader)},${jsonStr('seed_cents')}:${vault.seed_cents},${jsonStr('management_fee_bps')}:${vault.management_fee_bps}}`;
-  return `{${jsonStr('type')}:${jsonStr('vault_create')},${jsonStr('vault')}:${vaultJson}}`;
-}
-
-/// Build the canonical native `vault_distribute` action JSON string.
-///
-/// `{"type":"vault_distribute","params":{vault_id, amount_cents}}`.
-/// SENDER-AUTHORIZED (no owner field).
-export function buildNativeVaultDistributeAction(
-  params: VaultDistribute,
-): string {
-  validateU64(params.vault_id, 'vault_id');
-  validateU64(params.amount_cents, 'amount_cents');
-  const paramsJson = `{${jsonStr('vault_id')}:${params.vault_id},${jsonStr('amount_cents')}:${params.amount_cents}}`;
-  return `{${jsonStr('type')}:${jsonStr('vault_distribute')},${jsonStr('params')}:${paramsJson}}`;
-}
-
-/// Build the canonical native `vault_withdraw` action JSON string.
-///
-/// `{"type":"vault_withdraw","params":{vault_id, shares}}`. `shares` is a u128
-/// emitted as a bare unquoted integer (serde u128 JSON number form).
-/// SENDER-AUTHORIZED (no owner field).
-export function buildNativeVaultWithdrawAction(params: VaultWithdraw): string {
-  validateU64(params.vault_id, 'vault_id');
-  validateU128(params.shares, 'shares');
-  const paramsJson = `{${jsonStr('vault_id')}:${params.vault_id},${jsonStr('shares')}:${params.shares.toString()}}`;
-  return `{${jsonStr('type')}:${jsonStr('vault_withdraw')},${jsonStr('params')}:${paramsJson}}`;
-}
-
-/// Build the canonical native `pm_enroll` action JSON string.
-///
-/// `{"type":"pm_enroll","params":{user}}`. OWNER-CHECKED: `user` must equal the
-/// signing wallet. Opts the account into portfolio margin.
-export function buildNativePmEnrollAction(params: PmEnroll): string {
-  validateAddress(params.user, 'user');
-  const paramsJson = `{${jsonStr('user')}:${jsonStr(params.user)}}`;
-  return `{${jsonStr('type')}:${jsonStr('pm_enroll')},${jsonStr('params')}:${paramsJson}}`;
-}
-
-/// Build the canonical native `pm_unenroll` action JSON string.
-///
-/// `{"type":"pm_unenroll","params":{user}}`. OWNER-CHECKED: `user` must equal
-/// the signing wallet. Opts the account back out of portfolio margin.
-export function buildNativePmUnenrollAction(params: PmUnenroll): string {
-  validateAddress(params.user, 'user');
-  const paramsJson = `{${jsonStr('user')}:${jsonStr(params.user)}}`;
-  return `{${jsonStr('type')}:${jsonStr('pm_unenroll')},${jsonStr('params')}:${paramsJson}}`;
-}
-
-/// Build the canonical native `pm_rebalance` action JSON string.
-///
-/// `{"type":"pm_rebalance","params":{user}}`. SENDER-AUTHORIZED. Triggers a
-/// portfolio-margin rebalance for `user`.
-export function buildNativePmRebalanceAction(params: PmRebalance): string {
-  validateAddress(params.user, 'user');
-  const paramsJson = `{${jsonStr('user')}:${jsonStr(params.user)}}`;
-  return `{${jsonStr('type')}:${jsonStr('pm_rebalance')},${jsonStr('params')}:${paramsJson}}`;
-}
-
-/// Build the canonical native `rfq_request` action JSON string.
-///
-/// `{"type":"rfq_request","rfq":{taker, market, side, size, window_ms}}`.
-/// OWNER-CHECKED: `taker` must equal the signing wallet.
-export function buildNativeRfqRequestAction(rfq: RfqRequest): string {
-  validateAddress(rfq.taker, 'taker');
-  validateMarket(rfq.market);
-  validateU64(rfq.size, 'size');
-  validateU32(rfq.window_ms, 'window_ms');
-  const rfqJson = `{${jsonStr('taker')}:${jsonStr(rfq.taker)},${jsonStr('market')}:${rfq.market},${jsonStr('side')}:${jsonStr(rfq.side)},${jsonStr('size')}:${rfq.size},${jsonStr('window_ms')}:${rfq.window_ms}}`;
-  return `{${jsonStr('type')}:${jsonStr('rfq_request')},${jsonStr('rfq')}:${rfqJson}}`;
-}
-
-/// Build the canonical native `rfq_accept` action JSON string.
-///
-/// `{"type":"rfq_accept","accept":{rfq_id, mm, price}}`. SENDER-AUTHORIZED — the
-/// market maker accepts an outstanding RFQ.
-export function buildNativeRfqAcceptAction(accept: RfqAccept): string {
-  validateU64(accept.rfq_id, 'rfq_id');
-  validateAddress(accept.mm, 'mm');
-  validateU64(accept.price, 'price');
-  const acceptJson = `{${jsonStr('rfq_id')}:${accept.rfq_id},${jsonStr('mm')}:${jsonStr(accept.mm)},${jsonStr('price')}:${accept.price}}`;
-  return `{${jsonStr('type')}:${jsonStr('rfq_accept')},${jsonStr('accept')}:${acceptJson}}`;
-}
-
-/// Build the canonical native `fba_submit` action JSON string.
-///
-/// `{"type":"fba_submit","submit":{owner, market, side, size, limit_px, batch_id}}`.
-/// OWNER-CHECKED: `owner` must equal the signing wallet. Submits a frequent-
-/// batch-auction order.
-export function buildNativeFbaSubmitAction(submit: FbaSubmit): string {
-  validateAddress(submit.owner, 'owner');
-  validateMarket(submit.market);
-  validateU64(submit.size, 'size');
-  validateU64(submit.limit_px, 'limit_px');
-  validateU64(submit.batch_id, 'batch_id');
-  const submitJson = `{${jsonStr('owner')}:${jsonStr(submit.owner)},${jsonStr('market')}:${submit.market},${jsonStr('side')}:${jsonStr(submit.side)},${jsonStr('size')}:${submit.size},${jsonStr('limit_px')}:${submit.limit_px},${jsonStr('batch_id')}:${submit.batch_id}}`;
-  return `{${jsonStr('type')}:${jsonStr('fba_submit')},${jsonStr('submit')}:${submitJson}}`;
-}
-
-/// Build the canonical native `cross_chain_send` action JSON string.
-///
-/// `{"type":"cross_chain_send","msg":{sender, dst_chain, dst_address, asset, amount, nonce}}`.
-/// `amount` is a u128 emitted as a bare unquoted integer; `nonce` here is the
-/// action's OWN field (distinct from the replay nonce). OWNER-CHECKED: `sender`
-/// must equal the signing wallet.
-export function buildNativeCrossChainSendAction(msg: CrossChainSend): string {
-  validateAddress(msg.sender, 'sender');
-  validateU32(msg.dst_chain, 'dst_chain');
-  validateAddress(msg.dst_address, 'dst_address');
-  if (typeof msg.asset !== 'string' || msg.asset.length < 1 || msg.asset.length > 12) {
-    throw new RangeError('asset must be a string of length 1..=12');
+/// Build the inner `{...}` body of one perp order (the value under `order` in
+/// submit_order, and each element of a batch_order). Mirrors `NativeOrder`.
+function buildOrderBody(order: NativeOrder): string {
+  validateAddress(order.owner, 'owner');
+  validateMarket(order.market);
+  validateU64(order.size, 'size');
+  validateU64(order.limit_px, 'limit_px');
+  const parts: string[] = [
+    `${jsonStr('owner')}:${jsonStr(order.owner)}`,
+    `${jsonStr('market')}:${order.market}`,
+    `${jsonStr('side')}:${jsonStr(order.side)}`,
+    `${jsonStr('kind')}:${jsonStr(order.kind)}`,
+    `${jsonStr('size')}:${order.size}`,
+    `${jsonStr('limit_px')}:${order.limit_px}`,
+    `${jsonStr('tif')}:${jsonStr(order.tif)}`,
+    `${jsonStr('stp_mode')}:${jsonStr(order.stp_mode)}`,
+    `${jsonStr('reduce_only')}:${order.reduce_only ? 'true' : 'false'}`,
+  ];
+  if (order.cloid !== undefined) {
+    validateCloid(order.cloid);
+    parts.push(`${jsonStr('cloid')}:${jsonStr(order.cloid)}`);
   }
-  validateU128(msg.amount, 'amount');
-  validateU64(msg.nonce, 'nonce');
-  const msgJson = `{${jsonStr('sender')}:${jsonStr(msg.sender)},${jsonStr('dst_chain')}:${msg.dst_chain},${jsonStr('dst_address')}:${jsonStr(msg.dst_address)},${jsonStr('asset')}:${jsonStr(msg.asset)},${jsonStr('amount')}:${msg.amount.toString()},${jsonStr('nonce')}:${msg.nonce}}`;
-  return `{${jsonStr('type')}:${jsonStr('cross_chain_send')},${jsonStr('msg')}:${msgJson}}`;
+  if (order.builder !== undefined) {
+    parts.push(`${jsonStr('builder')}:${buildBuilder(order.builder)}`);
+  }
+  if (order.position_side !== undefined) {
+    parts.push(`${jsonStr('position_side')}:${jsonStr(order.position_side)}`);
+  }
+  return `{${parts.join(',')}}`;
 }
 
-/// Build the canonical native `encrypted_order_submit` action JSON string.
-///
-/// `{"type":"encrypted_order_submit","encrypted":{submitter, ciphertext, threshold, target_block}}`.
-/// `ciphertext` is a `Vec<u8>` emitted as a JSON array of byte numbers (serde
-/// Vec<u8> wire form). OWNER-CHECKED: `submitter` must equal the signing wallet.
-export function buildNativeEncryptedOrderSubmitAction(
-  encrypted: EncryptedOrderSubmit,
+/// Build the inner `{...}` body of one cancel (each element of a batch_cancel).
+/// `oid` required (a cloid-only cancel is rejected at lowering).
+function buildCancelBody(cancel: NativeCancel): string {
+  validateAddress(cancel.owner, 'owner');
+  validateMarket(cancel.market);
+  if (cancel.oid === undefined && cancel.cloid === undefined) {
+    throw new RangeError('cancel requires an oid (server cancels by oid)');
+  }
+  const parts: string[] = [
+    `${jsonStr('owner')}:${jsonStr(cancel.owner)}`,
+    `${jsonStr('market')}:${cancel.market}`,
+  ];
+  if (cancel.oid !== undefined) {
+    validateU64(cancel.oid, 'oid');
+    parts.push(`${jsonStr('oid')}:${cancel.oid}`);
+  }
+  if (cancel.cloid !== undefined) {
+    validateCloid(cancel.cloid);
+    parts.push(`${jsonStr('cloid')}:${jsonStr(cancel.cloid)}`);
+  }
+  return `{${parts.join(',')}}`;
+}
+
+/// Build the inner `{...}` body of one modify (modify / batch_modify).
+function buildModifyBody(m: Modify): string {
+  validateMarket(m.market);
+  validateU64(m.oid, 'oid');
+  const parts: string[] = [
+    `${jsonStr('market')}:${m.market}`,
+    `${jsonStr('oid')}:${m.oid}`,
+  ];
+  if (m.new_px !== undefined) {
+    validateU64(m.new_px, 'new_px');
+    parts.push(`${jsonStr('new_px')}:${m.new_px}`);
+  }
+  if (m.new_size !== undefined) {
+    validateU64(m.new_size, 'new_size');
+    parts.push(`${jsonStr('new_size')}:${m.new_size}`);
+  }
+  return `{${parts.join(',')}}`;
+}
+
+/// Wrap an already-built params body into `{"type":<type>,"params":<body>}`.
+function wrapParams(type: string, paramsJson: string): string {
+  return `{${jsonStr('type')}:${jsonStr(type)},${jsonStr('params')}:${paramsJson}}`;
+}
+
+// ---- order management ----
+
+/// `cancel_by_cloid` — cancel a resting order by its client order id.
+export function buildNativeCancelByCloidAction(params: CancelByCloid): string {
+  validateMarket(params.asset);
+  validateCloid(params.cloid);
+  return wrapParams(
+    'cancel_by_cloid',
+    `{${jsonStr('asset')}:${params.asset},${jsonStr('cloid')}:${jsonStr(params.cloid)}}`,
+  );
+}
+
+/// `modify` — amend a resting order's price and/or size in place.
+export function buildNativeModifyAction(params: Modify): string {
+  return wrapParams('modify', buildModifyBody(params));
+}
+
+/// `batch_modify` — N modifies under one signature.
+export function buildNativeBatchModifyAction(params: BatchModify): string {
+  const arr = params.modifications.map(buildModifyBody).join(',');
+  return wrapParams('batch_modify', `{${jsonStr('modifications')}:[${arr}]}`);
+}
+
+/// `batch_order` — N orders under one signature. Each order's `owner` must equal
+/// the signing wallet (enforced client-side by `Client.batchOrder`).
+export function buildNativeBatchOrderAction(params: BatchOrder): string {
+  const grouping = params.grouping ?? 'na';
+  if (grouping !== 'na' && grouping !== 'normalTpsl' && grouping !== 'positionTpsl') {
+    throw new RangeError('grouping must be na | normalTpsl | positionTpsl');
+  }
+  const arr = params.orders.map(buildOrderBody).join(',');
+  return wrapParams(
+    'batch_order',
+    `{${jsonStr('orders')}:[${arr}],${jsonStr('grouping')}:${jsonStr(grouping)}}`,
+  );
+}
+
+/// `batch_cancel` — N cancels under one signature.
+export function buildNativeBatchCancelAction(params: BatchCancel): string {
+  const arr = params.cancels.map(buildCancelBody).join(',');
+  return wrapParams('batch_cancel', `{${jsonStr('cancels')}:[${arr}]}`);
+}
+
+/// `schedule_cancel` — cancel-all of the sender's open orders at a future block.
+export function buildNativeScheduleCancelAction(params: ScheduleCancel): string {
+  validateU64(params.cancel_at_block, 'cancel_at_block');
+  return wrapParams(
+    'schedule_cancel',
+    `{${jsonStr('cancel_at_block')}:${params.cancel_at_block}}`,
+  );
+}
+
+/// `cancel_all_orders` — cancel all of the sender's open orders (optional asset).
+export function buildNativeCancelAllOrdersAction(
+  params: CancelAllOrders = {},
 ): string {
-  validateAddress(encrypted.submitter, 'submitter');
-  if (!(encrypted.ciphertext instanceof Uint8Array)) {
+  const parts: string[] = [];
+  if (params.asset !== undefined) {
+    validateMarket(params.asset);
+    parts.push(`${jsonStr('asset')}:${params.asset}`);
+  }
+  return wrapParams('cancel_all_orders', `{${parts.join(',')}}`);
+}
+
+// ---- TWAP ----
+
+/// `twap_order` — submit a sliced (TWAP) order.
+export function buildNativeTwapOrderAction(params: TwapOrder): string {
+  validateMarket(params.market);
+  validateU64(params.total_size, 'total_size');
+  validateU32(params.slice_count, 'slice_count');
+  validateU64(params.delay_ms, 'delay_ms');
+  return wrapParams(
+    'twap_order',
+    `{${jsonStr('market')}:${params.market},${jsonStr('side')}:${jsonStr(params.side)},${jsonStr('total_size')}:${params.total_size},${jsonStr('slice_count')}:${params.slice_count},${jsonStr('delay_ms')}:${params.delay_ms},${jsonStr('reduce_only')}:${params.reduce_only ? 'true' : 'false'}}`,
+  );
+}
+
+/// `twap_cancel` — cancel a running TWAP parent by id.
+export function buildNativeTwapCancelAction(params: TwapCancel): string {
+  validateU64(params.twap_id, 'twap_id');
+  return wrapParams('twap_cancel', `{${jsonStr('twap_id')}:${params.twap_id}}`);
+}
+
+// ---- leverage & margin ----
+
+/// `update_leverage` — set per-asset leverage (and optionally flip to isolated).
+export function buildNativeUpdateLeverageAction(params: UpdateLeverage): string {
+  validateMarket(params.asset);
+  validateU32(params.leverage, 'leverage');
+  return wrapParams(
+    'update_leverage',
+    `{${jsonStr('asset')}:${params.asset},${jsonStr('leverage')}:${params.leverage},${jsonStr('is_isolated')}:${params.is_isolated ? 'true' : 'false'}}`,
+  );
+}
+
+/// `update_isolated_margin` — add (`+`) or remove (`-`) isolated margin.
+export function buildNativeUpdateIsolatedMarginAction(
+  params: UpdateIsolatedMargin,
+): string {
+  validateMarket(params.asset);
+  validateDecimalString(params.delta, 'delta', { allowNegative: true });
+  return wrapParams(
+    'update_isolated_margin',
+    `{${jsonStr('asset')}:${params.asset},${jsonStr('delta')}:${jsonStr(params.delta)}}`,
+  );
+}
+
+/// `top_up_isolated_only_margin` — top up a strict-isolated-only position.
+export function buildNativeTopUpIsolatedOnlyMarginAction(
+  params: TopUpIsolatedOnlyMargin,
+): string {
+  validateMarket(params.asset);
+  validateDecimalString(params.amount, 'amount');
+  return wrapParams(
+    'top_up_isolated_only_margin',
+    `{${jsonStr('asset')}:${params.asset},${jsonStr('amount')}:${jsonStr(params.amount)}}`,
+  );
+}
+
+/// `user_portfolio_margin` — enroll into or out of portfolio margin.
+export function buildNativeUserPortfolioMarginAction(
+  params: UserPortfolioMargin,
+): string {
+  return wrapParams(
+    'user_portfolio_margin',
+    `{${jsonStr('enroll')}:${params.enroll ? 'true' : 'false'}}`,
+  );
+}
+
+// ---- account & agent settings ----
+
+/// `set_display_name` — set the account display name (handle).
+export function buildNativeSetDisplayNameAction(params: SetDisplayName): string {
+  if (typeof params.display_name !== 'string' || params.display_name.length === 0) {
+    throw new RangeError('display_name must be a non-empty string');
+  }
+  return wrapParams(
+    'set_display_name',
+    `{${jsonStr('display_name')}:${jsonStr(params.display_name)}}`,
+  );
+}
+
+/// `set_referrer` — set the account referrer (one-time, immutable once set).
+export function buildNativeSetReferrerAction(params: SetReferrer): string {
+  validateAddress(params.referrer, 'referrer');
+  return wrapParams(
+    'set_referrer',
+    `{${jsonStr('referrer')}:${jsonStr(params.referrer)}}`,
+  );
+}
+
+/// `approve_agent` — approve an agent wallet to sign on this account's behalf.
+export function buildNativeApproveAgentAction(params: ApproveAgent): string {
+  validateAddress(params.agent, 'agent');
+  const parts: string[] = [`${jsonStr('agent')}:${jsonStr(params.agent)}`];
+  if (params.name !== undefined) {
+    parts.push(`${jsonStr('name')}:${jsonStr(params.name)}`);
+  }
+  if (params.expires_at_ms !== undefined) {
+    validateU64(params.expires_at_ms, 'expires_at_ms');
+    parts.push(`${jsonStr('expires_at_ms')}:${params.expires_at_ms}`);
+  }
+  return wrapParams('approve_agent', `{${parts.join(',')}}`);
+}
+
+/// `approve_builder_fee` — approve a builder up to `max_bps` (`0` revokes).
+export function buildNativeApproveBuilderFeeAction(
+  params: ApproveBuilderFee,
+): string {
+  validateAddress(params.builder, 'builder');
+  validateU16(params.max_bps, 'max_bps');
+  return wrapParams(
+    'approve_builder_fee',
+    `{${jsonStr('builder')}:${jsonStr(params.builder)},${jsonStr('max_bps')}:${params.max_bps}}`,
+  );
+}
+
+/// `convert_to_multi_sig_user` — convert the account to an M-of-N multisig.
+export function buildNativeConvertToMultiSigUserAction(
+  params: ConvertToMultiSigUser,
+): string {
+  const arr = params.signers
+    .map((s, i) => {
+      validateAddress(s, `signers[${i}]`);
+      return jsonStr(s);
+    })
+    .join(',');
+  validateU32(params.threshold, 'threshold');
+  return wrapParams(
+    'convert_to_multi_sig_user',
+    `{${jsonStr('signers')}:[${arr}],${jsonStr('threshold')}:${params.threshold}}`,
+  );
+}
+
+/// `user_dex_abstraction` — toggle the account's DEX-abstraction opt-in flag.
+export function buildNativeUserDexAbstractionAction(
+  params: UserDexAbstraction,
+): string {
+  return wrapParams(
+    'user_dex_abstraction',
+    `{${jsonStr('enabled')}:${params.enabled ? 'true' : 'false'}}`,
+  );
+}
+
+/// `user_set_abstraction` — set a self-scoped abstraction config value.
+export function buildNativeUserSetAbstractionAction(
+  params: UserSetAbstraction,
+): string {
+  validateU8(params.kind, 'kind');
+  validateDecimalString(params.value, 'value', {
+    allowZero: true,
+    allowNegative: true,
+  });
+  return wrapParams(
+    'user_set_abstraction',
+    `{${jsonStr('kind')}:${params.kind},${jsonStr('value')}:${jsonStr(params.value)}}`,
+  );
+}
+
+/// `agent_set_abstraction` — an approved agent sets a config value for `user`.
+export function buildNativeAgentSetAbstractionAction(
+  params: AgentSetAbstraction,
+): string {
+  validateAddress(params.user, 'user');
+  validateU8(params.kind, 'kind');
+  validateDecimalString(params.value, 'value', {
+    allowZero: true,
+    allowNegative: true,
+  });
+  return wrapParams(
+    'agent_set_abstraction',
+    `{${jsonStr('user')}:${jsonStr(params.user)},${jsonStr('kind')}:${params.kind},${jsonStr('value')}:${jsonStr(params.value)}}`,
+  );
+}
+
+/// `priority_bid` — pay a priority fee (bps) for block-front placement.
+export function buildNativePriorityBidAction(params: PriorityBid): string {
+  validateMarket(params.asset);
+  validateU16(params.bid_bps, 'bid_bps');
+  return wrapParams(
+    'priority_bid',
+    `{${jsonStr('asset')}:${params.asset},${jsonStr('bid_bps')}:${params.bid_bps}}`,
+  );
+}
+
+// ---- staking ----
+
+/// `token_delegate` — delegate stake to a validator, or queue an undelegation.
+export function buildNativeTokenDelegateAction(params: TokenDelegate): string {
+  validateAddress(params.validator, 'validator');
+  validateDecimalString(params.amount, 'amount');
+  return wrapParams(
+    'token_delegate',
+    `{${jsonStr('validator')}:${jsonStr(params.validator)},${jsonStr('amount')}:${jsonStr(params.amount)},${jsonStr('is_undelegate')}:${params.is_undelegate ? 'true' : 'false'}}`,
+  );
+}
+
+/// `claim_rewards` — claim accrued staking rewards (optional validator filter).
+export function buildNativeClaimRewardsAction(
+  params: ClaimRewards = {},
+): string {
+  const parts: string[] = [];
+  if (params.validator !== undefined) {
+    validateAddress(params.validator, 'validator');
+    parts.push(`${jsonStr('validator')}:${jsonStr(params.validator)}`);
+  }
+  return wrapParams('claim_rewards', `{${parts.join(',')}}`);
+}
+
+/// `link_staking_user` — alias another account as this account's staking target.
+export function buildNativeLinkStakingUserAction(
+  params: LinkStakingUser,
+): string {
+  validateAddress(params.target, 'target');
+  return wrapParams(
+    'link_staking_user',
+    `{${jsonStr('target')}:${jsonStr(params.target)}}`,
+  );
+}
+
+// ---- encrypted orders ----
+
+/// `submit_encrypted_order` — submit a threshold-encrypted order ciphertext.
+export function buildNativeSubmitEncryptedOrderAction(
+  params: SubmitEncryptedOrder,
+): string {
+  if (!(params.ciphertext instanceof Uint8Array)) {
     throw new RangeError('ciphertext must be a Uint8Array');
   }
-  validateU8(encrypted.threshold, 'threshold');
-  validateU64(encrypted.target_block, 'target_block');
-  const ciphertextJson = `[${Array.from(encrypted.ciphertext).join(',')}]`;
-  const encryptedJson = `{${jsonStr('submitter')}:${jsonStr(encrypted.submitter)},${jsonStr('ciphertext')}:${ciphertextJson},${jsonStr('threshold')}:${encrypted.threshold},${jsonStr('target_block')}:${encrypted.target_block}}`;
-  return `{${jsonStr('type')}:${jsonStr('encrypted_order_submit')},${jsonStr('encrypted')}:${encryptedJson}}`;
+  if (!(params.commitment instanceof Uint8Array) || params.commitment.length !== 32) {
+    throw new RangeError('commitment must be a 32-byte Uint8Array');
+  }
+  validateU8(params.threshold, 'threshold');
+  validateU64(params.target_block, 'target_block');
+  validateU64(params.reveal_deadline_ms, 'reveal_deadline_ms');
+  const ct = `[${Array.from(params.ciphertext).join(',')}]`;
+  const cm = `[${Array.from(params.commitment).join(',')}]`;
+  return wrapParams(
+    'submit_encrypted_order',
+    `{${jsonStr('ciphertext')}:${ct},${jsonStr('commitment')}:${cm},${jsonStr('threshold')}:${params.threshold},${jsonStr('target_block')}:${params.target_block},${jsonStr('reveal_deadline_ms')}:${params.reveal_deadline_ms}}`,
+  );
+}
+
+// ---- vaults ----
+
+/// `create_vault` — create a new vault. The signing wallet becomes the leader.
+export function buildNativeCreateVaultAction(params: CreateVault): string {
+  if (typeof params.name !== 'string' || params.name.length === 0) {
+    throw new RangeError('name must be a non-empty string');
+  }
+  validateU64(params.lock_period_secs, 'lock_period_secs');
+  const kind = params.kind ?? 'User';
+  if (kind !== 'User' && kind !== 'Metaliquidity') {
+    throw new RangeError('kind must be User | Metaliquidity');
+  }
+  const parts: string[] = [
+    `${jsonStr('name')}:${jsonStr(params.name)}`,
+    `${jsonStr('lock_period_secs')}:${params.lock_period_secs}`,
+  ];
+  if (params.parent !== undefined) {
+    validateU64(params.parent, 'parent');
+    parts.push(`${jsonStr('parent')}:${params.parent}`);
+  }
+  parts.push(`${jsonStr('kind')}:${jsonStr(kind)}`);
+  return wrapParams('create_vault', `{${parts.join(',')}}`);
+}
+
+/// `vault_transfer` — leader moves capital into / out of a vault.
+export function buildNativeVaultTransferAction(params: VaultTransfer): string {
+  validateU64(params.vault_id, 'vault_id');
+  validateDecimalString(params.amount, 'amount');
+  return wrapParams(
+    'vault_transfer',
+    `{${jsonStr('vault_id')}:${params.vault_id},${jsonStr('deposit')}:${params.deposit ? 'true' : 'false'},${jsonStr('amount')}:${jsonStr(params.amount)}}`,
+  );
+}
+
+/// `vault_modify` — leader updates vault configuration (omitted = unchanged).
+export function buildNativeVaultModifyAction(params: VaultModify): string {
+  validateU64(params.vault_id, 'vault_id');
+  const parts: string[] = [`${jsonStr('vault_id')}:${params.vault_id}`];
+  if (params.new_name !== undefined) {
+    parts.push(`${jsonStr('new_name')}:${jsonStr(params.new_name)}`);
+  }
+  if (params.new_lock_period_secs !== undefined) {
+    validateU64(params.new_lock_period_secs, 'new_lock_period_secs');
+    parts.push(`${jsonStr('new_lock_period_secs')}:${params.new_lock_period_secs}`);
+  }
+  if (params.new_management_fee_bps !== undefined) {
+    validateU16(params.new_management_fee_bps, 'new_management_fee_bps');
+    parts.push(`${jsonStr('new_management_fee_bps')}:${params.new_management_fee_bps}`);
+  }
+  if (params.new_paused !== undefined) {
+    parts.push(`${jsonStr('new_paused')}:${params.new_paused ? 'true' : 'false'}`);
+  }
+  return wrapParams('vault_modify', `{${parts.join(',')}}`);
+}
+
+/// `vault_withdraw` — follower redeems shares (decimal string) from a vault.
+export function buildNativeVaultWithdrawAction(params: VaultWithdraw): string {
+  validateU64(params.vault_id, 'vault_id');
+  validateDecimalString(params.shares, 'shares');
+  return wrapParams(
+    'vault_withdraw',
+    `{${jsonStr('vault_id')}:${params.vault_id},${jsonStr('shares')}:${jsonStr(params.shares)}}`,
+  );
+}
+
+// ---- MetaBridge ----
+
+/// `mb_withdraw` — withdraw cross-collateral to a destination chain. `dst_addr`
+/// is `0x` + 40 hex (EVM, Base/Arbitrum) or 64 hex (32-byte, Solana).
+export function buildNativeMbWithdrawAction(params: MbWithdraw): string {
+  if (params.chain !== 'Base' && params.chain !== 'Arbitrum' && params.chain !== 'Solana') {
+    throw new RangeError('chain must be Base | Arbitrum | Solana');
+  }
+  validateU32(params.asset, 'asset');
+  validateU64(params.amount, 'amount');
+  const dstHex = params.dst_addr.startsWith('0x')
+    ? params.dst_addr.slice(2)
+    : params.dst_addr;
+  if (!/^[0-9a-fA-F]+$/.test(dstHex) || (dstHex.length !== 40 && dstHex.length !== 64)) {
+    throw new RangeError('dst_addr must be 0x + 40 (EVM) or 64 (Solana) hex chars');
+  }
+  return wrapParams(
+    'mb_withdraw',
+    `{${jsonStr('chain')}:${jsonStr(params.chain)},${jsonStr('asset')}:${params.asset},${jsonStr('amount')}:${params.amount},${jsonStr('dst_addr')}:${jsonStr(params.dst_addr)}}`,
+  );
+}
+
+// ---- governance / operator ----
+
+/// `set_metaliquidity_whitelist` — set an MLP whitelist membership (validator).
+export function buildNativeSetMetaliquidityWhitelistAction(
+  params: SetMetaliquidityWhitelist,
+): string {
+  validateAddress(params.address, 'address');
+  return wrapParams(
+    'set_metaliquidity_whitelist',
+    `{${jsonStr('address')}:${jsonStr(params.address)},${jsonStr('allowed')}:${params.allowed ? 'true' : 'false'}}`,
+  );
+}
+
+/// `register_metaliquidity_operator` — register / revoke a vault strategy operator.
+export function buildNativeRegisterMetaliquidityOperatorAction(
+  params: RegisterMetaliquidityOperator,
+): string {
+  validateU64(params.vault_id, 'vault_id');
+  validateAddress(params.operator, 'operator');
+  const parts: string[] = [
+    `${jsonStr('vault_id')}:${params.vault_id}`,
+    `${jsonStr('operator')}:${jsonStr(params.operator)}`,
+    `${jsonStr('allowed')}:${params.allowed ? 'true' : 'false'}`,
+  ];
+  if (params.expires_at_ms !== undefined) {
+    validateU64(params.expires_at_ms, 'expires_at_ms');
+    parts.push(`${jsonStr('expires_at_ms')}:${params.expires_at_ms}`);
+  }
+  return wrapParams('register_metaliquidity_operator', `{${parts.join(',')}}`);
 }
 
 // ============================================================================

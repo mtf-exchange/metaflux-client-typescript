@@ -1,18 +1,21 @@
-// MTF-native encrypted-order action types (mirror the Rust client
-// `rest/exchange.rs`). Field ORDER is load-bearing for the signed bytes.
+// MTF-native encrypted-order action payload type.
+//
+// Sender-authorized: the recovered signer is the submitter. Decryption shares
+// accumulate over subsequent blocks until `threshold` is met; the order is then
+// revealed (checked against `commitment`) and matched.
 
-/// MTF-native `encrypted_order_submit` action payload.
-///
-/// `{"type":"encrypted_order_submit","encrypted":{submitter, ciphertext, threshold, target_block}}`.
-/// OWNER-CHECKED: `submitter` must equal the signing wallet.
-export interface EncryptedOrderSubmit {
-  /// `0x`-hex 20-byte submitter. MUST equal the signing wallet.
-  submitter: string;
-  /// Encrypted order payload — a `Vec<u8>` emitted as a JSON array of byte
-  /// numbers (serde Vec<u8> wire form).
+/// `submit_encrypted_order` — submit a threshold-encrypted order ciphertext.
+export interface SubmitEncryptedOrder {
+  /// Ciphertext bytes — emitted as a JSON array of byte numbers.
   ciphertext: Uint8Array;
-  /// Threshold-decryption threshold (`u8`, 0..=255).
+  /// 32-byte `keccak(plaintext‖salt)` commitment binding the revealed order —
+  /// emitted as a JSON array of 32 byte numbers.
+  commitment: Uint8Array;
+  /// Threshold of decryption shares required to reveal (`u8`, `>= 1`).
   threshold: number;
-  /// Target block height for reveal (`u64`).
+  /// Earliest block at which the ciphertext can be revealed (`u64`).
   target_block: number;
+  /// Deadline (unix ms) by which the order must be revealed, else it expires
+  /// (`u64`).
+  reveal_deadline_ms: number;
 }
