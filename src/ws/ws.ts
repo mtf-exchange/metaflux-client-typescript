@@ -21,32 +21,81 @@
 // it globally, which is the SDK's floor). No `ws` npm dependency — keeping the
 // SDK dependency-free for both runtimes.
 
+import type { Funding } from '../types/info/core.js';
+
 /// Channel names exactly as the server's `Channel::from_wire` accepts them
 /// (snake_case MTF-native).
 export type WsChannel =
+  // per-market (require `coin`)
   | 'l2_book'
-  | 'trades'
   | 'bbo'
-  | 'fills'
+  | 'trades'
+  | 'active_asset_ctx'
+  // global (no params)
+  | 'all_mids'
+  // per-market + interval (`candles` needs `coin` + `interval`)
   | 'candles'
-  | 'user_events';
+  // per-account (require `user`)
+  | 'fills'
+  | 'user_events'
+  | 'order_updates'
+  | 'notifications'
+  | 'ledger_updates'
+  | 'user_fundings'
+  | 'user_twap_slice_fills'
+  | 'user_twap_history'
+  // per-account + market (`active_asset_data` needs `user` + `coin`)
+  | 'active_asset_data';
 
 /// All known channels — handy for callers that want to subscribe broadly.
 export const WS_CHANNELS: readonly WsChannel[] = [
   'l2_book',
-  'trades',
   'bbo',
-  'fills',
+  'trades',
+  'active_asset_ctx',
+  'all_mids',
   'candles',
+  'fills',
   'user_events',
+  'order_updates',
+  'notifications',
+  'ledger_updates',
+  'user_fundings',
+  'user_twap_slice_fills',
+  'user_twap_history',
+  'active_asset_data',
 ] as const;
 
 /// A subscription request body — the inner `subscription` object of a
-/// subscribe / unsubscribe frame. `coin` is the market symbol (e.g. `"BTC"`)
-/// and is optional per the server (`user_events` carries none).
+/// subscribe / unsubscribe frame. The routing key is the combination of the
+/// fields a channel uses:
+///   - `coin`     — per-market channels (`l2_book`, `bbo`, `trades`,
+///                  `active_asset_ctx`, `candles`, `active_asset_data`)
+///   - `user`     — per-account channels (`fills`, `user_events`,
+///                  `order_updates`, `active_asset_data`, …); the 0x address
+///   - `interval` — `candles` only (`1m`/`5m`/`15m`/`1h`/`4h`/`1d`)
+/// Global channels (`all_mids`) take none.
 export interface WsSubscription {
   type: WsChannel;
   coin?: string;
+  user?: string;
+  interval?: string;
+}
+
+/// `all_mids` payload — every market's tick-snapped whole-USDC mark, keyed by
+/// coin (same plane as the REST `markets` read; no 1e8 scaling).
+export interface AllMids {
+  mids: Record<string, string>;
+}
+
+/// `active_asset_ctx` payload — one market's mark/oracle/funding/OI, in the
+/// whole-USDC plane. `funding` is `null` for an unknown market.
+export interface ActiveAssetCtx {
+  coin: string;
+  mark_px: string;
+  oracle_px: string;
+  funding: Funding | null;
+  open_interest: string;
 }
 
 /// A typed inbound frame `{channel, data}`. `data` is left as `unknown` because
@@ -81,10 +130,12 @@ const DEFAULT_CONFIG: WsConfig = {
   autoReconnect: true,
 };
 
-/// Subscription set equality key — `(channel, coin)` is the server's routing
-/// key, so two subscriptions are identical iff both match.
+/// Subscription set equality key — `(channel, coin, user, interval)` is the
+/// server's routing key, so two subscriptions are identical iff all match
+/// (e.g. `candles` `1m` vs `5m`, or `fills` for two different users, are
+/// distinct subscriptions).
 function subKey(s: WsSubscription): string {
-  return `${s.type}:${s.coin ?? ''}`;
+  return `${s.type}:${s.coin ?? ''}:${s.user ?? ''}:${s.interval ?? ''}`;
 }
 
 /// MTF-native WebSocket client.
