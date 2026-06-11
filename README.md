@@ -156,72 +156,67 @@ actions carry an actor field (`leader` / `user` / `taker` / `owner` / `sender` /
 request leaves the process); **sender-authorized** actions have no such field —
 the recovered signer is the actor.
 
-- **Spot margin & Earn** (devnet preview, all sender-authorized):
-  `spotMarginDeposit` / `spotMarginWithdraw` / `spotMarginOpen` /
-  `spotMarginClose`, and the lending supply side `earnDeposit` / `earnWithdraw`.
-- **Vault**: `vaultCreate` (owner-checked), `vaultDistribute` /
-  `vaultWithdraw` (sender-authorized).
-- **Portfolio margin**: `pmEnroll` / `pmUnenroll` (owner-checked),
-  `pmRebalance` (sender-authorized).
-- **RFQ**: `rfqRequest` (owner-checked), `rfqAccept` (sender-authorized).
-- **Frequent-batch auction**: `fbaSubmit` (owner-checked).
-- **Cross-chain**: `crossChainSend` (owner-checked).
-- **Encrypted orders**: `encryptedOrderSubmit` (owner-checked).
+All of these are **sender-authorized** (the recovered signer is the actor) except
+`submitOrderNative` / `cancelOrderNative`, and `batchOrder` / `batchCancel` whose
+inner orders / cancels each carry an `owner` the client checks against the signer.
+
+- **Order management**: `cancelByCloid`, `modify`, `batchModify`, `batchOrder` /
+  `batchCancel`, `scheduleCancel`, `cancelAllOrders`.
+- **TWAP**: `twapOrder` / `twapCancel`.
+- **Leverage & margin**: `updateLeverage`, `updateIsolatedMargin`,
+  `topUpIsolatedOnlyMargin`, `userPortfolioMargin` (portfolio-margin enroll).
+- **Account & agents**: `setDisplayName`, `setReferrer`, `approveAgent`,
+  `approveBuilderFee`, `convertToMultiSigUser`, `userDexAbstraction`,
+  `userSetAbstraction`, `agentSetAbstraction`, `priorityBid`.
+- **Staking**: `tokenDelegate`, `claimRewards`, `linkStakingUser`.
+- **Vaults**: `createVault`, `vaultTransfer`, `vaultModify`, `vaultWithdraw`.
+- **Spot margin & Earn** (devnet preview): `spotMarginDeposit` /
+  `spotMarginWithdraw` / `spotMarginOpen` / `spotMarginClose`, and the lending
+  supply side `earnDeposit` / `earnWithdraw`.
+- **Encrypted orders**: `submitEncryptedOrder`.
+- **MetaBridge**: `mbWithdraw` (cross-collateral withdrawal to another chain).
+- **Governance**: `setMetaliquidityWhitelist`, `registerMetaliquidityOperator`.
+
+Decimal magnitudes (`amount` / `delta` / `shares` / `value`) are passed as
+**strings**; ids / sizes / prices are plain integers.
 
 ```ts
 const me = '0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025'; // the signing wallet
 
-// Vault — owner-checked (vault.leader must equal the signer).
-await client.vaultCreate({
-  leader: me,
-  seed_cents: 100_000, // USD cents
-  management_fee_bps: 200, // 2.00%
-});
-// vault_withdraw `shares` is a u128 -> pass a bigint (a number would lose
-// precision above 2^53). Sender-authorized: no actor field to match.
-await client.vaultWithdraw({ vault_id: 7, shares: 1_000_000n });
+// Vault — the signing wallet becomes the leader.
+await client.createVault({ name: 'my-vault', lock_period_secs: 4 * 86_400 });
+// Follower redeems shares (decimal string).
+await client.vaultWithdraw({ vault_id: 7, shares: '250.5' });
 
-// Portfolio margin — enroll is owner-checked on `user`.
-await client.pmEnroll({ user: me });
+// Leverage / margin.
+await client.updateLeverage({ asset: 0, leverage: 10, is_isolated: false });
+await client.updateIsolatedMargin({ asset: 0, delta: '-12.5' });
+await client.userPortfolioMargin({ enroll: true });
 
-// RFQ — taker opens a quote window (owner-checked), then accepts a quote.
-await client.rfqRequest({
-  taker: me,
+// TWAP — slice a large order over time.
+await client.twapOrder({
   market: 0,
   side: 'bid',
-  size: 1_000,
-  window_ms: 2_000,
-});
-await client.rfqAccept({ rfq_id: 1, mm: me, price: 5_000_000_000_000 });
-
-// Frequent-batch auction — submit into the open batch window.
-await client.fbaSubmit({
-  owner: me,
-  market: 0,
-  side: 'bid',
-  size: 100,
-  limit_px: 5_000_000_000_000,
-  batch_id: 42,
+  total_size: 10_000,
+  slice_count: 10,
+  delay_ms: 500,
+  reduce_only: false,
 });
 
-// Cross-chain — `amount` is a u128 (bigint); `nonce` here is the action's own
-// per-sender anti-replay field, distinct from the signing nonce.
-await client.crossChainSend({
-  sender: me,
-  dst_chain: 8453, // Base
-  dst_address: me,
-  asset: 'USDC',
-  amount: 1_000_000n, // 1 USDC at 6 decimals
-  nonce: 1,
-});
+// Staking.
+await client.tokenDelegate({ validator: me, amount: '100.5', is_undelegate: false });
 
-// Encrypted order — `ciphertext` is raw bytes (Uint8Array); the SDK emits the
-// serde `Vec<u8>` wire form.
-await client.encryptedOrderSubmit({
-  submitter: me,
+// MetaBridge — withdraw cross-collateral to another chain.
+await client.mbWithdraw({ chain: 'Base', asset: 0, amount: 1_000_000, dst_addr: me });
+
+// Encrypted order — `ciphertext` + 32-byte `commitment` are raw bytes; the SDK
+// emits them as serde byte arrays.
+await client.submitEncryptedOrder({
   ciphertext: new Uint8Array([0xab, 0xcd, 0xef]),
+  commitment: new Uint8Array(32),
   threshold: 5,
   target_block: 1_000_000,
+  reveal_deadline_ms: 5_000,
 });
 ```
 
@@ -245,16 +240,12 @@ await ws.subscribe({ type: 'l2_book', coin: 'BTC' });
 ### Power-user exports
 
 The barrel also exports the low-level pieces so you can build custom flows —
-`InfoApi` (standalone read client), the `buildNativeOrderAction` /
-`buildNativeCancelAction` / `buildNativeSpotOrderAction` /
-`buildNativeSpotCancelAction` / `buildNativeSetPositionModeAction` action
-builders (plus the new `buildNativeVaultCreateAction` / `…VaultDistributeAction` /
-`…VaultWithdrawAction` / `…PmEnrollAction` / `…PmUnenrollAction` /
-`…PmRebalanceAction` / `…RfqRequestAction` / `…RfqAcceptAction` /
-`…FbaSubmitAction` / `…CrossChainSendAction` / `…EncryptedOrderSubmitAction`),
-the `signNativeAction` / `nativeActionDigest` signing core, and the WASM crypto
-primitives (`keccak256`, `signSecp256k1`, `recoverPubkey`, …). See
-[`src/index.ts`](src/index.ts) for the full surface.
+`InfoApi` (standalone read client), a `buildNative*Action` builder for every
+signed action (`buildNativeOrderAction`, `buildNativeCreateVaultAction`,
+`buildNativeUpdateLeverageAction`, `buildNativeMbWithdrawAction`, … — one per
+method above), the `signNativeAction` / `nativeActionDigest` signing core, and
+the WASM crypto primitives (`keccak256`, `signSecp256k1`, `recoverPubkey`, …).
+See [`src/index.ts`](src/index.ts) for the full surface.
 
 ## What's WASM-backed vs pure-TS
 

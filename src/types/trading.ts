@@ -200,6 +200,70 @@ export interface NativeBuilder {
   user: string;
 }
 
+// ---- order-management actions ----
+
+/// Order grouping for a [`BatchOrder`] — mirrors the server `OrderGrouping`.
+/// `"na"` = independent orders; the TP/SL variants attach children.
+export type OrderGrouping = 'na' | 'normalTpsl' | 'positionTpsl';
+
+/// `modify` action payload — amend a resting order's price and/or size in
+/// place. An omitted field is left unchanged.
+export interface Modify {
+  /// Target market id (`u32`).
+  market: number;
+  /// Order id to amend (`u64`).
+  oid: number;
+  /// New limit price in tick units (`u64`); omit to leave unchanged.
+  new_px?: number;
+  /// New size in tick units (`u64`); omit to leave unchanged.
+  new_size?: number;
+}
+
+/// `batch_modify` action payload — N [`Modify`]s under one signature.
+export interface BatchModify {
+  /// Modifications, applied in order.
+  modifications: Modify[];
+}
+
+/// `batch_order` action payload — N orders under one signature. Each order's
+/// `owner` must equal the signing wallet.
+export interface BatchOrder {
+  /// Orders to place, in priority order.
+  orders: NativeOrder[];
+  /// Grouping semantics. Defaults to `"na"` when omitted.
+  grouping?: OrderGrouping;
+}
+
+/// `batch_cancel` action payload — N cancels under one signature. Each cancel's
+/// `owner` must equal the signing wallet and must carry an `oid`.
+export interface BatchCancel {
+  /// Cancels to apply, in order.
+  cancels: NativeCancel[];
+}
+
+/// `cancel_by_cloid` action payload — cancel a resting order by client id.
+export interface CancelByCloid {
+  /// Target asset / market id (`u32`).
+  asset: number;
+  /// `0x`-hex 32-char (16-byte) client order id.
+  cloid: string;
+}
+
+/// `schedule_cancel` action payload — cancel-all of the sender's open orders at
+/// a future block.
+export interface ScheduleCancel {
+  /// Block height at which all of the sender's open orders are cancelled
+  /// (`u64`).
+  cancel_at_block: number;
+}
+
+/// `cancel_all_orders` action payload — cancel all of the sender's open orders,
+/// optionally filtered to one asset.
+export interface CancelAllOrders {
+  /// Asset filter (`u32`). Omit to cancel across all assets.
+  asset?: number;
+}
+
 /// Signed native action envelope posted to `POST /exchange`.
 ///
 /// `action` is the raw JSON STRING (not a parsed object) so the bytes sent
