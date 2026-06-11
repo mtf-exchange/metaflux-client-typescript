@@ -75,5 +75,9 @@ export type {
   VaultTransfer,
   VaultModify,
   VaultWithdraw,
+  VaultDistribute,
 } from './vault.js';
-export type { SubmitEncryptedOrder } from './encrypted.js';
+export type { SubmitEncryptedOrder, EncryptedOrderSubmit } from './encrypted.js';
+export type { CoreSide, RfqRequest, RfqAccept } from './rfq.js';
+export type { FbaSubmit } from './fba.js';
+export type { CrossChainSend } from './cross-chain.js';

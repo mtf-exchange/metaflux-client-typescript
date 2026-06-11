@@ -302,6 +302,98 @@ describe('InfoApi request shapes', () => {
   });
 });
 
+describe('InfoApi deployed-gateway read shapes', () => {
+  it('marketInfo decodes lowercase kind + sz_decimals + mark/oracle px', async () => {
+    const api = new InfoApi(BASE);
+    nextType = 'market_info';
+    nextData = {
+      asset_id: 0,
+      name: 'BTC',
+      kind: 'perp',
+      sz_decimals: 5,
+      mark_px: '50000',
+      oracle_px: '50000',
+      tick_size: '1000000',
+      step_size: '1',
+      min_order: '1',
+      max_leverage: 50,
+      maint_margin_ratio: '300',
+      init_margin_ratio: '200',
+      funding: {
+        rate_per_hr: '0',
+        cap_per_hr: '0',
+        interval_ms: 3600000,
+        next_payment_ts: 0,
+      },
+      mark_source: 'MedianOfOraclesAndMid',
+      fba_enabled: false,
+      open_interest: '0',
+    };
+    const m = await api.marketInfo(0);
+    expect(m.kind).toBe('perp');
+    // sz_decimals is load-bearing for raw-lot size encoding.
+    expect(m.sz_decimals).toBe(5);
+    expect(typeof m.sz_decimals).toBe('number');
+    expect(m.mark_px).toBe('50000');
+    expect(m.oracle_px).toBe('50000');
+  });
+
+  it('feeSchedule decodes string bps + tiers[] + burn_ratio (optional top-level pair)', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      maker_bps: '1.0',
+      taker_bps: '5.0',
+      referrer_share_bps: '5.0',
+      builder_rebate_bps: '0',
+      burn_ratio: '0.8',
+      tiers: [{ maker_bps: '1.0', taker_bps: '5.0', volume_30d: '0' }],
+    };
+    const f = await api.feeSchedule();
+    expect(f.maker_bps).toBe('1.0');
+    expect(f.taker_bps).toBe('5.0');
+    expect(f.burn_ratio).toBe('0.8');
+    expect(f.referrer_share_bps).toBe('5.0');
+    expect(f.builder_rebate_bps).toBe('0');
+    expect(f.tiers[0]?.taker_bps).toBe('5.0');
+    expect(f.tiers[0]?.volume_30d).toBe('0');
+
+    // A source-built node may omit the top-level maker/taker pair.
+    nextData = {
+      referrer_share_bps: '5.0',
+      builder_rebate_bps: '0',
+      burn_ratio: '0.8',
+      tiers: [{ maker_bps: '1.0', taker_bps: '5.0', volume_30d: '0' }],
+    };
+    const f2 = await api.feeSchedule();
+    expect(f2.maker_bps).toBeUndefined();
+    expect(f2.taker_bps).toBeUndefined();
+  });
+
+  it('openOrders decodes the live gateway oid:0 fixture (lowercase side, market_id key)', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      address: ADDR,
+      orders: [
+        {
+          oid: 0,
+          market_id: 0,
+          side: 'bid',
+          px: '2500000000000',
+          size: '60',
+          inserted_at_ms: 0,
+        },
+      ],
+    };
+    const o = await api.openOrders({ address: ADDR });
+    expect(o.account_id).toBeUndefined();
+    expect(o.orders[0]?.side).toBe('bid');
+    expect(o.orders[0]?.px).toBe('2500000000000');
+    expect(o.orders[0]?.size).toBe('60');
+    // Live gateway gap: oid reads back as 0 (not cancellable by oid).
+    expect(o.orders[0]?.oid).toBe(0);
+  });
+});
+
 describe('InfoApi envelope validation', () => {
   it('throws when the response is not a {type, data} envelope', async () => {
     const api = new InfoApi(BASE);
