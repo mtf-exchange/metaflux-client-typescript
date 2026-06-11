@@ -14,7 +14,7 @@ const pkgDir = resolve(__dirname, '..', 'pkg');
 const wasmBuilt = existsSync(resolve(pkgDir, 'metaflux_client_wasm.js'));
 
 if (!wasmBuilt) {
-  // eslint-disable-next-line no-console
+   
   console.warn(
     '[native.test.ts] pkg/ not found — skipping WASM tests. ' +
       'Run `npm run build:wasm` to enable.',
