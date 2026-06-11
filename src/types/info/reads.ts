@@ -148,6 +148,46 @@ export interface SubAccounts {
   sub_accounts: SubAccountEntry[];
 }
 
+/// One OHLCV bar from the `candle` `/info` read.
+///
+/// The REST companion to the live `candles` WS channel: the WS pushes the
+/// forming bar as trades land, this read returns the closed history. Bars are
+/// oldest-first by `open_time`; the newest element is the still-forming bar.
+///
+/// **Price plane — does NOT match the WS `candles` frame.** This REST read's
+/// `open` / `close` / `high` / `low` are **whole-USDC** human-dollar decimal
+/// strings (`"67042.50"`); the WS `candles` frame carries the SAME bar's OHLC
+/// as RAW 1e8 fixed-point integers (`"6700000000000"`). Rescale if you mix the
+/// two sources. `volume` is base units (coin size, NOT notional); `num_trades`
+/// is a fill count, not notional.
+///
+/// GATEWAY-served, not node: candles are derived display data folded from the
+/// public trade stream — not committed chain state, so they must be queried
+/// against the **gateway** (`<net>-gateway.mtf.exchange/info`); a bare node
+/// returns `unknown info type: candle`.
+export interface Candle {
+  /// Echoed market symbol (e.g. `"BTC"`).
+  coin: string;
+  /// Echoed bucket token (`1m`/`5m`/`15m`/`1h`/`4h`/`1d`).
+  interval: string;
+  /// Bar open timestamp (ms, bucket-aligned).
+  open_time: number;
+  /// Bar close timestamp (ms) — `open_time + interval − 1`.
+  close_time: number;
+  /// Open price, whole-USDC decimal string.
+  open: string;
+  /// Close price, whole-USDC decimal string.
+  close: string;
+  /// High price, whole-USDC decimal string.
+  high: string;
+  /// Low price, whole-USDC decimal string.
+  low: string;
+  /// Traded base volume in the bar, decimal string (coin size, not notional).
+  volume: string;
+  /// Fill count in the bar.
+  num_trades: number;
+}
+
 /// One MIP-3 auction bid.
 export interface Mip3Bid {
   /// Bidder address (0x).

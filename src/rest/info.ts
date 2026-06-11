@@ -31,6 +31,7 @@ import type {
   ActiveAssetData,
   Agents,
   BlockInfo,
+  Candle,
   DelegatorSummary,
   ExchangeStatus,
   FeeSchedule,
@@ -156,6 +157,43 @@ export class InfoApi {
   /// `funding_history` — market-scoped funding premium samples by `market_id`.
   async fundingHistory(marketId: number): Promise<FundingHistory> {
     return this.post<FundingHistory>({ type: 'funding_history', market_id: marketId });
+  }
+
+  /// `candle` — historical OHLCV bars for `(coin, interval)` over a window.
+  ///
+  /// The REST companion to the live `candles` WS channel. `coin` is a market
+  /// **symbol** (e.g. `"BTC"`), NOT a numeric asset id — unlike the other
+  /// market-scoped reads here. `interval` is one of
+  /// `1m`/`5m`/`15m`/`1h`/`4h`/`1d`. `startTime` / `endTime` are unix-ms filters
+  /// on bar open, sent as `start_time` / `end_time` ONLY when provided
+  /// (omitted = unbounded / from 0). Bars come oldest-first by `open_time`; the
+  /// newest element is the still-forming bar.
+  ///
+  /// **Price plane — does NOT match the WS `candles` frame.** The returned
+  /// `open` / `close` / `high` / `low` are whole-USDC human-dollar decimal
+  /// strings (`"67042.50"`); the WS `candles` frame carries the SAME bar's OHLC
+  /// as RAW 1e8 fixed-point integers (`"6700000000000"`). Rescale if you mix the
+  /// two sources. `volume` is base units (coin size, NOT notional); `num_trades`
+  /// is a fill count.
+  ///
+  /// GATEWAY-served, not node: must hit `<net>-gateway.mtf.exchange/info`; a
+  /// bare node returns `unknown info type: candle`. An empty array is the
+  /// honest-empty answer for an unsupported `interval`, a market with no indexed
+  /// trades, or a deployment with no indexer wired.
+  async candle(
+    coin: string,
+    interval: string,
+    startTime?: number,
+    endTime?: number,
+  ): Promise<Candle[]> {
+    const body: { type: string; [k: string]: unknown } = {
+      type: 'candle',
+      coin,
+      interval,
+    };
+    if (startTime !== undefined) body.start_time = startTime;
+    if (endTime !== undefined) body.end_time = endTime;
+    return this.post<Candle[]>(body);
   }
 
   /// `block_info` — latest committed block metadata. No parameters.
