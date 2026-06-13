@@ -1,6 +1,6 @@
 {
   "name": "@metaflux-dex/client",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "packageManager": "pnpm@11.3.0",
   "description": "MetaFlux (MTF) TypeScript client SDK — WASM-backed crypto + ESM-only fetch wrappers.",
   "type": "module",
@@ -33,9 +33,10 @@
     "LICENSE"
   ],
   "scripts": {
-    "build:wasm": "wasm-pack build wasm/ --target web --out-dir ../pkg",
+    "build:wasm": "wasm-pack build wasm/ --target web --out-dir ../pkg && rm -f pkg/.gitignore",
     "build:ts": "tsc",
     "build": "pnpm run build:wasm && pnpm run build:ts",
+    "prepublishOnly": "pnpm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src/ __tests__/",
