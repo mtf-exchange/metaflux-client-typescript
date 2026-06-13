@@ -1,6 +1,6 @@
 // EIP-712 typed-action payload types (the structured wallet-signing path).
 //
-// These 18 actions are signed as proper EIP-712 typed structs so a wallet
+// These actions are signed as proper EIP-712 typed structs so a wallet
 // (`eth_signTypedData_v4`) renders named fields instead of one opaque blob.
 // Each interface carries exactly the action's signed fields; the envelope
 // `nonce` is supplied at sign time (it is the same value bound into every typed
