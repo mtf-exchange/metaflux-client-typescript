@@ -3,3 +3,4 @@
 
 export * from './digest.js';
 export * from './actions.js';
+export * from './typed.js';
