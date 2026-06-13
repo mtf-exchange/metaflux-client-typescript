@@ -1,0 +1,16 @@
+# Packaging whitelist lives in package.json "files"; this .npmignore exists so
+# npm does NOT fall back to .gitignore (which lists pkg/ and dist/) when packing.
+# Without it the WASM signer in pkg/ is silently dropped from the tarball.
+node_modules/
+target/
+wasm/
+__tests__/
+.github/
+*.log
+.DS_Store
+*.tsbuildinfo
+pnpm-lock.yaml
+pnpm-workspace.yaml
+tsconfig*.json
+vitest.config.ts
+eslint.config.js
