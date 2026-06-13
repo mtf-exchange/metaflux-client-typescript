@@ -75,6 +75,14 @@ import {
   recoverNativeSigner,
   signNativeAction,
 } from './native/digest.js';
+import {
+  buildTyped,
+  signTypedAction,
+  typedDataV4,
+  typedRequestBody,
+  type TypedDataV4,
+  type TypedSignedAction,
+} from './native/typed.js';
 import { InfoApi } from './rest/info.js';
 import { WsClient, type WsConfig } from './ws/ws.js';
 import type {
@@ -116,9 +124,13 @@ import type {
   RfqAccept,
   RfqRequest,
   ScheduleCancel,
+  SendAsset,
   SetDisplayName,
+  SetMetaliquiditySet,
   SetMetaliquidityWhitelist,
   SetReferrer,
+  UsdClassTransfer,
+  Withdraw,
   SignedOrder,
   SubmitEncryptedOrder,
   TokenDelegate,
@@ -1058,6 +1070,123 @@ export class Client {
       rawJson: nativeRequestBody(signed),
       bearer: this.jwt,
     });
+  }
+
+  // ============================================================================
+  // EIP-712 typed-action scheme (`sig_scheme:"typed"`).
+  //
+  // The 18 wallet-signed actions below are sent as proper EIP-712 typed structs
+  // so a wallet (`eth_signTypedData_v4`) renders the named fields. The POST body
+  // carries `sig_scheme:"typed"` + the same canonical `action` JSON that was
+  // hashed. Everything else keeps the legacy opaque scheme above.
+  //
+  // The chain id for these is the MTF-native chain id (`MTF_CHAIN_ID`, testnet
+  // 114514 by default), NOT the legacy `ClientOpts.chainId` (a different domain).
+  // ============================================================================
+
+  /// Build the `eth_signTypedData_v4` payload for one of the 18 typed actions,
+  /// WITHOUT signing. Hand this (JSON-stringified) to a wallet's
+  /// `eth_signTypedData_v4`; submit the returned 65-byte signature with
+  /// [`postTyped`]. `payload` carries only the action-specific snake_case fields
+  /// (no `metafluxChain` / `nonce`).
+  typedData(
+    actionType: string,
+    payload: Record<string, unknown>,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): { payload: TypedDataV4; actionJson: string; nonce: bigint } {
+    const nonce = opts.nonce ?? nextNonce();
+    const built = buildTyped(actionType, payload, nonce, opts.chainId);
+    return { payload: typedDataV4(built), actionJson: built.actionJson, nonce };
+  }
+
+  /// POST an already-signed typed action (e.g. from a wallet's
+  /// `eth_signTypedData_v4`) to `/exchange` under `sig_scheme:"typed"`. Pass the
+  /// `{ actionJson, nonce }` from [`typedData`] plus the 0x-hex 65-byte signature.
+  async postTyped(
+    signed: TypedSignedAction,
+  ): Promise<NativeExchangeAck> {
+    return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
+      method: 'POST',
+      rawJson: typedRequestBody(signed),
+      bearer: this.jwt,
+    });
+  }
+
+  /// Sign one of the 18 typed actions with this client's private key (the local
+  /// signing path — agents / tests) and POST it under `sig_scheme:"typed"`.
+  /// `payload` carries only the action-specific snake_case fields.
+  async submitTyped(
+    actionType: string,
+    payload: Record<string, unknown>,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    if (this.privateKey === undefined) {
+      throw new Error(
+        'submitTyped requires a privateKey in ClientOpts (this Client is read-only)',
+      );
+    }
+    const nonce = opts.nonce ?? nextNonce();
+    const signed = await signTypedAction(
+      this.privateKey,
+      actionType,
+      payload,
+      nonce,
+      opts.chainId,
+    );
+    return this.postTyped(signed);
+  }
+
+  // ── typed transfers + metaliquidity-set (new under the typed scheme) ───────
+
+  /// Transfer an asset between dexes / accounts (`send_asset`, typed scheme).
+  async sendAsset(
+    params: SendAsset,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'send_asset',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Move USD notional between the spot and perp classes (`usd_class_transfer`,
+  /// typed scheme).
+  async usdClassTransfer(
+    params: UsdClassTransfer,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'usd_class_transfer',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Withdraw an asset to an external destination chain (`withdraw`, typed
+  /// scheme).
+  async withdraw(
+    params: Withdraw,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'withdraw',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Set a metaliquidity-set membership (`set_metaliquidity_set`, typed scheme;
+  /// validator-authorized). Distinct from the legacy `setMetaliquidityWhitelist`.
+  async setMetaliquiditySet(
+    params: SetMetaliquiditySet,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'set_metaliquidity_set',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
   }
 
   /// Open an MTF-native WebSocket connection to `<baseUrl>/ws`.

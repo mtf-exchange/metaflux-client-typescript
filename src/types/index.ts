@@ -81,3 +81,11 @@ export type { SubmitEncryptedOrder, EncryptedOrderSubmit } from './encrypted.js'
 export type { CoreSide, RfqRequest, RfqAccept } from './rfq.js';
 export type { FbaSubmit } from './fba.js';
 export type { CrossChainSend } from './cross-chain.js';
+export type {
+  // EIP-712 typed-action payloads (the structured wallet-signing path).
+  MetafluxChainTag,
+  SendAsset,
+  UsdClassTransfer,
+  Withdraw,
+  SetMetaliquiditySet,
+} from './typed.js';

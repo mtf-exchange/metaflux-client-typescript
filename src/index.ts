@@ -22,6 +22,24 @@ export {
   nativeRequestBody,
 } from './native/digest.js';
 export {
+  // EIP-712 typed-action signing (the structured wallet-signing path). Exported
+  // so wallet integrations can build the `eth_signTypedData_v4` payload and sign
+  // out-of-band, and power users can sign with a local key directly.
+  TYPED_ACTION_TYPES,
+  isTypedAction,
+  encodeType,
+  primaryType,
+  metafluxChainTag,
+  buildTyped,
+  typedActionDigest,
+  typedDataV4,
+  signTypedAction,
+  recoverTypedSigner,
+  typedRequestBody,
+  type TypedDataV4,
+  type TypedSignedAction,
+} from './native/typed.js';
+export {
   // MTF-native action builders — the full real /exchange surface.
   buildNativeOrderAction,
   buildNativeCancelAction,
@@ -263,4 +281,10 @@ export type {
   RfqAccept,
   FbaSubmit,
   CrossChainSend,
+  // EIP-712 typed-action payloads (structured wallet-signing path).
+  MetafluxChainTag,
+  SendAsset,
+  UsdClassTransfer,
+  Withdraw,
+  SetMetaliquiditySet,
 } from './types/index.js';
