@@ -65,6 +65,7 @@ export function metafluxChainTag(chainId: number): MetafluxChainTag {
 type FieldSolidityType =
   | 'string'
   | 'string-decimal'
+  | 'chain-u8'
   | 'address'
   | 'address[]'
   | 'bool'
@@ -72,6 +73,15 @@ type FieldSolidityType =
   | 'uint16'
   | 'uint32'
   | 'uint64';
+
+/// MetaBridge destination-chain string names → the `uint8` code the typed
+/// `mb_withdraw.chain` field signs. The POST `params.chain` carries the STRING
+/// name; the signed word carries this code (Solana=0, Base=1, Arbitrum=2).
+const MB_CHAIN_CODES: Readonly<Record<string, number>> = Object.freeze({
+  Solana: 0,
+  Base: 1,
+  Arbitrum: 2,
+});
 
 /// One field of a typed struct.
 interface FieldSpec {
@@ -98,7 +108,7 @@ function f(name: string, ty: FieldSolidityType, wireKey: string): FieldSpec {
   return { name, ty, wireKey };
 }
 
-// The 18 reachable typed actions. Field order is CONSENSUS-FROZEN — it is both
+// The 30 reachable typed actions. Field order is CONSENSUS-FROZEN — it is both
 // the encodeType order and the `eth_signTypedData_v4` message order.
 const TYPED_SPECS: Record<string, TypedSpec> = {
   // ---- transfers (3) ----
@@ -233,6 +243,118 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('expiresAtMs', 'uint64', 'expires_at_ms'),
     ],
   },
+  // ---- margin (2) ----
+  update_isolated_margin: {
+    pascal: 'UpdateIsolatedMargin',
+    wireType: 'update_isolated_margin',
+    fields: [
+      f('asset', 'uint32', 'asset'),
+      f('delta', 'string-decimal', 'delta'),
+    ],
+  },
+  top_up_isolated_only_margin: {
+    pascal: 'TopUpIsolatedOnlyMargin',
+    wireType: 'top_up_isolated_only_margin',
+    fields: [
+      f('asset', 'uint32', 'asset'),
+      f('amount', 'string-decimal', 'amount'),
+    ],
+  },
+  // ---- staking (1) ----
+  token_delegate: {
+    pascal: 'TokenDelegate',
+    wireType: 'token_delegate',
+    fields: [
+      f('validator', 'address', 'validator'),
+      f('amount', 'string-decimal', 'amount'),
+      f('isUndelegate', 'bool', 'is_undelegate'),
+    ],
+  },
+  // ---- agent settings (1) ----
+  agent_set_abstraction: {
+    pascal: 'AgentSetAbstraction',
+    wireType: 'agent_set_abstraction',
+    fields: [
+      f('user', 'address', 'user'),
+      f('kind', 'uint8', 'kind'),
+      f('value', 'string', 'value'),
+    ],
+  },
+  // ---- vaults (2) ----
+  vault_transfer: {
+    pascal: 'VaultTransfer',
+    wireType: 'vault_transfer',
+    fields: [
+      f('vaultId', 'uint64', 'vault_id'),
+      f('deposit', 'bool', 'deposit'),
+      f('amount', 'string-decimal', 'amount'),
+    ],
+  },
+  vault_withdraw: {
+    pascal: 'VaultWithdraw',
+    wireType: 'vault_withdraw',
+    fields: [
+      f('vaultId', 'uint64', 'vault_id'),
+      f('shares', 'string-decimal', 'shares'),
+    ],
+  },
+  // ---- MetaBridge (1) ----
+  mb_withdraw: {
+    pascal: 'MbWithdraw',
+    wireType: 'mb_withdraw',
+    // `chain` rides POST `params` as the STRING name but signs as a uint8 code.
+    // `amount` is an integer (uint64), not a decimal string.
+    fields: [
+      f('chain', 'chain-u8', 'chain'),
+      f('asset', 'uint32', 'asset'),
+      f('amount', 'uint64', 'amount'),
+      f('dstAddr', 'string', 'dst_addr'),
+    ],
+  },
+  // ---- spot margin (3) ----
+  spot_margin_deposit: {
+    pascal: 'SpotMarginDeposit',
+    wireType: 'spot_margin_deposit',
+    fields: [
+      f('pair', 'uint32', 'pair'),
+      f('amount', 'string-decimal', 'amount'),
+    ],
+  },
+  spot_margin_withdraw: {
+    pascal: 'SpotMarginWithdraw',
+    wireType: 'spot_margin_withdraw',
+    fields: [
+      f('pair', 'uint32', 'pair'),
+      f('amount', 'string-decimal', 'amount'),
+    ],
+  },
+  spot_margin_open: {
+    pascal: 'SpotMarginOpen',
+    wireType: 'spot_margin_open',
+    fields: [
+      f('pair', 'uint32', 'pair'),
+      f('size', 'uint64', 'size'),
+      f('limitPx', 'uint64', 'limit_px'),
+      f('borrow', 'string-decimal', 'borrow'),
+    ],
+  },
+  // ---- earn (2) ----
+  earn_deposit: {
+    pascal: 'EarnDeposit',
+    wireType: 'earn_deposit',
+    fields: [
+      f('asset', 'uint32', 'asset'),
+      f('amount', 'string-decimal', 'amount'),
+    ],
+  },
+  earn_withdraw: {
+    pascal: 'EarnWithdraw',
+    wireType: 'earn_withdraw',
+    fields: [
+      f('asset', 'uint32', 'asset'),
+      f('shares', 'string-decimal', 'shares'),
+    ],
+  },
 };
 
 /// The set of snake_case `action.type` tags the typed scheme covers.
@@ -240,7 +362,7 @@ export const TYPED_ACTION_TYPES: readonly string[] = Object.freeze(
   Object.values(TYPED_SPECS).map((s) => s.wireType),
 );
 
-/// Whether the given snake_case action type is one of the 18 typed actions.
+/// Whether the given snake_case action type is one of the 30 typed actions.
 export function isTypedAction(actionType: string): boolean {
   return Object.prototype.hasOwnProperty.call(TYPED_SPECS, actionType);
 }
@@ -259,9 +381,12 @@ function requireSpec(actionType: string): TypedSpec {
 // encodeType / primaryType / types map
 // ============================================================================
 
-/// Solidity type name for the encodeType string (decimal fields are `string`).
+/// Solidity type name for the encodeType string. Decimal fields are `string`;
+/// the MetaBridge `chain-u8` field is a `uint8` in the signed type.
 function solidityTypeName(ty: FieldSolidityType): string {
-  return ty === 'string-decimal' ? 'string' : ty;
+  if (ty === 'string-decimal') return 'string';
+  if (ty === 'chain-u8') return 'uint8';
+  return ty;
 }
 
 /// Full encodeType string for a spec:
@@ -374,6 +499,18 @@ function planField(fld: FieldSpec, payload: Record<string, unknown>): FieldPlan 
       const s = raw as string;
       validateDecimal(s, fld.wireKey);
       return mkPlan(fld, jsonStr(s), s, () => keccak256(enc.encode(s)));
+    }
+    case 'chain-u8': {
+      // POST `params` carries the STRING chain name; the signed word + v4
+      // message value are the uint8 code (Solana=0, Base=1, Arbitrum=2).
+      const code = typeof raw === 'string' ? MB_CHAIN_CODES[raw] : undefined;
+      if (code === undefined) {
+        throw new RangeError(
+          `${fld.wireKey} must be one of: ${Object.keys(MB_CHAIN_CODES).join(', ')}`,
+        );
+      }
+      const word = encUintWord(BigInt(code), 8, fld.wireKey);
+      return mkPlan(fld, jsonStr(raw as string), code, async () => word);
     }
     case 'address': {
       const a = raw as string;
