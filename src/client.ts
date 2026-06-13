@@ -1075,7 +1075,7 @@ export class Client {
   // ============================================================================
   // EIP-712 typed-action scheme (`sig_scheme:"typed"`).
   //
-  // The 18 wallet-signed actions below are sent as proper EIP-712 typed structs
+  // The wallet-signed actions below are sent as proper EIP-712 typed structs
   // so a wallet (`eth_signTypedData_v4`) renders the named fields. The POST body
   // carries `sig_scheme:"typed"` + the same canonical `action` JSON that was
   // hashed. Everything else keeps the legacy opaque scheme above.
@@ -1084,7 +1084,7 @@ export class Client {
   // 114514 by default), NOT the legacy `ClientOpts.chainId` (a different domain).
   // ============================================================================
 
-  /// Build the `eth_signTypedData_v4` payload for one of the 18 typed actions,
+  /// Build the `eth_signTypedData_v4` payload for one of the typed actions,
   /// WITHOUT signing. Hand this (JSON-stringified) to a wallet's
   /// `eth_signTypedData_v4`; submit the returned 65-byte signature with
   /// [`postTyped`]. `payload` carries only the action-specific snake_case fields
@@ -1112,7 +1112,7 @@ export class Client {
     });
   }
 
-  /// Sign one of the 18 typed actions with this client's private key (the local
+  /// Sign one of the typed actions with this client's private key (the local
   /// signing path — agents / tests) and POST it under `sig_scheme:"typed"`.
   /// `payload` carries only the action-specific snake_case fields.
   async submitTyped(
@@ -1184,6 +1184,163 @@ export class Client {
   ): Promise<NativeExchangeAck> {
     return this.submitTyped(
       'set_metaliquidity_set',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  // ── typed margin / staking / vault / spot-margin / earn / bridge ───────────
+  //
+  // These mirror the legacy-scheme methods of the same root name but sign under
+  // `sig_scheme:"typed"`. They carry a `Typed` suffix so both schemes remain
+  // reachable (decimal fields are canonical strings, hashed verbatim).
+
+  /// Add or remove isolated margin (`update_isolated_margin`, typed scheme).
+  async updateIsolatedMarginTyped(
+    params: UpdateIsolatedMargin,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'update_isolated_margin',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Top up a strict-isolated-only position (`top_up_isolated_only_margin`,
+  /// typed scheme).
+  async topUpIsolatedOnlyMarginTyped(
+    params: TopUpIsolatedOnlyMargin,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'top_up_isolated_only_margin',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Delegate / undelegate stake to a validator (`token_delegate`, typed scheme).
+  async tokenDelegateTyped(
+    params: TokenDelegate,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'token_delegate',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Agent sets an abstraction config value for a user (`agent_set_abstraction`,
+  /// typed scheme; `value` is an EIP-712 string signed verbatim).
+  async agentSetAbstractionTyped(
+    params: AgentSetAbstraction,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'agent_set_abstraction',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Leader moves capital into / out of a vault (`vault_transfer`, typed scheme).
+  async vaultTransferTyped(
+    params: VaultTransfer,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'vault_transfer',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Follower redeems vault shares (`vault_withdraw`, typed scheme).
+  async vaultWithdrawTyped(
+    params: VaultWithdraw,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'vault_withdraw',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Withdraw cross-collateral to a destination chain (`mb_withdraw`, typed
+  /// scheme). The POST `params.chain` carries the chain NAME; the signed struct
+  /// field is its `uint8` code (Solana=0, Base=1, Arbitrum=2). `amount` is an
+  /// integer (uint64), not a decimal string.
+  async mbWithdrawTyped(
+    params: MbWithdraw,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'mb_withdraw',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Post quote collateral into a spot-margin account (`spot_margin_deposit`,
+  /// typed scheme).
+  async spotMarginDepositTyped(
+    params: NativeSpotMarginDeposit,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'spot_margin_deposit',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Withdraw free collateral from a spot-margin account (`spot_margin_withdraw`,
+  /// typed scheme).
+  async spotMarginWithdrawTyped(
+    params: NativeSpotMarginWithdraw,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'spot_margin_withdraw',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Open a leveraged spot position (`spot_margin_open`, typed scheme).
+  async spotMarginOpenTyped(
+    params: NativeSpotMarginOpen,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'spot_margin_open',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Supply quote into a lending pool for shares (`earn_deposit`, typed scheme).
+  async earnDepositTyped(
+    params: NativeEarnDeposit,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'earn_deposit',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Redeem lending-pool shares back to quote (`earn_withdraw`, typed scheme).
+  async earnWithdrawTyped(
+    params: NativeEarnWithdraw,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'earn_withdraw',
       params as unknown as Record<string, unknown>,
       opts,
     );

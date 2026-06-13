@@ -167,12 +167,86 @@ const VECTORS: Vector[] = [
     nonce: 34n,
     digest: '4de965c3bc25f15ddafa0b778179909f50cd0930bf4f58a652dde93bce524c80',
   },
+  // ---- the 12 formerly-deferred actions (now typed) ----
+  {
+    actionType: 'update_isolated_margin',
+    payload: { asset: 1, delta: '-100.5' },
+    nonce: 9n,
+    digest: 'f3ca20d10ce710d31de3d321d61d60b53550adbb4dfd09fca9b7a8c8dbc08162',
+  },
+  {
+    actionType: 'top_up_isolated_only_margin',
+    payload: { asset: 1, amount: '50' },
+    nonce: 10n,
+    digest: '47647d208358a681eb657867da2ce00dfeb010a7f2023ecb69e195642da24c8a',
+  },
+  {
+    actionType: 'token_delegate',
+    payload: { validator: addr(0xd4), amount: '1000', is_undelegate: false },
+    nonce: 11n,
+    digest: '5327737fefc7ee3b38b59743fb4ba311d9142a7c672ec59ca92c5a871173008b',
+  },
+  {
+    actionType: 'agent_set_abstraction',
+    payload: { user: addr(0xf6), kind: 3, value: 'abstraction-value' },
+    nonce: 14n,
+    digest: '0dd8a92857e2f4aafd97dd0131704bab22969345844389d2b214d55f2a7de71e',
+  },
+  {
+    actionType: 'vault_transfer',
+    payload: { vault_id: 42, deposit: true, amount: '250.75' },
+    nonce: 16n,
+    digest: 'd5da325a4e1331ebd6a158d7192795a3eeaf2a39c86b90d44cd5506c98ececc9',
+  },
+  {
+    actionType: 'vault_withdraw',
+    payload: { vault_id: 42, shares: '10.5' },
+    nonce: 18n,
+    digest: 'ca6c76e49c7cedd99df8d27ee85d14175b954d25bdac53f9525e6b8c71f6b5a7',
+  },
+  {
+    // chain "Arbitrum" => signed uint8 code 2; amount is a uint64 integer.
+    actionType: 'mb_withdraw',
+    payload: { chain: 'Arbitrum', asset: 1, amount: 1_000_000, dst_addr: '0xdeadbeef' },
+    nonce: 19n,
+    digest: '423f327abdec7b3469b6dc5d4993ac4a11f0a09487cec564b85d8162abdee2e8',
+  },
+  {
+    actionType: 'spot_margin_deposit',
+    payload: { pair: 5, amount: '100' },
+    nonce: 20n,
+    digest: '3d2f440131e3059d8ac4329864f258ae8c799f82323785a36420182ed3e304fd',
+  },
+  {
+    actionType: 'spot_margin_withdraw',
+    payload: { pair: 5, amount: '50' },
+    nonce: 21n,
+    digest: '44540925574b90c68c0cb4c5773d2d51e14d3c3ddd6c9fe5b97e81aba67e768c',
+  },
+  {
+    actionType: 'spot_margin_open',
+    payload: { pair: 5, size: 1_000, limit_px: 5_000_000_000, borrow: '200' },
+    nonce: 22n,
+    digest: 'd56110f1e4adb4fbd07a72b870678425bd5440d2119e3d9d9f205469c6dbd4c1',
+  },
+  {
+    actionType: 'earn_deposit',
+    payload: { asset: 0, amount: '500' },
+    nonce: 24n,
+    digest: '947530d85221850f892412799ef45baef7f5a75663272bc565e81c519879664e',
+  },
+  {
+    actionType: 'earn_withdraw',
+    payload: { asset: 0, shares: '25.5' },
+    nonce: 25n,
+    digest: '5244365c226ab1b7ec786129f134d104a2923a57b9cc2588d6b215aef5b55018',
+  },
 ];
 
 describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
-  it('reproduces all 18 contract KAT digests byte-for-byte (chain 114514)', async () => {
+  it('reproduces all 30 contract KAT digests byte-for-byte (chain 114514)', async () => {
     const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
-    expect(VECTORS.length).toBe(18);
+    expect(VECTORS.length).toBe(30);
     for (const v of VECTORS) {
       const built = buildTyped(v.actionType, v.payload, v.nonce, CHAIN_ID);
       const digest = await typedActionDigest(built);
@@ -374,13 +448,110 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(toHex(base)).not.toBe(toHex(otherChain));
   });
 
-  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 18 reachable actions', async () => {
+  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 30 reachable actions', async () => {
     const { isTypedAction, TYPED_ACTION_TYPES } = await import('../src/native/typed.js');
-    expect(TYPED_ACTION_TYPES.length).toBe(18);
+    expect(TYPED_ACTION_TYPES.length).toBe(30);
     expect(isTypedAction('approve_agent')).toBe(true);
     expect(isTypedAction('submit_order')).toBe(false);
-    // The deferred actions stay on the legacy scheme.
-    expect(isTypedAction('token_delegate')).toBe(false);
-    expect(isTypedAction('mb_withdraw')).toBe(false);
+    // The 12 formerly-deferred actions are now typed too.
+    expect(isTypedAction('token_delegate')).toBe(true);
+    expect(isTypedAction('mb_withdraw')).toBe(true);
+    expect(isTypedAction('agent_set_abstraction')).toBe(true);
+    expect(isTypedAction('spot_margin_open')).toBe(true);
+    expect(isTypedAction('earn_withdraw')).toBe(true);
+  });
+
+  it('encodeType strings for the 12 formerly-deferred actions match the contract', async () => {
+    const { encodeType } = await import('../src/native/typed.js');
+    expect(encodeType('update_isolated_margin')).toBe(
+      'MetaFluxTransaction:UpdateIsolatedMargin(string metafluxChain,uint32 asset,string delta,uint64 nonce)',
+    );
+    expect(encodeType('top_up_isolated_only_margin')).toBe(
+      'MetaFluxTransaction:TopUpIsolatedOnlyMargin(string metafluxChain,uint32 asset,string amount,uint64 nonce)',
+    );
+    expect(encodeType('token_delegate')).toBe(
+      'MetaFluxTransaction:TokenDelegate(string metafluxChain,address validator,string amount,bool isUndelegate,uint64 nonce)',
+    );
+    expect(encodeType('agent_set_abstraction')).toBe(
+      'MetaFluxTransaction:AgentSetAbstraction(string metafluxChain,address user,uint8 kind,string value,uint64 nonce)',
+    );
+    expect(encodeType('vault_transfer')).toBe(
+      'MetaFluxTransaction:VaultTransfer(string metafluxChain,uint64 vaultId,bool deposit,string amount,uint64 nonce)',
+    );
+    expect(encodeType('vault_withdraw')).toBe(
+      'MetaFluxTransaction:VaultWithdraw(string metafluxChain,uint64 vaultId,string shares,uint64 nonce)',
+    );
+    expect(encodeType('mb_withdraw')).toBe(
+      'MetaFluxTransaction:MbWithdraw(string metafluxChain,uint8 chain,uint32 asset,uint64 amount,string dstAddr,uint64 nonce)',
+    );
+    expect(encodeType('spot_margin_deposit')).toBe(
+      'MetaFluxTransaction:SpotMarginDeposit(string metafluxChain,uint32 pair,string amount,uint64 nonce)',
+    );
+    expect(encodeType('spot_margin_withdraw')).toBe(
+      'MetaFluxTransaction:SpotMarginWithdraw(string metafluxChain,uint32 pair,string amount,uint64 nonce)',
+    );
+    expect(encodeType('spot_margin_open')).toBe(
+      'MetaFluxTransaction:SpotMarginOpen(string metafluxChain,uint32 pair,uint64 size,uint64 limitPx,string borrow,uint64 nonce)',
+    );
+    expect(encodeType('earn_deposit')).toBe(
+      'MetaFluxTransaction:EarnDeposit(string metafluxChain,uint32 asset,string amount,uint64 nonce)',
+    );
+    expect(encodeType('earn_withdraw')).toBe(
+      'MetaFluxTransaction:EarnWithdraw(string metafluxChain,uint32 asset,string shares,uint64 nonce)',
+    );
+  });
+
+  it('mb_withdraw: POST params.chain is the NAME, the v4 message field is the uint8 code', async () => {
+    const { buildTyped, typedDataV4 } = await import('../src/native/typed.js');
+    const built = buildTyped(
+      'mb_withdraw',
+      { chain: 'Arbitrum', asset: 1, amount: 1_000_000, dst_addr: '0xdeadbeef' },
+      19n,
+      CHAIN_ID,
+    );
+    // The POST action JSON carries the string chain name verbatim.
+    expect(JSON.parse(built.actionJson)).toEqual({
+      type: 'mb_withdraw',
+      params: { chain: 'Arbitrum', asset: 1, amount: 1_000_000, dst_addr: '0xdeadbeef' },
+    });
+    // The signed v4 message renders `chain` as the uint8 code (Arbitrum=2).
+    const data = typedDataV4(built);
+    expect(data.message.chain).toBe(2);
+    expect(
+      data.types[data.primaryType].find((t) => t.name === 'chain')?.type,
+    ).toBe('uint8');
+  });
+
+  it('agent_set_abstraction: value is an EIP-712 string, kind is uint8', async () => {
+    const { buildTyped, typedDataV4 } = await import('../src/native/typed.js');
+    const built = buildTyped(
+      'agent_set_abstraction',
+      { user: addr(0xf6), kind: 3, value: 'abstraction-value' },
+      14n,
+      CHAIN_ID,
+    );
+    const data = typedDataV4(built);
+    expect(data.message.kind).toBe(3);
+    expect(data.message.value).toBe('abstraction-value');
+    const fields = data.types[data.primaryType];
+    expect(fields.find((t) => t.name === 'kind')?.type).toBe('uint8');
+    expect(fields.find((t) => t.name === 'value')?.type).toBe('string');
+    // The same value string appears verbatim in the POST action JSON.
+    expect(built.actionJson.includes('"value":"abstraction-value"')).toBe(true);
+  });
+
+  it('decimal delta/shares/borrow ride verbatim into the POST action', async () => {
+    const { buildTyped } = await import('../src/native/typed.js');
+    const im = buildTyped('update_isolated_margin', { asset: 1, delta: '-100.5' }, 9n, CHAIN_ID);
+    expect(im.actionJson.includes('"delta":"-100.5"')).toBe(true);
+    const vw = buildTyped('vault_withdraw', { vault_id: 42, shares: '10.5' }, 18n, CHAIN_ID);
+    expect(vw.actionJson.includes('"shares":"10.5"')).toBe(true);
+    const so = buildTyped(
+      'spot_margin_open',
+      { pair: 5, size: 1_000, limit_px: 5_000_000_000, borrow: '200' },
+      22n,
+      CHAIN_ID,
+    );
+    expect(so.actionJson.includes('"borrow":"200"')).toBe(true);
   });
 });
