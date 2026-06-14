@@ -49,9 +49,9 @@ interface Vector {
 const VECTORS: Vector[] = [
   {
     actionType: 'approve_agent',
-    payload: { agent: addr(0xa1), name: 'trading-bot' },
+    payload: { agent: addr(0xa1), name: 'trading-bot', expires_at_ms: 1_700_000_000_000 },
     nonce: 1n,
-    digest: 'b5a1178200a97f6ea644abdf4eb21525ad8e13c8ff07b5c4a6809815e6c91820',
+    digest: '569bb62f0cd468264550e8bdc4c37abcf273bdd48569bed37b985c5d6e94693e',
   },
   {
     actionType: 'set_referrer',
@@ -260,12 +260,12 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
     const built = buildTyped(
       'approve_agent',
-      { agent: addr(0xa1), name: 'trading-bot' },
+      { agent: addr(0xa1), name: 'trading-bot', expires_at_ms: 1_700_000_000_000 },
       1n,
       CHAIN_ID,
     );
     expect(toHex(await typedActionDigest(built))).toBe(
-      'b5a1178200a97f6ea644abdf4eb21525ad8e13c8ff07b5c4a6809815e6c91820',
+      '569bb62f0cd468264550e8bdc4c37abcf273bdd48569bed37b985c5d6e94693e',
     );
   });
 
@@ -305,7 +305,7 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
   it('encodeType strings match the frozen contract (field order)', async () => {
     const { encodeType } = await import('../src/native/typed.js');
     expect(encodeType('approve_agent')).toBe(
-      'MetaFluxTransaction:ApproveAgent(string metafluxChain,address agentAddress,string agentName,uint64 nonce)',
+      'MetaFluxTransaction:ApproveAgent(string metafluxChain,address agentAddress,string agentName,uint64 expiresAtMs,uint64 nonce)',
     );
     expect(encodeType('send_asset')).toBe(
       'MetaFluxTransaction:SendAsset(string metafluxChain,uint32 sourceDex,uint32 destinationDex,uint32 asset,address destination,string amount,bool toPerp,uint64 nonce)',
@@ -322,7 +322,7 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     const { buildTyped, typedDataV4 } = await import('../src/native/typed.js');
     const built = buildTyped(
       'approve_agent',
-      { agent: addr(0xa1), name: 'trading-bot' },
+      { agent: addr(0xa1), name: 'trading-bot', expires_at_ms: 1_700_000_000_000 },
       1n,
       CHAIN_ID,
     );
@@ -343,6 +343,7 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
       'string metafluxChain',
       'address agentAddress',
       'string agentName',
+      'uint64 expiresAtMs',
       'uint64 nonce',
     ]);
 
@@ -350,6 +351,7 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(data.message.metafluxChain).toBe('Testnet');
     expect(data.message.agentAddress).toBe(addr(0xa1));
     expect(data.message.agentName).toBe('trading-bot');
+    expect(data.message.expiresAtMs).toBe(1_700_000_000_000);
     expect(data.message.nonce).toBe('1');
   });
 
@@ -399,7 +401,7 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     const probePub = await recoverPubkey(probeSig, probe);
     const owner = `0x${toHex(await deriveAddressFromPubkey(probePub))}`;
 
-    const payload = { agent: addr(0xa1), name: 'trading-bot' };
+    const payload = { agent: addr(0xa1), name: 'trading-bot', expires_at_ms: 1_700_000_000_000 };
     const signed = await signTypedAction(privKey, 'approve_agent', payload, 1n, CHAIN_ID);
     expect(signed.signature.startsWith('0x')).toBe(true);
     expect(signed.signature.length).toBe(2 + 130); // 0x + 65 bytes
