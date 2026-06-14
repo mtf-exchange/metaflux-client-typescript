@@ -146,6 +146,8 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
     fields: [
       f('agentAddress', 'address', 'agent'),
       f('agentName', 'string', 'name'),
+      // `0` = never expires; a real ms-epoch expiry signs verbatim (consensus-frozen).
+      f('expiresAtMs', 'uint64', 'expires_at_ms'),
     ],
   },
   set_referrer: {
