@@ -109,3 +109,66 @@ export interface PriorityBid {
   /// Bid in basis points (`u16`).
   bid_bps: number;
 }
+
+/// `create_sub_account` — open a sub-account under the sender (the master).
+export interface CreateSubAccount {
+  /// Human-readable sub-account name.
+  name: string;
+  /// Optional explicit sub-account index (`u32`). Omit for the next available.
+  /// Flattens in the signed digest to a presence `bool` + value (`0` when omitted).
+  explicit_index?: number;
+  /// Whether the sub-account shares the parent's STP group.
+  shared_stp_group: boolean;
+}
+
+/// `sub_account_transfer` — move perp cross-collateral between the master and a
+/// sub-account.
+export interface SubAccountTransfer {
+  /// Sub-account index relative to the sender (`u32`).
+  sub_index: number;
+  /// Direction (`true` = parent → sub, `false` = sub → parent).
+  deposit: boolean;
+  /// Amount (USDC) as a canonical decimal string.
+  amount: string;
+}
+
+/// `sub_account_spot_transfer` — move a spot token balance between the master
+/// and a sub-account.
+export interface SubAccountSpotTransfer {
+  /// Sub-account index (`u32`).
+  sub_index: number;
+  /// Token (spot asset) id (`u32`).
+  token: number;
+  /// Direction (`true` = parent → sub, `false` = sub → parent).
+  deposit: boolean;
+  /// Amount as a canonical decimal string.
+  amount: string;
+}
+
+/// `c_deposit` — move spot MTF into the free staking balance.
+export interface CDeposit {
+  /// Amount of MTF to move (positive), as a canonical decimal string.
+  amount: string;
+}
+
+/// `c_withdraw` — move the free staking balance back to spot MTF.
+export interface CWithdraw {
+  /// Amount of MTF to move (positive), as a canonical decimal string.
+  amount: string;
+}
+
+/// `core_evm_transfer` — move USDC from the Core ledger to MetaFluxEVM.
+///
+/// Core → EVM only on `/exchange`: debits the sender's Core USDC
+/// cross-collateral and mints the scale-converted 6-decimal EVM USDC to
+/// `destination` on the next EVM block (`amount × 1e6`). `to_evm: false`
+/// (EVM → Core) is rejected — that direction originates as an EVM burn tx.
+/// Sender-authorized. Typed-only.
+export interface CoreEvmTransfer {
+  /// Amount in the whole-USDC plane as a canonical decimal string.
+  amount: string;
+  /// Direction. `true` = Core → EVM (the only supported direction here).
+  to_evm: boolean;
+  /// `0x`-hex 20-byte EVM-side recipient.
+  destination: string;
+}

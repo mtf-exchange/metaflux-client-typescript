@@ -241,12 +241,88 @@ const VECTORS: Vector[] = [
     nonce: 25n,
     digest: '5244365c226ab1b7ec786129f134d104a2923a57b9cc2588d6b215aef5b55018',
   },
+  // ---- the 11 newly-typed actions (core_evm_transfer + account/sub-account
+  //      /staking/abstraction/priority/encrypted set) ----
+  {
+    actionType: 'core_evm_transfer',
+    payload: { amount: '250.5', to_evm: true, destination: addr(0xce) },
+    nonce: 52n,
+    digest: 'afab7aec6d4b9ab674162a745a79e1f0f3939b75710236a2d255a0d6d64ab499',
+  },
+  {
+    // explicit_index present => signed hasExplicitIndex=true, explicitIndex=5.
+    actionType: 'create_sub_account',
+    payload: { name: 'bot', explicit_index: 5, shared_stp_group: true },
+    nonce: 53n,
+    digest: 'd4ab521e447ba69431403946797bc4fed4f7ab1c395fbde55170dae5cd5872ef',
+  },
+  {
+    actionType: 'sub_account_transfer',
+    payload: { sub_index: 0, deposit: true, amount: '100.5' },
+    nonce: 55n,
+    digest: '741b3707a6530c4410d54ed1f80a9581ad3d7255a8d84dc93356adf71fb90910',
+  },
+  {
+    actionType: 'sub_account_spot_transfer',
+    payload: { sub_index: 2, token: 7, deposit: false, amount: '42.0' },
+    nonce: 56n,
+    digest: '0c2e9be9c1372f62cbd6f6122a9d5f48589ae966ec1717ddd1fe8a56984997d4',
+  },
+  {
+    actionType: 'c_deposit',
+    payload: { amount: '500' },
+    nonce: 57n,
+    digest: '59e1ad2f5970799c5ac2f84f859757c6b102bfefa0e42edc1068ed2a33240d39',
+  },
+  {
+    actionType: 'c_withdraw',
+    payload: { amount: '500' },
+    nonce: 58n,
+    digest: '66466daf4a1f531f167ea4d131ee4c41c5e16d75e3a85bd0cc739633b763b4cf',
+  },
+  {
+    actionType: 'user_dex_abstraction',
+    payload: { enabled: true },
+    nonce: 59n,
+    digest: '5fad4db7c576767400c930e5ed312847e17741526db66f6f918ff027a6e7b2d6',
+  },
+  {
+    actionType: 'user_set_abstraction',
+    payload: { kind: 3, value: '9.9' },
+    nonce: 60n,
+    digest: '8a84c2fe0594d1db9f4bb6c3db0c539cec75b7c759d053818db92d7acc107148',
+  },
+  {
+    actionType: 'priority_bid',
+    payload: { asset: 8, bid_bps: 6 },
+    nonce: 61n,
+    digest: 'aaffc74728255d071f7c3033ddb4aa81f822269e7ba3742172933fd238cc3522',
+  },
+  {
+    // asset present => signed hasAsset=true, asset=4.
+    actionType: 'cancel_all_orders',
+    payload: { asset: 4 },
+    nonce: 62n,
+    digest: '9088140fe0311f99071e2c45e5eff506052fa787e6eb44e0d110a198fb5a3bf7',
+  },
+  {
+    actionType: 'submit_encrypted_order',
+    payload: {
+      ciphertext: Uint8Array.from([1, 2, 3, 4]),
+      commitment: new Uint8Array(32).fill(0x11),
+      threshold: 2,
+      target_block: 1000,
+      reveal_deadline_ms: 5000,
+    },
+    nonce: 64n,
+    digest: '86657cd5b8920543f8e4ec41790aeb0957af3c4d2440e25d8009cfa9e5fc9675',
+  },
 ];
 
 describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
-  it('reproduces all 30 contract KAT digests byte-for-byte (chain 114514)', async () => {
+  it('reproduces all 41 contract KAT digests byte-for-byte (chain 114514)', async () => {
     const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
-    expect(VECTORS.length).toBe(30);
+    expect(VECTORS.length).toBe(41);
     for (const v of VECTORS) {
       const built = buildTyped(v.actionType, v.payload, v.nonce, CHAIN_ID);
       const digest = await typedActionDigest(built);
@@ -450,9 +526,9 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(toHex(base)).not.toBe(toHex(otherChain));
   });
 
-  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 30 reachable actions', async () => {
+  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 41 reachable actions', async () => {
     const { isTypedAction, TYPED_ACTION_TYPES } = await import('../src/native/typed.js');
-    expect(TYPED_ACTION_TYPES.length).toBe(30);
+    expect(TYPED_ACTION_TYPES.length).toBe(41);
     expect(isTypedAction('approve_agent')).toBe(true);
     expect(isTypedAction('submit_order')).toBe(false);
     // The 12 formerly-deferred actions are now typed too.
@@ -461,6 +537,118 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(isTypedAction('agent_set_abstraction')).toBe(true);
     expect(isTypedAction('spot_margin_open')).toBe(true);
     expect(isTypedAction('earn_withdraw')).toBe(true);
+    // The 11 newly-typed actions (core_evm_transfer + account/sub-account set).
+    expect(isTypedAction('core_evm_transfer')).toBe(true);
+    expect(isTypedAction('create_sub_account')).toBe(true);
+    expect(isTypedAction('sub_account_transfer')).toBe(true);
+    expect(isTypedAction('sub_account_spot_transfer')).toBe(true);
+    expect(isTypedAction('c_deposit')).toBe(true);
+    expect(isTypedAction('c_withdraw')).toBe(true);
+    expect(isTypedAction('user_dex_abstraction')).toBe(true);
+    expect(isTypedAction('user_set_abstraction')).toBe(true);
+    expect(isTypedAction('priority_bid')).toBe(true);
+    expect(isTypedAction('cancel_all_orders')).toBe(true);
+    expect(isTypedAction('submit_encrypted_order')).toBe(true);
+  });
+
+  it('encodeType strings for the 11 newly-typed actions match the contract', async () => {
+    const { encodeType } = await import('../src/native/typed.js');
+    expect(encodeType('core_evm_transfer')).toBe(
+      'MetaFluxTransaction:CoreEvmTransfer(string metafluxChain,string amount,bool toEvm,address destination,uint64 nonce)',
+    );
+    expect(encodeType('create_sub_account')).toBe(
+      'MetaFluxTransaction:CreateSubAccount(string metafluxChain,string name,bool hasExplicitIndex,uint32 explicitIndex,bool sharedStpGroup,uint64 nonce)',
+    );
+    expect(encodeType('sub_account_transfer')).toBe(
+      'MetaFluxTransaction:SubAccountTransfer(string metafluxChain,uint32 subIndex,bool deposit,string amount,uint64 nonce)',
+    );
+    expect(encodeType('sub_account_spot_transfer')).toBe(
+      'MetaFluxTransaction:SubAccountSpotTransfer(string metafluxChain,uint32 subIndex,uint32 token,bool deposit,string amount,uint64 nonce)',
+    );
+    expect(encodeType('c_deposit')).toBe(
+      'MetaFluxTransaction:CDeposit(string metafluxChain,string amount,uint64 nonce)',
+    );
+    expect(encodeType('c_withdraw')).toBe(
+      'MetaFluxTransaction:CWithdraw(string metafluxChain,string amount,uint64 nonce)',
+    );
+    expect(encodeType('user_dex_abstraction')).toBe(
+      'MetaFluxTransaction:UserDexAbstraction(string metafluxChain,bool enabled,uint64 nonce)',
+    );
+    expect(encodeType('user_set_abstraction')).toBe(
+      'MetaFluxTransaction:UserSetAbstraction(string metafluxChain,uint8 kind,string value,uint64 nonce)',
+    );
+    expect(encodeType('priority_bid')).toBe(
+      'MetaFluxTransaction:PriorityBid(string metafluxChain,uint32 asset,uint16 bidBps,uint64 nonce)',
+    );
+    expect(encodeType('cancel_all_orders')).toBe(
+      'MetaFluxTransaction:CancelAllOrders(string metafluxChain,bool hasAsset,uint32 asset,uint64 nonce)',
+    );
+    expect(encodeType('submit_encrypted_order')).toBe(
+      'MetaFluxTransaction:SubmitEncryptedOrder(string metafluxChain,bytes ciphertext,bytes32 commitment,uint8 threshold,uint64 targetBlock,uint64 revealDeadlineMs,uint64 nonce)',
+    );
+  });
+
+  it('optional-flatten: absent explicit_index / asset sign the absent variant + omit from POST', async () => {
+    const { buildTyped, typedActionDigest, typedDataV4 } = await import(
+      '../src/native/typed.js'
+    );
+    // create_sub_account WITHOUT explicit_index => hasExplicitIndex=false,
+    // explicitIndex=0; the POST omits explicit_index entirely.
+    const csa = buildTyped(
+      'create_sub_account',
+      { name: 'bot', shared_stp_group: false },
+      54n,
+      CHAIN_ID,
+    );
+    expect(toHex(await typedActionDigest(csa))).toBe(
+      '9a8663dc58851e1e0baf4a04a1fcdc38ca5b13b8017eb49554a10b9060ae5eff',
+    );
+    expect(JSON.parse(csa.actionJson)).toEqual({
+      type: 'create_sub_account',
+      params: { name: 'bot', shared_stp_group: false },
+    });
+    const csaMsg = typedDataV4(csa).message;
+    expect(csaMsg.hasExplicitIndex).toBe(false);
+    expect(csaMsg.explicitIndex).toBe(0);
+
+    // cancel_all_orders WITHOUT asset (all assets) => hasAsset=false, asset=0;
+    // the POST params object is empty.
+    const cao = buildTyped('cancel_all_orders', {}, 63n, CHAIN_ID);
+    expect(toHex(await typedActionDigest(cao))).toBe(
+      'cd7cb102701e9d114bad62d2b693a3f1d4ea78ae5e6ea243a496720debac97e4',
+    );
+    expect(JSON.parse(cao.actionJson)).toEqual({
+      type: 'cancel_all_orders',
+      params: {},
+    });
+    const caoMsg = typedDataV4(cao).message;
+    expect(caoMsg.hasAsset).toBe(false);
+    expect(caoMsg.asset).toBe(0);
+  });
+
+  it('core_evm_transfer: amount rides verbatim, field order = server type string', async () => {
+    const { buildTyped, typedDataV4 } = await import('../src/native/typed.js');
+    const built = buildTyped(
+      'core_evm_transfer',
+      { amount: '250.5', to_evm: true, destination: addr(0xce) },
+      52n,
+      CHAIN_ID,
+    );
+    expect(JSON.parse(built.actionJson)).toEqual({
+      type: 'core_evm_transfer',
+      params: { amount: '250.5', to_evm: true, destination: addr(0xce) },
+    });
+    const data = typedDataV4(built);
+    const fields = data.types[data.primaryType].map((t) => `${t.type} ${t.name}`);
+    expect(fields).toEqual([
+      'string metafluxChain',
+      'string amount',
+      'bool toEvm',
+      'address destination',
+      'uint64 nonce',
+    ]);
+    expect(data.message.amount).toBe('250.5');
+    expect(data.message.toEvm).toBe(true);
   });
 
   it('encodeType strings for the 12 formerly-deferred actions match the contract', async () => {
