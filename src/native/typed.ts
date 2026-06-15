@@ -62,6 +62,18 @@ export function metafluxChainTag(chainId: number): MetafluxChainTag {
 // ============================================================================
 
 /// Supported EIP-712 leaf solidity types for the typed actions.
+///
+/// `presence-bool` / `opt-uint32` are the two halves of an OPTIONAL wire field
+/// that the server flattens into a presence `bool` + value pair (the same
+/// `Option<T>` → `(hasX: bool, x)` rule the node's `to_typed` applies). Both
+/// read the SAME snake_case wire key: the presence half signs `true`/`false`
+/// for present/absent, the value half signs the value (or `0` when absent). The
+/// POST `action.params` carries only the original optional key (present or
+/// omitted), never the flattened pair — exactly like the server's native action.
+///
+/// `bytes` / `bytes32` back the encrypted-order ciphertext / commitment: a
+/// `Uint8Array` POSTed as a JSON byte array. `bytes` hashes `keccak256(raw)`;
+/// `bytes32` is the raw 32 bytes carried verbatim into one word.
 type FieldSolidityType =
   | 'string'
   | 'string-decimal'
@@ -72,7 +84,11 @@ type FieldSolidityType =
   | 'uint8'
   | 'uint16'
   | 'uint32'
-  | 'uint64';
+  | 'uint64'
+  | 'presence-bool'
+  | 'opt-uint32'
+  | 'bytes'
+  | 'bytes32';
 
 /// MetaBridge destination-chain string names → the `uint8` code the typed
 /// `mb_withdraw.chain` field signs. The POST `params.chain` carries the STRING
@@ -108,7 +124,7 @@ function f(name: string, ty: FieldSolidityType, wireKey: string): FieldSpec {
   return { name, ty, wireKey };
 }
 
-// The 30 reachable typed actions. Field order is CONSENSUS-FROZEN — it is both
+// The 41 reachable typed actions. Field order is CONSENSUS-FROZEN — it is both
 // the encodeType order and the `eth_signTypedData_v4` message order.
 const TYPED_SPECS: Record<string, TypedSpec> = {
   // ---- transfers (3) ----
@@ -357,6 +373,102 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('shares', 'string-decimal', 'shares'),
     ],
   },
+  // ---- Core ↔ MetaFluxEVM transfer (1) ----
+  core_evm_transfer: {
+    pascal: 'CoreEvmTransfer',
+    wireType: 'core_evm_transfer',
+    fields: [
+      f('amount', 'string-decimal', 'amount'),
+      f('toEvm', 'bool', 'to_evm'),
+      f('destination', 'address', 'destination'),
+    ],
+  },
+  // ---- account / sub-account / staking / abstraction / priority / encrypted ----
+  // (formerly un-mapped on the typed-only `/exchange` — now reachable.)
+  //
+  // `create_sub_account` + `cancel_all_orders` carry an OPTIONAL wire field that
+  // the server flattens to a presence `bool` + value pair (presence-bool +
+  // opt-uint32, both reading the same wire key). `submit_encrypted_order` signs
+  // `bytes` ciphertext + a `bytes32` commitment.
+  create_sub_account: {
+    pascal: 'CreateSubAccount',
+    wireType: 'create_sub_account',
+    fields: [
+      f('name', 'string', 'name'),
+      f('hasExplicitIndex', 'presence-bool', 'explicit_index'),
+      f('explicitIndex', 'opt-uint32', 'explicit_index'),
+      f('sharedStpGroup', 'bool', 'shared_stp_group'),
+    ],
+  },
+  sub_account_transfer: {
+    pascal: 'SubAccountTransfer',
+    wireType: 'sub_account_transfer',
+    fields: [
+      f('subIndex', 'uint32', 'sub_index'),
+      f('deposit', 'bool', 'deposit'),
+      f('amount', 'string-decimal', 'amount'),
+    ],
+  },
+  sub_account_spot_transfer: {
+    pascal: 'SubAccountSpotTransfer',
+    wireType: 'sub_account_spot_transfer',
+    fields: [
+      f('subIndex', 'uint32', 'sub_index'),
+      f('token', 'uint32', 'token'),
+      f('deposit', 'bool', 'deposit'),
+      f('amount', 'string-decimal', 'amount'),
+    ],
+  },
+  c_deposit: {
+    pascal: 'CDeposit',
+    wireType: 'c_deposit',
+    fields: [f('amount', 'string-decimal', 'amount')],
+  },
+  c_withdraw: {
+    pascal: 'CWithdraw',
+    wireType: 'c_withdraw',
+    fields: [f('amount', 'string-decimal', 'amount')],
+  },
+  user_dex_abstraction: {
+    pascal: 'UserDexAbstraction',
+    wireType: 'user_dex_abstraction',
+    fields: [f('enabled', 'bool', 'enabled')],
+  },
+  user_set_abstraction: {
+    pascal: 'UserSetAbstraction',
+    wireType: 'user_set_abstraction',
+    fields: [
+      f('kind', 'uint8', 'kind'),
+      f('value', 'string-decimal', 'value'),
+    ],
+  },
+  priority_bid: {
+    pascal: 'PriorityBid',
+    wireType: 'priority_bid',
+    fields: [
+      f('asset', 'uint32', 'asset'),
+      f('bidBps', 'uint16', 'bid_bps'),
+    ],
+  },
+  cancel_all_orders: {
+    pascal: 'CancelAllOrders',
+    wireType: 'cancel_all_orders',
+    fields: [
+      f('hasAsset', 'presence-bool', 'asset'),
+      f('asset', 'opt-uint32', 'asset'),
+    ],
+  },
+  submit_encrypted_order: {
+    pascal: 'SubmitEncryptedOrder',
+    wireType: 'submit_encrypted_order',
+    fields: [
+      f('ciphertext', 'bytes', 'ciphertext'),
+      f('commitment', 'bytes32', 'commitment'),
+      f('threshold', 'uint8', 'threshold'),
+      f('targetBlock', 'uint64', 'target_block'),
+      f('revealDeadlineMs', 'uint64', 'reveal_deadline_ms'),
+    ],
+  },
 };
 
 /// The set of snake_case `action.type` tags the typed scheme covers.
@@ -384,10 +496,13 @@ function requireSpec(actionType: string): TypedSpec {
 // ============================================================================
 
 /// Solidity type name for the encodeType string. Decimal fields are `string`;
-/// the MetaBridge `chain-u8` field is a `uint8` in the signed type.
+/// the MetaBridge `chain-u8` field is a `uint8`; an optional field flattens to a
+/// `bool` presence flag + a `uint32` value in the signed type.
 function solidityTypeName(ty: FieldSolidityType): string {
   if (ty === 'string-decimal') return 'string';
   if (ty === 'chain-u8') return 'uint8';
+  if (ty === 'presence-bool') return 'bool';
+  if (ty === 'opt-uint32') return 'uint32';
   return ty;
 }
 
@@ -486,6 +601,11 @@ interface FieldPlan {
   readonly jsonValue: string;
   /// Structured value for the v4 `message`.
   readonly messageValue: MessageValue;
+  /// When `true`, this field is signed but NOT written to the POST
+  /// `action.params` JSON. Used by a flattened optional's presence half (the
+  /// derived `hasX` bool — the server re-derives it from the optional wire key)
+  /// and by an absent optional value (the key is simply omitted on the wire).
+  readonly omitFromParams?: boolean;
   /// Produce the 32-byte struct-hash word (async: string/array fields keccak).
   word(): Promise<Uint8Array>;
 }
@@ -539,7 +659,62 @@ function planField(fld: FieldSpec, payload: Record<string, unknown>): FieldPlan 
       const word = encUintWord(v, uintBits(fld.ty), fld.wireKey);
       return mkPlan(fld, v.toString(), numberFor(v, fld.wireKey), async () => word);
     }
+    case 'presence-bool': {
+      // The derived presence half of a flattened optional. Signs `true`/`false`
+      // for present/absent of the (shared) wire key; never written to POST
+      // params (the server re-derives it from the optional key).
+      const present = isPresent(raw);
+      const word = encUintWord(present ? 1n : 0n, 8, fld.wireKey);
+      return mkPlan(fld, present ? 'true' : 'false', present, async () => word, true);
+    }
+    case 'opt-uint32': {
+      // The value half of a flattened optional. Signs the uint32 value, or `0`
+      // when absent (matching the server's `Option::unwrap_or(0)`). On the wire
+      // the optional key is emitted ONLY when present (omitted otherwise).
+      const present = isPresent(raw);
+      const v = present ? asBigInt(raw, fld.wireKey) : 0n;
+      const word = encUintWord(v, 32, fld.wireKey);
+      return mkPlan(
+        fld,
+        v.toString(),
+        numberFor(v, fld.wireKey),
+        async () => word,
+        !present,
+      );
+    }
+    case 'bytes': {
+      // `Uint8Array` POSTed as a JSON byte array (the server's native wire
+      // form); hashed `keccak256(raw)`. The v4 message renders it as `0x`-hex.
+      const bytes = asByteArray(raw, fld.wireKey);
+      const jsonValue = `[${Array.from(bytes).join(',')}]`;
+      return mkPlan(fld, jsonValue, `0x${toHex(bytes)}`, () => keccak256(bytes));
+    }
+    case 'bytes32': {
+      // A fixed 32-byte buffer carried verbatim into one word; POSTed as a JSON
+      // byte array. The v4 message renders it as `0x`-hex.
+      const bytes = asByteArray(raw, fld.wireKey);
+      if (bytes.length !== 32) {
+        throw new RangeError(`${fld.wireKey} must be exactly 32 bytes`);
+      }
+      const word = bytes.slice();
+      const jsonValue = `[${Array.from(bytes).join(',')}]`;
+      return mkPlan(fld, jsonValue, `0x${toHex(bytes)}`, async () => word);
+    }
   }
+}
+
+/// Whether an optional wire value is present (non-`null`, non-`undefined`).
+function isPresent(raw: unknown): boolean {
+  return raw !== undefined && raw !== null;
+}
+
+/// Read a `bytes` / `bytes32` field as a `Uint8Array`.
+function asByteArray(raw: unknown, field: string): Uint8Array {
+  if (raw instanceof Uint8Array) return raw;
+  if (Array.isArray(raw) && raw.every((b) => typeof b === 'number')) {
+    return Uint8Array.from(raw as number[]);
+  }
+  throw new RangeError(`${field} must be a Uint8Array (or array of byte numbers)`);
 }
 
 function mkPlan(
@@ -547,8 +722,16 @@ function mkPlan(
   jsonValue: string,
   messageValue: MessageValue,
   word: () => Promise<Uint8Array>,
+  omitFromParams = false,
 ): FieldPlan {
-  return { wireKey: fld.wireKey, name: fld.name, jsonValue, messageValue, word };
+  return {
+    wireKey: fld.wireKey,
+    name: fld.name,
+    jsonValue,
+    messageValue,
+    omitFromParams,
+    word,
+  };
 }
 
 /// Concatenate equal-length 32-byte words into one buffer.
@@ -589,7 +772,13 @@ export function buildTyped(
   const spec = requireSpec(actionType);
   const chainTag = metafluxChainTag(chainId);
   const plans = spec.fields.map((fld) => planField(fld, payload));
-  const params = plans.map((p) => `${jsonStr(p.wireKey)}:${p.jsonValue}`).join(',');
+  // The POST `action.params` omits flattened-optional presence flags and absent
+  // optional values (`omitFromParams`), so the wire shape matches the server's
+  // native action exactly while every spec field is still signed.
+  const params = plans
+    .filter((p) => !p.omitFromParams)
+    .map((p) => `${jsonStr(p.wireKey)}:${p.jsonValue}`)
+    .join(',');
   const actionJson = `{${jsonStr('type')}:${jsonStr(spec.wireType)},${jsonStr('params')}:{${params}}}`;
   return { actionType, chainId, chainTag, nonce, plans, actionJson };
 }

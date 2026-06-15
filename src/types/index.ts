@@ -63,6 +63,12 @@ export type {
   UserSetAbstraction,
   AgentSetAbstraction,
   PriorityBid,
+  CreateSubAccount,
+  SubAccountTransfer,
+  SubAccountSpotTransfer,
+  CDeposit,
+  CWithdraw,
+  CoreEvmTransfer,
 } from './account.js';
 export type { TokenDelegate, ClaimRewards, LinkStakingUser } from './staking.js';
 export type { TwapOrder, TwapCancel } from './twap.js';
