@@ -107,8 +107,15 @@ export async function loadWasm(): Promise<WasmModule> {
         // dev-mode (vitest running .ts directly) the same relative path lands
         // on the same pkg/ directory because vitest resolves it against the
         // src/wallet/ source location.
-        const wasmPath = '../../pkg/metaflux_client_wasm.js';
-        mod = (await import(/* @vite-ignore */ wasmPath)) as WasmModule;
+        //
+        // MUST be a LITERAL specifier (no @vite-ignore, no variable): bundlers
+        // (Vite/Rollup/webpack) only follow + emit the wasm-pack shim + its
+        // `new URL('…_bg.wasm', import.meta.url)` asset when the import target is
+        // statically analyzable. A variable + @vite-ignore leaves the raw
+        // `../../pkg/…` path in the bundle, which 404s from the hashed chunk dir
+        // in production → WasmNotBuiltError. `pkg/` ships in the npm tarball, so
+        // the literal resolves at consumer build time.
+        mod = (await import('../../pkg/metaflux_client_wasm.js')) as WasmModule;
       } catch (err) {
         throw new WasmNotBuiltError(err);
       }
