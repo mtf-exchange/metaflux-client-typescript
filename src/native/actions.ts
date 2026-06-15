@@ -53,6 +53,7 @@ import type {
   NativeSpotMarginOpen,
   NativeSpotMarginWithdraw,
   NativeSpotOrder,
+  NativeTrigger,
   PriorityBid,
   RegisterMetaliquidityOperator,
   RfqAccept,
@@ -113,8 +114,23 @@ export function buildNativeOrderAction(order: NativeOrder): string {
   if (order.position_side !== undefined) {
     parts.push(`${jsonStr('position_side')}:${jsonStr(order.position_side)}`);
   }
+  // TP/SL trigger block rides last (after position_side), matching the server
+  // `NativeOrder` field declaration order; omitted entirely when absent.
+  if (order.trigger !== undefined) {
+    parts.push(`${jsonStr('trigger')}:${buildTrigger(order.trigger)}`);
+  }
   const orderJson = `{${parts.join(',')}}`;
   return `{${jsonStr('type')}:${jsonStr('submit_order')},${jsonStr('order')}:${orderJson}}`;
+}
+
+/// Serialize a TP/SL trigger block in the server-expected
+/// `{trigger_px, is_market, tpsl}` order. `tpsl` is `"tp"` / `"sl"`.
+function buildTrigger(t: NativeTrigger): string {
+  validateU64(t.trigger_px, 'trigger.trigger_px');
+  if (t.tpsl !== 'tp' && t.tpsl !== 'sl') {
+    throw new RangeError('trigger.tpsl must be "tp" or "sl"');
+  }
+  return `{${jsonStr('trigger_px')}:${t.trigger_px},${jsonStr('is_market')}:${t.is_market ? 'true' : 'false'},${jsonStr('tpsl')}:${jsonStr(t.tpsl)}}`;
 }
 
 /// Serialize a builder carve in the server-expected `{fee, user}` order.
@@ -254,6 +270,9 @@ function buildOrderBody(order: NativeOrder): string {
   }
   if (order.position_side !== undefined) {
     parts.push(`${jsonStr('position_side')}:${jsonStr(order.position_side)}`);
+  }
+  if (order.trigger !== undefined) {
+    parts.push(`${jsonStr('trigger')}:${buildTrigger(order.trigger)}`);
   }
   return `{${parts.join(',')}}`;
 }
