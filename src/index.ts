@@ -269,6 +269,13 @@ export type {
   UserSetAbstraction,
   AgentSetAbstraction,
   PriorityBid,
+  // Sub-accounts / staking moves / Core↔EVM transfer (typed scheme).
+  CreateSubAccount,
+  SubAccountTransfer,
+  SubAccountSpotTransfer,
+  CDeposit,
+  CWithdraw,
+  CoreEvmTransfer,
   // TWAP.
   TwapOrder,
   TwapCancel,

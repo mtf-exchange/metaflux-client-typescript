@@ -100,10 +100,14 @@ import type {
   BatchOrder,
   CancelAllOrders,
   CancelByCloid,
+  CDeposit,
   ClaimRewards,
   ConvertToMultiSigUser,
+  CoreEvmTransfer,
+  CreateSubAccount,
   CreateVault,
   CrossChainSend,
+  CWithdraw,
   EncryptedOrderSubmit,
   FbaSubmit,
   LinkStakingUser,
@@ -135,6 +139,8 @@ import type {
   SetMetaliquiditySet,
   SetMetaliquidityWhitelist,
   SetReferrer,
+  SubAccountSpotTransfer,
+  SubAccountTransfer,
   UsdClassTransfer,
   Withdraw,
   SignedOrder,
@@ -1527,6 +1533,161 @@ export class Client {
   ): Promise<NativeExchangeAck> {
     return this.submitTyped(
       'earn_withdraw',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  // ── Core ↔ MetaFluxEVM transfer + sub-accounts + staking moves (typed) ─────
+  //
+  // These were previously un-mapped on the typed-only `/exchange` (so a typed
+  // request was rejected); they now sign under `sig_scheme:"typed"`. The methods
+  // already present on the legacy/native path (`cancelAllOrders`,
+  // `userDexAbstraction`, `userSetAbstraction`, `priorityBid`,
+  // `submitEncryptedOrder`) gain a `Typed` suffix so both schemes stay reachable.
+
+  /// Move USDC from the Core ledger to MetaFluxEVM (`core_evm_transfer`, typed
+  /// scheme). Core → EVM only: debits the sender's Core USDC cross-collateral and
+  /// mints the scale-converted 6-decimal EVM USDC to `destination` on the next
+  /// EVM block (`amount × 1e6`). `to_evm: false` (EVM → Core) is rejected by the
+  /// node — that direction originates as an EVM burn tx. Sender-authorized.
+  async coreEvmTransfer(
+    params: CoreEvmTransfer,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'core_evm_transfer',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Open a sub-account under the sender (`create_sub_account`, typed scheme).
+  /// Omit `explicit_index` for the next available slot (it flattens to a presence
+  /// flag + value in the signed digest; the POST omits it when absent).
+  async createSubAccount(
+    params: CreateSubAccount,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'create_sub_account',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Move perp cross-collateral master ↔ sub-account (`sub_account_transfer`,
+  /// typed scheme).
+  async subAccountTransfer(
+    params: SubAccountTransfer,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'sub_account_transfer',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Move a spot token balance master ↔ sub-account
+  /// (`sub_account_spot_transfer`, typed scheme).
+  async subAccountSpotTransfer(
+    params: SubAccountSpotTransfer,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'sub_account_spot_transfer',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Move spot MTF into the free staking balance (`c_deposit`, typed scheme).
+  async cDeposit(
+    params: CDeposit,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'c_deposit',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Move the free staking balance back to spot MTF (`c_withdraw`, typed scheme).
+  async cWithdraw(
+    params: CWithdraw,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'c_withdraw',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Toggle the user DEX-abstraction flag (`user_dex_abstraction`, typed scheme).
+  async userDexAbstractionTyped(
+    params: UserDexAbstraction,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'user_dex_abstraction',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Self-scope an abstraction config value (`user_set_abstraction`, typed
+  /// scheme; `value` is an EIP-712 string signed verbatim).
+  async userSetAbstractionTyped(
+    params: UserSetAbstraction,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'user_set_abstraction',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Pay a priority fee (bps) for block-front placement (`priority_bid`, typed
+  /// scheme).
+  async priorityBidTyped(
+    params: PriorityBid,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'priority_bid',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Cancel all the sender's open orders, optionally one asset
+  /// (`cancel_all_orders`, typed scheme). Omit `asset` to cancel across all
+  /// assets (it flattens to a presence flag + value in the signed digest; the
+  /// POST omits it when absent).
+  async cancelAllOrdersTyped(
+    params: CancelAllOrders = {},
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'cancel_all_orders',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Submit a threshold-encrypted order ciphertext (`submit_encrypted_order`,
+  /// typed scheme). `ciphertext` signs as EIP-712 `bytes` (`keccak256(raw)`),
+  /// `commitment` as a `bytes32`; both POST as JSON byte arrays.
+  async submitEncryptedOrderTyped(
+    params: SubmitEncryptedOrder,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'submit_encrypted_order',
       params as unknown as Record<string, unknown>,
       opts,
     );
