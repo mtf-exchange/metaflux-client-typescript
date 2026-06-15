@@ -18,6 +18,8 @@ export type {
   NativeOrder,
   NativeCancel,
   NativeBuilder,
+  NativeTrigger,
+  NativeTpSl,
   NativeSide,
   NativePositionSide,
   NativeOrderKind,

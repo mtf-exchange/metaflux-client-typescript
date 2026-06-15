@@ -135,7 +135,28 @@ export interface NativeOrder {
   /// the mode↔side pairing. Left off the signed bytes entirely when absent, so
   /// a one-way payload stays byte-identical to a pre-hedge SDK.
   position_side?: NativePositionSide;
+  /// Optional protective-leg trigger block (TP/SL). When present it rides INSIDE
+  /// the signed action; the typed digest flattens it to the order struct's
+  /// `triggerPx` / `triggerIsMarket` / `triggerTpsl` fields. Absent => the typed
+  /// digest uses the `0` / `false` / `""` sentinels.
+  trigger?: NativeTrigger;
 }
+
+/// MTF-native TP/SL trigger block attached to a [`NativeOrder`] — mirrors the
+/// server `NativeTrigger`. Selects the trigger price, market-vs-limit execution
+/// on the cross, and whether the leg is a take-profit or stop-loss.
+export interface NativeTrigger {
+  /// Trigger price in fixed-point tick units (`u64` on the wire).
+  trigger_px: number;
+  /// `true` fires a market order on the cross; `false` a limit at the order's
+  /// `limit_px`.
+  is_market: boolean;
+  /// `"tp"` (take-profit) or `"sl"` (stop-loss).
+  tpsl: NativeTpSl;
+}
+
+/// MTF-native TP/SL discriminator — mirrors the server `NativeTpSl`.
+export type NativeTpSl = 'tp' | 'sl';
 
 /// MTF-native `set_position_mode` action payload — byte-for-byte mirror of the
 /// server `SetPositionModeParams`. Toggles the account between one-way (net,
