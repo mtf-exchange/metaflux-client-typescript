@@ -52,14 +52,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Build BEFORE typecheck: tsc resolves the literal `../../pkg/…` wasm import
+      # against the wasm-pack output, which only exists after build:wasm.
+      - name: Build (wasm + ts)
+        run: pnpm run build
+
       - name: Typecheck
         run: pnpm run typecheck
 
       - name: Test
         run: pnpm test
-
-      - name: Build (wasm + ts)
-        run: pnpm run build
 
       - name: Publish
         run: pnpm publish --provenance --no-git-checks --tag "${{ github.event.inputs.dist_tag || 'latest' }}"
