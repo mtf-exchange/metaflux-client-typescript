@@ -83,6 +83,12 @@ import {
   type TypedDataV4,
   type TypedSignedAction,
 } from './native/typed.js';
+import {
+  recoverTypedOrderSigner,
+  signTypedOrder,
+  typedOrderRequestBody,
+  type TypedOrderPayload,
+} from './native/typed_orders.js';
 import { InfoApi } from './rest/info.js';
 import { WsClient, type WsConfig } from './ws/ws.js';
 import type {
@@ -161,6 +167,20 @@ export interface ClientOpts {
   /// EVM chain ID used for the EIP-712 domain. Defaults to a
   /// devnet-style placeholder (`31337`); production deployments override.
   chainId?: number;
+}
+
+/// Per-call options for the trading actions. `nonce` / `chainId` bind the
+/// signed digest; `legacy` opts a single call back into the opaque
+/// `MetaFluxAction` signing scheme (the default is the EIP-712 typed scheme).
+/// The server accepts both during the migration window.
+export interface TradeOpts {
+  /// Per-account replay nonce. Defaults to a strictly-increasing unix-ms clock.
+  nonce?: bigint;
+  /// EIP-712 domain chain id. Defaults to `MTF_CHAIN_ID` (testnet 114514).
+  chainId?: number;
+  /// Sign under the legacy opaque `MetaFluxAction` scheme instead of the typed
+  /// EIP-712 scheme. The typed scheme is the default for all trading actions.
+  legacy?: boolean;
 }
 
 /// Default chain ID for the EIP-712 domain. The devnet default `31337`
@@ -387,15 +407,25 @@ export class Client {
   /// (which is the wrong domain for this path).
   async submitOrderNative(
     order: NativeOrder,
-    opts: { nonce?: bigint; chainId?: number } = {},
+    opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
     if (this.privateKey === undefined) {
       throw new Error(
         'submitOrderNative requires a privateKey in ClientOpts (this Client is read-only)',
       );
     }
-    const nonce = opts.nonce ?? nextNonce();
     const actionJson = buildNativeOrderAction(order);
+    // Typed (EIP-712) is the default; `{ legacy: true }` keeps the opaque scheme.
+    if (!opts.legacy) {
+      return this.postTypedOrderOwnerChecked(
+        'submit_order',
+        { order },
+        actionJson,
+        [order.owner],
+        opts,
+      );
+    }
+    const nonce = opts.nonce ?? nextNonce();
     const signed = await signNativeAction(
       this.privateKey,
       actionJson,
@@ -432,15 +462,26 @@ export class Client {
   /// locally and reject a mismatch before hitting the network.
   async cancelOrderNative(
     cancel: NativeCancel,
-    opts: { nonce?: bigint; chainId?: number } = {},
+    opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
     if (this.privateKey === undefined) {
       throw new Error(
         'cancelOrderNative requires a privateKey in ClientOpts (this Client is read-only)',
       );
     }
-    const nonce = opts.nonce ?? nextNonce();
     const actionJson = buildNativeCancelAction(cancel);
+    // Typed (EIP-712) is the default. The typed digest binds `oid`; a cloid-only
+    // cancel has no typed form, so it falls back to the legacy opaque scheme.
+    if (!opts.legacy && cancel.oid !== undefined) {
+      return this.postTypedOrderOwnerChecked(
+        'cancel_order',
+        { cancel },
+        actionJson,
+        [cancel.owner],
+        opts,
+      );
+    }
+    const nonce = opts.nonce ?? nextNonce();
     const signed = await signNativeAction(
       this.privateKey,
       actionJson,
@@ -489,9 +530,14 @@ export class Client {
   /// is the trader, so there is no `owner` field and no local owner check.
   async submitSpotOrderNative(
     order: NativeSpotOrder,
-    opts: { nonce?: bigint; chainId?: number } = {},
+    opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeSpotOrderAction(order), opts);
+    return this.postTradeAction(
+      'spot_order',
+      { order },
+      buildNativeSpotOrderAction(order),
+      opts,
+    );
   }
 
   /// Cancel a resting SE-0 spot order via `POST /exchange`.
@@ -500,9 +546,14 @@ export class Client {
   /// authorized, same envelope as the other native actions.
   async cancelSpotOrderNative(
     cancel: NativeSpotCancel,
-    opts: { nonce?: bigint; chainId?: number } = {},
+    opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeSpotCancelAction(cancel), opts);
+    return this.postTradeAction(
+      'spot_cancel',
+      { cancel },
+      buildNativeSpotCancelAction(cancel),
+      opts,
+    );
   }
 
   // ── spot margin & Earn actions (devnet preview) ───────────────────────────
@@ -587,25 +638,40 @@ export class Client {
   /// Cancel a resting order by its client order id via `POST /exchange`.
   async cancelByCloid(
     params: CancelByCloid,
-    opts: { nonce?: bigint; chainId?: number } = {},
+    opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeCancelByCloidAction(params), opts);
+    return this.postTradeAction(
+      'cancel_by_cloid',
+      { params },
+      buildNativeCancelByCloidAction(params),
+      opts,
+    );
   }
 
   /// Amend a resting order's price and/or size in place via `POST /exchange`.
   async modify(
     params: Modify,
-    opts: { nonce?: bigint; chainId?: number } = {},
+    opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeModifyAction(params), opts);
+    return this.postTradeAction(
+      'modify',
+      { params },
+      buildNativeModifyAction(params),
+      opts,
+    );
   }
 
   /// Apply N modifications under one signature via `POST /exchange`.
   async batchModify(
     params: BatchModify,
-    opts: { nonce?: bigint; chainId?: number } = {},
+    opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeBatchModifyAction(params), opts);
+    return this.postTradeAction(
+      'batch_modify',
+      { params },
+      buildNativeBatchModifyAction(params),
+      opts,
+    );
   }
 
   /// Place N orders under one signature via `POST /exchange`. Each order's
@@ -613,38 +679,58 @@ export class Client {
   /// envelope (not per-order statuses).
   async batchOrder(
     batch: BatchOrder,
-    opts: { nonce?: bigint; chainId?: number } = {},
+    opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
-    return this.postBatchOwnerChecked(
-      buildNativeBatchOrderAction(batch),
-      batch.orders.map((o) => o.owner),
-      opts,
-    );
+    const actionJson = buildNativeBatchOrderAction(batch);
+    const owners = batch.orders.map((o) => o.owner);
+    if (!opts.legacy) {
+      return this.postTypedOrderOwnerChecked(
+        'batch_order',
+        { params: batch },
+        actionJson,
+        owners,
+        opts,
+      );
+    }
+    return this.postBatchOwnerChecked(actionJson, owners, opts);
   }
 
   /// Apply N cancels under one signature via `POST /exchange`. Each cancel's
   /// `owner` must equal the signing wallet.
   async batchCancel(
     batch: BatchCancel,
-    opts: { nonce?: bigint; chainId?: number } = {},
+    opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
-    return this.postBatchOwnerChecked(
-      buildNativeBatchCancelAction(batch),
-      batch.cancels.map((c) => c.owner),
-      opts,
-    );
+    const actionJson = buildNativeBatchCancelAction(batch);
+    const owners = batch.cancels.map((c) => c.owner);
+    if (!opts.legacy) {
+      return this.postTypedOrderOwnerChecked(
+        'batch_cancel',
+        { params: batch },
+        actionJson,
+        owners,
+        opts,
+      );
+    }
+    return this.postBatchOwnerChecked(actionJson, owners, opts);
   }
 
   /// Schedule a cancel-all of the sender's open orders at a future block.
   async scheduleCancel(
     params: ScheduleCancel,
-    opts: { nonce?: bigint; chainId?: number } = {},
+    opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeScheduleCancelAction(params), opts);
+    return this.postTradeAction(
+      'schedule_cancel',
+      { params },
+      buildNativeScheduleCancelAction(params),
+      opts,
+    );
   }
 
   /// Cancel all of the sender's open orders (optionally one asset) via
-  /// `POST /exchange`.
+  /// `POST /exchange`. NOTE: `cancel_all_orders` has no typed form (the server
+  /// keeps it on the opaque scheme), so this always signs under the legacy scheme.
   async cancelAllOrders(
     params: CancelAllOrders = {},
     opts: { nonce?: bigint; chainId?: number } = {},
@@ -657,17 +743,27 @@ export class Client {
   /// Submit a sliced (TWAP) order via `POST /exchange`.
   async twapOrder(
     params: TwapOrder,
-    opts: { nonce?: bigint; chainId?: number } = {},
+    opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeTwapOrderAction(params), opts);
+    return this.postTradeAction(
+      'twap_order',
+      { params },
+      buildNativeTwapOrderAction(params),
+      opts,
+    );
   }
 
   /// Cancel a running TWAP parent by id via `POST /exchange`.
   async twapCancel(
     params: TwapCancel,
-    opts: { nonce?: bigint; chainId?: number } = {},
+    opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeTwapCancelAction(params), opts);
+    return this.postTradeAction(
+      'twap_cancel',
+      { params },
+      buildNativeTwapCancelAction(params),
+      opts,
+    );
   }
 
   // ── leverage & margin ──────────────────────────
@@ -1068,6 +1164,96 @@ export class Client {
     return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
       method: 'POST',
       rawJson: nativeRequestBody(signed),
+      bearer: this.jwt,
+    });
+  }
+
+  // ============================================================================
+  // Trading-set typed scheme (`sig_scheme:"typed"`) — order / cancel / TWAP /
+  // batch actions. These are the DEFAULT path for the order builders below; the
+  // server still accepts the legacy opaque scheme during migration, reachable
+  // via `{ legacy: true }` in the call options.
+  // ============================================================================
+
+  /// Sign a trading action under the typed (EIP-712) scheme and POST it with
+  /// `sig_scheme:"typed"`. `actionJson` is the canonical action bytes (built by
+  /// the `./native/actions.js` builders); `payload` carries the order / cancel /
+  /// params body the typed digest is computed over. SENDER-AUTHORIZED (no owner
+  /// cross-check); use [`postTypedOrderOwnerChecked`] when an owner must match.
+  private async postTypedOrder(
+    actionType: string,
+    payload: TypedOrderPayload,
+    actionJson: string,
+    opts: TradeOpts,
+  ): Promise<NativeExchangeAck> {
+    if (this.privateKey === undefined) {
+      throw new Error(
+        'this action requires a privateKey in ClientOpts (this Client is read-only)',
+      );
+    }
+    const nonce = opts.nonce ?? nextNonce();
+    const signed = await signTypedOrder(
+      this.privateKey,
+      actionType,
+      payload,
+      actionJson,
+      nonce,
+      opts.chainId,
+    );
+    return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
+      method: 'POST',
+      rawJson: typedOrderRequestBody(signed),
+      bearer: this.jwt,
+    });
+  }
+
+  /// Route a sender-authorized trading action through the typed scheme (default)
+  /// or the legacy opaque scheme (`{ legacy: true }`). `actionJson` is the
+  /// canonical bytes; `actionType` + `payload` drive the typed digest.
+  private async postTradeAction(
+    actionType: string,
+    payload: TypedOrderPayload,
+    actionJson: string,
+    opts: TradeOpts,
+  ): Promise<NativeExchangeAck> {
+    if (opts.legacy) {
+      return this.postSenderAuthorized(actionJson, opts);
+    }
+    return this.postTypedOrder(actionType, payload, actionJson, opts);
+  }
+
+  /// Like [`postTypedOrder`] but cross-checks every `owner` against the recovered
+  /// signer before POSTing (the order / cancel / batch paths carry an `owner`).
+  private async postTypedOrderOwnerChecked(
+    actionType: string,
+    payload: TypedOrderPayload,
+    actionJson: string,
+    owners: string[],
+    opts: TradeOpts,
+  ): Promise<NativeExchangeAck> {
+    if (this.privateKey === undefined) {
+      throw new Error(
+        'this action requires a privateKey in ClientOpts (this Client is read-only)',
+      );
+    }
+    const nonce = opts.nonce ?? nextNonce();
+    const signed = await signTypedOrder(
+      this.privateKey,
+      actionType,
+      payload,
+      actionJson,
+      nonce,
+      opts.chainId,
+    );
+    const signer = await recoverTypedOrderSigner(signed, actionType, payload, opts.chainId);
+    for (const owner of owners) {
+      if (signer.toLowerCase() !== owner.toLowerCase()) {
+        throw new Error(`order/cancel owner ${owner} != recovered signer ${signer}`);
+      }
+    }
+    return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
+      method: 'POST',
+      rawJson: typedOrderRequestBody(signed),
       bearer: this.jwt,
     });
   }

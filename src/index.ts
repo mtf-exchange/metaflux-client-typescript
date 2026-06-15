@@ -7,7 +7,7 @@
 //
 //     import { Client, type Order } from '@metaflux-dex/client';
 
-export { Client, type ClientOpts } from './client.js';
+export { Client, type ClientOpts, type TradeOpts } from './client.js';
 export { MetaFluxApiError } from './rest/http.js';
 export { requestFaucet, type FaucetResponse } from './faucet.js';
 export {
@@ -39,6 +39,21 @@ export {
   type TypedDataV4,
   type TypedSignedAction,
 } from './native/typed.js';
+export {
+  // EIP-712 typed signing for the trading set (orders / cancels / TWAP /
+  // batches). Exported so power users can build / sign / inspect trading actions
+  // out-of-band under the typed scheme.
+  TYPED_ORDER_ACTION_TYPES,
+  isTypedOrderAction,
+  encodeOrderType,
+  buildTypedOrder,
+  typedOrderDigest,
+  signTypedOrder,
+  recoverTypedOrderSigner,
+  typedOrderRequestBody,
+  type BuiltTypedOrder,
+  type TypedOrderPayload,
+} from './native/typed_orders.js';
 export {
   // MTF-native action builders — the full real /exchange surface.
   buildNativeOrderAction,
@@ -213,6 +228,8 @@ export type {
   NativeOrder,
   NativeCancel,
   NativeBuilder,
+  NativeTrigger,
+  NativeTpSl,
   NativeSide,
   NativePositionSide,
   NativeOrderKind,
