@@ -41,13 +41,13 @@ export interface AccountPosition {
   /// Signed position size, fixed-point as a decimal string.
   size: string;
   /// Volume-weighted entry price, decimal string (whole-USDC plane).
-  entry_px: string;
+  entry: string;
   /// Unrealised PnL (signed), decimal string (same unit as `account_value`).
-  unrealised_pnl: string;
+  upnl: string;
   /// Whether this position uses isolated margin.
   isolated: boolean;
   /// Per-asset leverage multiple.
-  leverage: number;
+  lev: number;
 }
 
 /// Per-account balances inside an `AccountState`. `usdc` is the cross USDC
