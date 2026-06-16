@@ -381,6 +381,7 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('amount', 'string-decimal', 'amount'),
       f('toEvm', 'bool', 'to_evm'),
       f('destination', 'address', 'destination'),
+      f('asset', 'uint32', 'asset'),
     ],
   },
   // ---- account / sub-account / staking / abstraction / priority / encrypted ----
