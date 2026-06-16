@@ -76,7 +76,7 @@ export interface AccountState {
   /// Liquidation tier.
   tier: Tier;
   /// Margin mode.
-  margin_mode: MarginMode;
+  mode: MarginMode;
   /// Portfolio-margin opt-in state.
   pm_enabled: boolean;
   /// Per-asset open positions.
