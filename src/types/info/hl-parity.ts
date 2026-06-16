@@ -394,11 +394,11 @@ export interface WebData2Position {
   /// Signed position size, decimal string.
   size: string;
   /// Entry notional, decimal string.
-  entry_notional: string;
+  entry_ntl: string;
   /// Effective margin mode.
-  margin_mode: 'cross' | 'isolated' | 'strict_iso';
+  mode: 'cross' | 'isolated' | 'strict_iso';
   /// Per-asset leverage multiple.
-  leverage: number;
+  lev: number;
 }
 
 /// The clearinghouse summary inside `WebData2`.
