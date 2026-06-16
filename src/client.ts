@@ -1546,18 +1546,23 @@ export class Client {
   // `userDexAbstraction`, `userSetAbstraction`, `priorityBid`,
   // `submitEncryptedOrder`) gain a `Typed` suffix so both schemes stay reachable.
 
-  /// Move USDC from the Core ledger to MetaFluxEVM (`core_evm_transfer`, typed
-  /// scheme). Core → EVM only: debits the sender's Core USDC cross-collateral and
-  /// mints the scale-converted 6-decimal EVM USDC to `destination` on the next
-  /// EVM block (`amount × 1e6`). `to_evm: false` (EVM → Core) is rejected by the
-  /// node — that direction originates as an EVM burn tx. Sender-authorized.
+  /// Move a Core spot token to MetaFluxEVM (`core_evm_transfer`, typed scheme).
+  /// Core → EVM only: debits the sender's Core balance for `asset` (omit / `0` =
+  /// USDC cross-collateral; any other id = its spot balance, which must be linked
+  /// to an EVM contract) and mints the scale-converted token to `destination` on
+  /// the next EVM block. `asset` is part of the signed digest, so a relay can't
+  /// redirect the transfer to a different token. `to_evm: false` (EVM → Core) is
+  /// rejected by the node — that direction originates as an EVM burn tx.
+  /// Sender-authorized.
   async coreEvmTransfer(
     params: CoreEvmTransfer,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
     return this.submitTyped(
       'core_evm_transfer',
-      params as unknown as Record<string, unknown>,
+      // `asset` is part of the signed digest; default to 0 (USDC) when omitted so
+      // the uint32 field always has a value to encode.
+      { ...params, asset: params.asset ?? 0 } as unknown as Record<string, unknown>,
       opts,
     );
   }

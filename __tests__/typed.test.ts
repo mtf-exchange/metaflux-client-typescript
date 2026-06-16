@@ -245,9 +245,9 @@ const VECTORS: Vector[] = [
   //      /staking/abstraction/priority/encrypted set) ----
   {
     actionType: 'core_evm_transfer',
-    payload: { amount: '250.5', to_evm: true, destination: addr(0xce) },
+    payload: { amount: '250.5', to_evm: true, destination: addr(0xce), asset: 0 },
     nonce: 52n,
-    digest: 'afab7aec6d4b9ab674162a745a79e1f0f3939b75710236a2d255a0d6d64ab499',
+    digest: 'c4ea0f4c7ac7aad20c157bda62198070e6f1a3af941945726a7d09004ee2e27d',
   },
   {
     // explicit_index present => signed hasExplicitIndex=true, explicitIndex=5.
@@ -554,7 +554,7 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
   it('encodeType strings for the 11 newly-typed actions match the contract', async () => {
     const { encodeType } = await import('../src/native/typed.js');
     expect(encodeType('core_evm_transfer')).toBe(
-      'MetaFluxTransaction:CoreEvmTransfer(string metafluxChain,string amount,bool toEvm,address destination,uint64 nonce)',
+      'MetaFluxTransaction:CoreEvmTransfer(string metafluxChain,string amount,bool toEvm,address destination,uint32 asset,uint64 nonce)',
     );
     expect(encodeType('create_sub_account')).toBe(
       'MetaFluxTransaction:CreateSubAccount(string metafluxChain,string name,bool hasExplicitIndex,uint32 explicitIndex,bool sharedStpGroup,uint64 nonce)',
@@ -630,13 +630,13 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     const { buildTyped, typedDataV4 } = await import('../src/native/typed.js');
     const built = buildTyped(
       'core_evm_transfer',
-      { amount: '250.5', to_evm: true, destination: addr(0xce) },
+      { amount: '250.5', to_evm: true, destination: addr(0xce), asset: 0 },
       52n,
       CHAIN_ID,
     );
     expect(JSON.parse(built.actionJson)).toEqual({
       type: 'core_evm_transfer',
-      params: { amount: '250.5', to_evm: true, destination: addr(0xce) },
+      params: { amount: '250.5', to_evm: true, destination: addr(0xce), asset: 0 },
     });
     const data = typedDataV4(built);
     const fields = data.types[data.primaryType].map((t) => `${t.type} ${t.name}`);
@@ -645,6 +645,7 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
       'string amount',
       'bool toEvm',
       'address destination',
+      'uint32 asset',
       'uint64 nonce',
     ]);
     expect(data.message.amount).toBe('250.5');

@@ -157,18 +157,21 @@ export interface CWithdraw {
   amount: string;
 }
 
-/// `core_evm_transfer` — move USDC from the Core ledger to MetaFluxEVM.
+/// `core_evm_transfer` — move a Core spot token to MetaFluxEVM.
 ///
-/// Core → EVM only on `/exchange`: debits the sender's Core USDC
-/// cross-collateral and mints the scale-converted 6-decimal EVM USDC to
-/// `destination` on the next EVM block (`amount × 1e6`). `to_evm: false`
-/// (EVM → Core) is rejected — that direction originates as an EVM burn tx.
-/// Sender-authorized. Typed-only.
+/// Core → EVM only on `/exchange`: debits the sender's Core balance for `asset`
+/// (omit / `0` = USDC cross-collateral; any other id = its spot balance, which
+/// must be linked to an EVM contract) and mints the scale-converted token to
+/// `destination` on the next EVM block. `to_evm: false` (EVM → Core) is rejected
+/// — that direction originates as an EVM burn tx. Sender-authorized. Typed-only.
 export interface CoreEvmTransfer {
-  /// Amount in the whole-USDC plane as a canonical decimal string.
+  /// Amount in the whole-token plane as a canonical decimal string.
   amount: string;
   /// Direction. `true` = Core → EVM (the only supported direction here).
   to_evm: boolean;
   /// `0x`-hex 20-byte EVM-side recipient.
   destination: string;
+  /// MTF asset id to move (omit / `0` = USDC). Part of the signed digest, so a
+  /// relay can't redirect the transfer to a different spot token.
+  asset?: number;
 }
