@@ -216,6 +216,21 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
     wireType: 'claim_rewards',
     fields: [f('validator', 'address', 'validator')],
   },
+  claim_referral_rewards: {
+    pascal: 'ClaimReferralRewards',
+    wireType: 'claim_referral_rewards',
+    fields: [],
+  },
+  claim_builder_rewards: {
+    pascal: 'ClaimBuilderRewards',
+    wireType: 'claim_builder_rewards',
+    fields: [],
+  },
+  vault_distribute: {
+    pascal: 'VaultDistribute',
+    wireType: 'vault_distribute',
+    fields: [f('vaultId', 'uint64', 'vault_id'), f('pnl', 'string-decimal', 'pnl')],
+  },
   link_staking_user: {
     pascal: 'LinkStakingUser',
     wireType: 'link_staking_user',
