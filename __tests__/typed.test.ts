@@ -526,11 +526,15 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(toHex(base)).not.toBe(toHex(otherChain));
   });
 
-  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 41 reachable actions', async () => {
+  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 44 reachable actions', async () => {
     const { isTypedAction, TYPED_ACTION_TYPES } = await import('../src/native/typed.js');
-    expect(TYPED_ACTION_TYPES.length).toBe(41);
+    expect(TYPED_ACTION_TYPES.length).toBe(44);
     expect(isTypedAction('approve_agent')).toBe(true);
     expect(isTypedAction('submit_order')).toBe(false);
+    // The 3 actions added for the web claim/vault-deposit flows.
+    expect(isTypedAction('claim_referral_rewards')).toBe(true);
+    expect(isTypedAction('claim_builder_rewards')).toBe(true);
+    expect(isTypedAction('vault_distribute')).toBe(true);
     // The 12 formerly-deferred actions are now typed too.
     expect(isTypedAction('token_delegate')).toBe(true);
     expect(isTypedAction('mb_withdraw')).toBe(true);
