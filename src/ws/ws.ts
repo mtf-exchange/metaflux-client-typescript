@@ -220,6 +220,14 @@ export class WsClient {
       timer: ReturnType<typeof setTimeout>;
     }
   >();
+  /// In-flight `ping()` calls (FIFO) — each resolved with the round-trip time in
+  /// milliseconds when the next bare `pong` frame arrives, or rejected on timeout.
+  private readonly pendingPings: Array<{
+    resolve: (ms: number) => void;
+    reject: (err: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+    t0: number;
+  }> = [];
 
   constructor(url: string, config: Partial<WsConfig> = {}, signer?: WsSigner) {
     if (url.length === 0) {
@@ -487,6 +495,26 @@ export class WsClient {
     });
   }
 
+  /// Round-trip latency probe: send a `{method:"ping"}` and resolve with the
+  /// elapsed milliseconds when the node's `pong` frame returns. Rejects if the
+  /// socket is not open or no pong arrives within `postTimeoutMs`. Pongs are
+  /// unkeyed, so concurrent pings are paired to pongs in FIFO order.
+  ping(): Promise<number> {
+    if (this.socket?.readyState !== 1) {
+      return Promise.reject(new Error('ws ping: socket is not open'));
+    }
+    const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    return new Promise<number>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const i = this.pendingPings.findIndex((p) => p.resolve === resolve);
+        if (i >= 0) this.pendingPings.splice(i, 1);
+        reject(new Error('ws ping: timed out'));
+      }, this.config.postTimeoutMs);
+      this.pendingPings.push({ resolve, reject, timer, t0 });
+      this.send({ method: 'ping' });
+    });
+  }
+
   /// Whether the socket is currently OPEN.
   get isOpen(): boolean {
     return this.socket?.readyState === 1; // WebSocket.OPEN
@@ -504,6 +532,12 @@ export class WsClient {
       pending.reject(new Error('ws post: client closed'));
     }
     this.pendingPosts.clear();
+    // Unblock any in-flight pings on a closed socket.
+    for (const pending of this.pendingPings) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('ws ping: client closed'));
+    }
+    this.pendingPings.length = 0;
     if (this.socket !== undefined) {
       try {
         this.socket.close();
@@ -603,6 +637,11 @@ export class WsClient {
       this.resolvePost(frame.data);
       return;
     }
+    // A bare `pong` resolves the oldest in-flight ping() with its round-trip
+    // time, then still fans out to handlers (preserves the pong pass-through).
+    if (frame.channel === 'pong') {
+      this.resolvePong();
+    }
     for (const h of this.handlers) {
       h(frame);
     }
@@ -620,6 +659,16 @@ export class WsClient {
     this.pendingPosts.delete(id);
     clearTimeout(pending.timer);
     pending.resolve(response);
+  }
+
+  /// Resolve the oldest pending `ping()` with its round-trip time (ms). Pongs are
+  /// unkeyed, so FIFO order pairs each pong with the oldest outstanding ping.
+  private resolvePong(): void {
+    const pending = this.pendingPings.shift();
+    if (pending === undefined) return;
+    clearTimeout(pending.timer);
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    pending.resolve(Math.round(now - pending.t0));
   }
 
   private clearTimers(): void {
