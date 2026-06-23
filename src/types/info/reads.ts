@@ -30,6 +30,9 @@ export interface OpenOrder {
   size: string;
   /// Insertion timestamp (consensus ms). See the note: currently `0`.
   inserted_at_ms: number;
+  /// Client order id (`0x`-hex), or `null` when the order carried none. Present
+  /// once the gateway populates per-order cloid; may be absent on older nodes.
+  cloid?: string | null;
 }
 
 /// `open_orders` — account-scoped resting orders across every perp book.
@@ -62,24 +65,62 @@ export interface L2Book {
   asks: L2Level[];
 }
 
-/// `recent_trades` — market-scoped trade tape (honest-empty today).
+/// One trade inside a `RecentTrades` tape.
+export interface RecentTrade {
+  /// Side that took liquidity, lowercase `"bid"` / `"ask"`.
+  side: 'bid' | 'ask';
+  /// Trade price, decimal string.
+  px: string;
+  /// Trade size (base units), decimal string.
+  size: string;
+  /// Trade timestamp (consensus ms).
+  time_ms: number;
+  /// Committed block height the trade landed in.
+  block: number;
+  /// Transaction hash (`0x` + 32 bytes) the trade landed in.
+  hash: string;
+}
+
+/// `recent_trades` — market-scoped trade tape.
 export interface RecentTrades {
   /// Echoed market id.
   market_id: number;
   /// Timestamp of the last trade (`0` if none).
   last_trade_ms: number;
-  /// Empty until the trade indexer lands.
-  trades: unknown[];
+  /// Recent trades (empty until the trade indexer is wired).
+  trades: RecentTrade[];
 }
 
-/// `user_fills` — account-scoped fill history (honest-empty today).
+/// One fill inside a `UserFills` history.
+export interface UserFill {
+  /// Asset / market id the fill is on.
+  market_id: number;
+  /// Fill side, lowercase `"bid"` / `"ask"`.
+  side: 'bid' | 'ask';
+  /// Fill price, decimal string.
+  px: string;
+  /// Fill size (base units), decimal string.
+  size: string;
+  /// Fee paid on the fill, decimal string.
+  fee: string;
+  /// Server order id the fill belongs to.
+  oid: number;
+  /// Fill timestamp (consensus ms).
+  time_ms: number;
+  /// Committed block height the fill landed in.
+  block: number;
+  /// Transaction hash (`0x` + 32 bytes) the fill landed in.
+  hash: string;
+}
+
+/// `user_fills` — account-scoped fill history.
 export interface UserFills {
   /// Resolved account address (0x).
   address: string;
   /// Echoed only when the request used `account_id`.
   account_id?: number;
-  /// Empty until the fill indexer lands.
-  fills: unknown[];
+  /// Fills (empty until the fill indexer is wired).
+  fills: UserFill[];
 }
 
 /// One funding premium sample.
@@ -184,6 +225,9 @@ export interface Candle {
   low: string;
   /// Traded base volume in the bar, decimal string (coin size, not notional).
   volume: string;
+  /// Quote / USD (notional) volume in the bar, decimal string. Additive; may be
+  /// absent on older gateways that only emitted base `volume`.
+  q?: string;
   /// Fill count in the bar.
   num_trades: number;
 }

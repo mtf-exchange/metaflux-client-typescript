@@ -347,18 +347,25 @@ export function buildNativeBatchModifyAction(params: BatchModify): string {
   return wrapParams('batch_modify', `{${jsonStr('modifications')}:[${arr}]}`);
 }
 
-/// `batch_order` — N orders under one signature. Each order's `owner` must equal
-/// the signing wallet (enforced client-side by `Client.batchOrder`).
+/// `batch_order` — N orders under one signature. When a params-level `owner` is
+/// present the gateway reads ownership from it (operator / vault trading) and it
+/// is bound into the typed digest; otherwise ownership defaults to the signing
+/// wallet. The params-level `owner` is emitted first to mirror the Rust SDK's
+/// `BatchOrder` wire field order (owner, orders, grouping).
 export function buildNativeBatchOrderAction(params: BatchOrder): string {
   const grouping = params.grouping ?? 'na';
   if (grouping !== 'na' && grouping !== 'normalTpsl' && grouping !== 'positionTpsl') {
     throw new RangeError('grouping must be na | normalTpsl | positionTpsl');
   }
   const arr = params.orders.map(buildOrderBody).join(',');
-  return wrapParams(
-    'batch_order',
-    `{${jsonStr('orders')}:[${arr}],${jsonStr('grouping')}:${jsonStr(grouping)}}`,
-  );
+  const parts: string[] = [];
+  if (params.owner !== undefined) {
+    validateAddress(params.owner, 'owner');
+    parts.push(`${jsonStr('owner')}:${jsonStr(params.owner)}`);
+  }
+  parts.push(`${jsonStr('orders')}:[${arr}]`);
+  parts.push(`${jsonStr('grouping')}:${jsonStr(grouping)}`);
+  return wrapParams('batch_order', `{${parts.join(',')}}`);
 }
 
 /// `batch_cancel` — N cancels under one signature.

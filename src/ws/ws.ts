@@ -124,6 +124,25 @@ export interface ActiveAssetCtx {
   open_interest: string;
 }
 
+/// `activeAssetData` WS payload — a user's per-asset leverage + tradeable size
+/// snapshot (HL-compat camelCase). The pair fields are `[buy, sell]`:
+/// `maxTradeSzs` is the per-side max order size and `availableToTrade` is the
+/// per-side size still openable given margin. Pushed on the user's per-asset
+/// channel; mirrors the REST `active_asset_data` read in the HL-compat plane.
+/// Named `*Frame` to disambiguate from the REST `ActiveAssetData` read shape.
+export interface ActiveAssetDataFrame {
+  /// User `0x`-hex address.
+  user: string;
+  /// Market symbol (e.g. `"BTC"`).
+  coin: string;
+  /// Effective leverage.
+  leverage: number;
+  /// `[buy, sell]` max order size, base units.
+  maxTradeSzs: [number, number];
+  /// `[buy, sell]` size still openable given available margin, base units.
+  availableToTrade: [number, number];
+}
+
 /// A typed inbound frame `{channel, data}`. `data` is left as `unknown` because
 /// the node currently ships string-JSON payloads whose concrete shapes are
 /// mid-flight server-side (see `ws/subscribe.rs` — empty snapshots today); the
