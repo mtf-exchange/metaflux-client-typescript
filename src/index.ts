@@ -138,7 +138,9 @@ export type {
   L2Book,
   L2Level,
   RecentTrades,
+  RecentTrade,
   UserFills,
+  UserFill,
   FundingHistory,
   FundingSample,
   BlockInfo,
@@ -155,6 +157,8 @@ export type {
   SpotClearinghouseState,
   SpotBalance,
   ExchangeStatus,
+  PerpAssetCtx,
+  SpotAssetCtx,
   FrontendOpenOrders,
   FrontendOpenOrder,
   OrderTrigger,
@@ -200,6 +204,7 @@ export {
   type WsSigner,
   type AllMids,
   type ActiveAssetCtx,
+  type ActiveAssetDataFrame,
 } from './ws/ws.js';
 export {
   WasmNotBuiltError,

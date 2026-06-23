@@ -103,6 +103,15 @@ const ENCODE_TYPES: Readonly<Record<string, string>> = Object.freeze({
     'MetaFluxTransaction:BatchCancel(string metafluxChain,bytes32 cancels,uint64 nonce)',
 });
 
+/// Owner-carrying `batch_order` encodeType — the params-level `owner` (address)
+/// is inserted at position 2 (right after metafluxChain, before `bytes32 orders`),
+/// for operator / vault trading where the orders' owner differs from the signer.
+/// Selected ONLY when `BatchOrder.owner` is present; an owner-less batch uses the
+/// owner-less `ENCODE_TYPES.batch_order` above so existing signatures still verify.
+/// Byte-identical to the Rust SDK's owner-carrying BatchOrder type string.
+const BATCH_ORDER_OWNER_TYPE =
+  'MetaFluxTransaction:BatchOrder(string metafluxChain,address owner,bytes32 orders,string grouping,uint64 nonce)';
+
 /// The set of snake_case `action.type` tags the trading-set typed scheme covers.
 export const TYPED_ORDER_ACTION_TYPES: readonly string[] = Object.freeze(
   Object.keys(ENCODE_TYPES),
@@ -114,8 +123,13 @@ export function isTypedOrderAction(actionType: string): boolean {
   return Object.prototype.hasOwnProperty.call(ENCODE_TYPES, actionType);
 }
 
-/// Full encodeType string for a trading action.
-export function encodeOrderType(actionType: string): string {
+/// Full encodeType string for a trading action. For `batch_order`, pass
+/// `withOwner = true` to select the owner-carrying variant (the params-level
+/// `owner` word at position 2); the default owner-less variant is unchanged.
+export function encodeOrderType(actionType: string, withOwner = false): string {
+  if (actionType === 'batch_order' && withOwner) {
+    return BATCH_ORDER_OWNER_TYPE;
+  }
   const t = ENCODE_TYPES[actionType];
   if (t === undefined) {
     throw new RangeError(
@@ -422,7 +436,22 @@ async function encodeOrderData(
       const p = payload.params as BatchOrder;
       const grouping = checkEnum(VALID_GROUPING, p.grouping ?? 'na', 'grouping');
       const items = await Promise.all(p.orders.map(orderWords));
-      return [chainWord, await hashItems(items), await encString(grouping), nonceWord];
+      const ordersWord = await hashItems(items);
+      const groupingWord = await encString(grouping);
+      // Owner-carrying variant: insert the params-level `owner` address word at
+      // position 2 (after metafluxChain, before the orders hash). Gated on
+      // presence — an owner-less batch keeps the original owner-less layout so
+      // existing signatures still verify. Matches the Rust SDK word order.
+      if (p.owner !== undefined) {
+        return [
+          chainWord,
+          encAddr(p.owner, 'owner'),
+          ordersWord,
+          groupingWord,
+          nonceWord,
+        ];
+      }
+      return [chainWord, ordersWord, groupingWord, nonceWord];
     }
     case 'batch_cancel': {
       const p = payload.params as BatchCancel;
@@ -477,6 +506,10 @@ export interface BuiltTypedOrder {
   readonly nonce: bigint;
   readonly actionJson: string;
   readonly words: readonly Uint8Array[];
+  /// True for an owner-carrying `batch_order` — selects the owner variant of the
+  /// encodeType string (matching the extra `owner` word in `words`). False for
+  /// every other action and for an owner-less batch.
+  readonly withOwner: boolean;
 }
 
 /// Build a typed trading action from its wire payload + the canonical action
@@ -497,12 +530,17 @@ export async function buildTypedOrder(
   if (nonce >= 1n << 64n) throw new RangeError('nonce overflows u64');
   const chainTag = metafluxChainTag(chainId);
   const words = await encodeOrderData(actionType, payload, chainTag, nonce);
-  return { actionType, chainId, chainTag, nonce, actionJson, words };
+  const withOwner =
+    actionType === 'batch_order' &&
+    (payload.params as BatchOrder | undefined)?.owner !== undefined;
+  return { actionType, chainId, chainTag, nonce, actionJson, words, withOwner };
 }
 
 /// `hashStruct(s) = keccak256(typeHash || encodeData)` for a built trading action.
 async function hashStructOrder(built: BuiltTypedOrder): Promise<Uint8Array> {
-  const typeHash = await keccak256(enc.encode(encodeOrderType(built.actionType)));
+  const typeHash = await keccak256(
+    enc.encode(encodeOrderType(built.actionType, built.withOwner)),
+  );
   return keccak256(concatWords([typeHash, ...built.words]));
 }
 

@@ -246,9 +246,15 @@ export interface BatchModify {
   modifications: Modify[];
 }
 
-/// `batch_order` action payload — N orders under one signature. Each order's
-/// `owner` must equal the signing wallet.
+/// `batch_order` action payload — N orders under one signature.
 export interface BatchOrder {
+  /// `0x`-hex 20-byte account that OWNS the orders. Optional: when present it is
+  /// bound into the typed digest at position 2 (the owner-carrying variant) and
+  /// the gateway reads ownership from it — for operator-driven vault trading set
+  /// it to the VAULT address (the signer must be a registered operator of that
+  /// vault, so it MAY differ from the signer). When omitted, the digest keeps the
+  /// original owner-less form and ownership defaults to the signing wallet.
+  owner?: string;
   /// Orders to place, in priority order.
   orders: NativeOrder[];
   /// Grouping semantics. Defaults to `"na"` when omitted.

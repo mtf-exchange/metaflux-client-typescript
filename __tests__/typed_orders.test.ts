@@ -235,6 +235,90 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing — trading set', () =
     );
   });
 
+  it('owner-carrying batch_order byte-matches the Rust SDK KAT (owner word at pos 2)', async () => {
+    // Cross-impl pin: mirrors the Rust SDK's `batch_order_kat`
+    // (owner 0x1111..11, [plain_order, rich_order], grouping normalTpsl, chain
+    // 114514, nonce 1). The params-level `owner` selects the owner-carrying type
+    // string and inserts the owner address word right after metafluxChain.
+    const { buildTypedOrder, typedOrderDigest } = await import(
+      '../src/native/typed_orders.js'
+    );
+    // Rust `plain_order()`.
+    const plainOrder: NativeOrder = {
+      owner: OWNER,
+      market: 1,
+      side: 'bid',
+      kind: 'limit',
+      size: 100,
+      limit_px: 6_800_000_000_000,
+      tif: 'gtc',
+      stp_mode: 'cancel_newest',
+      reduce_only: false,
+    };
+    // Rust `rich_order()`.
+    const richOrder: NativeOrder = {
+      owner: OWNER,
+      market: 7,
+      side: 'ask',
+      kind: 'take_profit',
+      size: 500,
+      limit_px: 0,
+      tif: 'alo',
+      stp_mode: 'cancel_oldest',
+      reduce_only: true,
+      cloid: '0xabababababababababababababababab',
+      builder: { fee: 25, user: addr(0x22) },
+      position_side: 'short',
+      trigger: { trigger_px: 4_200, is_market: true, tpsl: 'tp' },
+    };
+    const built = await buildTypedOrder(
+      'batch_order',
+      {
+        params: {
+          owner: addr(0x11),
+          orders: [plainOrder, richOrder],
+          grouping: 'normalTpsl',
+        },
+      },
+      '',
+      1n,
+      CHAIN_ID,
+    );
+    expect(built.withOwner).toBe(true);
+    expect(toHex(await typedOrderDigest(built))).toBe(
+      'ef21c04ccb568652ab2d8950dffd1bd289acaafde846199f74a8ba72e0f5dad8',
+    );
+  });
+
+  it('owner-less batch_order digest is unchanged (back-compat)', async () => {
+    // Adding the optional owner must NOT change the owner-less digest — existing
+    // signatures still verify. Same inputs as the server pin above, no owner.
+    const { buildTypedOrder, typedOrderDigest } = await import(
+      '../src/native/typed_orders.js'
+    );
+    const built = await buildTypedOrder(
+      'batch_order',
+      { params: { orders: [sampleOrder()], grouping: 'na' } },
+      '',
+      50n,
+      CHAIN_ID,
+    );
+    expect(built.withOwner).toBe(false);
+    expect(toHex(await typedOrderDigest(built))).toBe(
+      'ecd87cbb39934732153edc401cb79019e873c2ee819f0f36298b563f7845edb8',
+    );
+  });
+
+  it('encodeOrderType selects the owner-carrying batch_order type only with withOwner', async () => {
+    const { encodeOrderType } = await import('../src/native/typed_orders.js');
+    expect(encodeOrderType('batch_order')).toBe(
+      'MetaFluxTransaction:BatchOrder(string metafluxChain,bytes32 orders,string grouping,uint64 nonce)',
+    );
+    expect(encodeOrderType('batch_order', true)).toBe(
+      'MetaFluxTransaction:BatchOrder(string metafluxChain,address owner,bytes32 orders,string grouping,uint64 nonce)',
+    );
+  });
+
   it('encodeType strings match the frozen server contract (field order)', async () => {
     const { encodeOrderType } = await import('../src/native/typed_orders.js');
     expect(encodeOrderType('submit_order')).toBe(

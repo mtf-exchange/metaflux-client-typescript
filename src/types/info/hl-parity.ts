@@ -77,6 +77,43 @@ export interface ExchangeStatus {
   mip3_enabled: boolean;
 }
 
+/// One perp asset context inside the HL-compat `meta_and_asset_ctxs` response —
+/// the per-market price / volume / funding snapshot (camelCase HL field names,
+/// all magnitudes decimal strings). Positional: the ctx at index `i` pairs with
+/// the universe asset at index `i`.
+export interface PerpAssetCtx {
+  /// 24h notional (USD) volume, decimal string.
+  dayNtlVlm: string;
+  /// Previous-day close price, decimal string.
+  prevDayPx: string;
+  /// Current mark price, decimal string.
+  markPx: string;
+  /// Current mid price, decimal string (may be absent when one-sided).
+  midPx?: string;
+  /// Current funding rate, decimal string.
+  funding: string;
+  /// Open interest (base units), decimal string.
+  openInterest: string;
+  /// Current oracle price, decimal string.
+  oraclePx: string;
+}
+
+/// One spot asset context inside the HL-compat `spot_meta_and_asset_ctxs`
+/// response — the per-pair price / volume / supply snapshot (camelCase HL field
+/// names, all magnitudes decimal strings). Positional with the spot universe.
+export interface SpotAssetCtx {
+  /// 24h notional (USD) volume, decimal string.
+  dayNtlVlm: string;
+  /// Previous-day close price, decimal string.
+  prevDayPx: string;
+  /// Current mark price, decimal string.
+  markPx: string;
+  /// Current mid price, decimal string (may be absent when one-sided).
+  midPx?: string;
+  /// Circulating token supply, decimal string.
+  circulatingSupply: string;
+}
+
 /// A trigger detail attached to a `FrontendOpenOrder`.
 export interface OrderTrigger {
   /// Trigger price, fixed-point decimal string.
