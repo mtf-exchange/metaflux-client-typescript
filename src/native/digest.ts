@@ -219,15 +219,47 @@ export function validateMarket(market: number): void {
   }
 }
 
-export function validateU64(value: number, field: string): void {
-  if (!Number.isInteger(value) || value < 0) {
-    throw new RangeError(`${field} must be a non-negative integer`);
+/// A `u64` wire value as a `number` (≤ 2^53 only), a `bigint` (any u64), or a
+/// base-10 integer STRING (any u64). Prices/sizes that exceed JS double
+/// precision MUST ride as a `bigint`/`string` — use the `scale` helpers
+/// (`pxToWire` / `szToWire`) to convert a human decimal value losslessly.
+export type U64Input = number | bigint | string;
+
+const U64_MAX = (1n << 64n) - 1n;
+
+/// Normalize + validate a `u64` wire value to a `bigint` in `[0, 2^64)`. A
+/// `number` must be a safe integer (no silent precision loss above 2^53); a
+/// `string` must be plain base-10 digits (convert decimals via the `scale`
+/// helpers first). The returned `bigint` is what both the wire JSON and the
+/// EIP-712 word use, so they can never diverge.
+export function toU64(value: U64Input, field: string): bigint {
+  let v: bigint;
+  if (typeof value === 'bigint') {
+    v = value;
+  } else if (typeof value === 'number') {
+    if (!Number.isInteger(value)) {
+      throw new RangeError(`${field} must be an integer`);
+    }
+    if (!Number.isSafeInteger(value)) {
+      throw new RangeError(
+        `${field} exceeds Number.MAX_SAFE_INTEGER (2^53); pass a bigint or string`,
+      );
+    }
+    v = BigInt(value);
+  } else {
+    if (!/^\d+$/.test(value)) {
+      throw new RangeError(`${field} must be a base-10 integer string`);
+    }
+    v = BigInt(value);
   }
-  if (value > Number.MAX_SAFE_INTEGER) {
-    throw new RangeError(
-      `${field} exceeds Number.MAX_SAFE_INTEGER; use a value below 2^53`,
-    );
+  if (v < 0n || v > U64_MAX) {
+    throw new RangeError(`${field} out of u64 range [0, 2^64)`);
   }
+  return v;
+}
+
+export function validateU64(value: U64Input, field: string): void {
+  toU64(value, field);
 }
 
 /// Validate a `u32` field passed as a plain `number` (e.g. dst_chain,

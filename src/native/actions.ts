@@ -21,6 +21,7 @@ import {
   validateU32,
   validateU64,
   validateU128,
+  toU64,
 } from './digest.js';
 import type {
   AgentSetAbstraction,
@@ -95,8 +96,8 @@ export function buildNativeOrderAction(order: NativeOrder): string {
     `${jsonStr('market')}:${order.market}`,
     `${jsonStr('side')}:${jsonStr(order.side)}`,
     `${jsonStr('kind')}:${jsonStr(order.kind)}`,
-    `${jsonStr('size')}:${order.size}`,
-    `${jsonStr('limit_px')}:${order.limit_px}`,
+    `${jsonStr('size')}:${toU64(order.size, 'size')}`,
+    `${jsonStr('limit_px')}:${toU64(order.limit_px, 'limit_px')}`,
     `${jsonStr('tif')}:${jsonStr(order.tif)}`,
     `${jsonStr('stp_mode')}:${jsonStr(order.stp_mode)}`,
     `${jsonStr('reduce_only')}:${order.reduce_only ? 'true' : 'false'}`,
@@ -130,7 +131,7 @@ function buildTrigger(t: NativeTrigger): string {
   if (t.tpsl !== 'tp' && t.tpsl !== 'sl') {
     throw new RangeError('trigger.tpsl must be "tp" or "sl"');
   }
-  return `{${jsonStr('trigger_px')}:${t.trigger_px},${jsonStr('is_market')}:${t.is_market ? 'true' : 'false'},${jsonStr('tpsl')}:${jsonStr(t.tpsl)}}`;
+  return `{${jsonStr('trigger_px')}:${toU64(t.trigger_px, 'trigger.trigger_px')},${jsonStr('is_market')}:${t.is_market ? 'true' : 'false'},${jsonStr('tpsl')}:${jsonStr(t.tpsl)}}`;
 }
 
 /// Serialize a builder carve in the server-expected `{fee, user}` order.
@@ -205,14 +206,14 @@ export function buildNativeSpotOrderAction(order: NativeSpotOrder): string {
   if (tif !== 'ioc') {
     throw new RangeError('spot_order v0 requires tif="ioc" (Gtc/Alo rejected)');
   }
-  if (order.limit_px <= 0) {
+  if (toU64(order.limit_px, 'limit_px') <= 0n) {
     throw new RangeError('spot_order v0 requires limit_px > 0 (market px rejected)');
   }
   const parts: string[] = [
     `${jsonStr('pair')}:${order.pair}`,
     `${jsonStr('side')}:${jsonStr(order.side)}`,
-    `${jsonStr('size')}:${order.size}`,
-    `${jsonStr('limit_px')}:${order.limit_px}`,
+    `${jsonStr('size')}:${toU64(order.size, 'size')}`,
+    `${jsonStr('limit_px')}:${toU64(order.limit_px, 'limit_px')}`,
     `${jsonStr('tif')}:${jsonStr(tif)}`,
     `${jsonStr('stp_mode')}:${jsonStr(order.stp_mode)}`,
   ];
@@ -255,8 +256,8 @@ function buildOrderBody(order: NativeOrder): string {
     `${jsonStr('market')}:${order.market}`,
     `${jsonStr('side')}:${jsonStr(order.side)}`,
     `${jsonStr('kind')}:${jsonStr(order.kind)}`,
-    `${jsonStr('size')}:${order.size}`,
-    `${jsonStr('limit_px')}:${order.limit_px}`,
+    `${jsonStr('size')}:${toU64(order.size, 'size')}`,
+    `${jsonStr('limit_px')}:${toU64(order.limit_px, 'limit_px')}`,
     `${jsonStr('tif')}:${jsonStr(order.tif)}`,
     `${jsonStr('stp_mode')}:${jsonStr(order.stp_mode)}`,
     `${jsonStr('reduce_only')}:${order.reduce_only ? 'true' : 'false'}`,
@@ -309,12 +310,10 @@ function buildModifyBody(m: Modify): string {
     `${jsonStr('oid')}:${m.oid}`,
   ];
   if (m.new_px !== undefined) {
-    validateU64(m.new_px, 'new_px');
-    parts.push(`${jsonStr('new_px')}:${m.new_px}`);
+    parts.push(`${jsonStr('new_px')}:${toU64(m.new_px, 'new_px')}`);
   }
   if (m.new_size !== undefined) {
-    validateU64(m.new_size, 'new_size');
-    parts.push(`${jsonStr('new_size')}:${m.new_size}`);
+    parts.push(`${jsonStr('new_size')}:${toU64(m.new_size, 'new_size')}`);
   }
   return `{${parts.join(',')}}`;
 }
@@ -811,16 +810,16 @@ export function buildNativeSpotMarginOpenAction(
   params: NativeSpotMarginOpen,
 ): string {
   validateMarket(params.pair);
-  validateU64(params.size, 'size');
-  validateU64(params.limit_px, 'limit_px');
-  if (params.size <= 0) {
+  const sizeWire = toU64(params.size, 'size');
+  const limitPxWire = toU64(params.limit_px, 'limit_px');
+  if (sizeWire <= 0n) {
     throw new RangeError('spot_margin_open requires size > 0');
   }
-  if (params.limit_px <= 0) {
+  if (limitPxWire <= 0n) {
     throw new RangeError('spot_margin_open requires limit_px > 0');
   }
   validateDecimalString(params.borrow, 'borrow');
-  const paramsJson = `{${jsonStr('pair')}:${params.pair},${jsonStr('size')}:${params.size},${jsonStr('limit_px')}:${params.limit_px},${jsonStr('borrow')}:${jsonStr(params.borrow)}}`;
+  const paramsJson = `{${jsonStr('pair')}:${params.pair},${jsonStr('size')}:${sizeWire},${jsonStr('limit_px')}:${limitPxWire},${jsonStr('borrow')}:${jsonStr(params.borrow)}}`;
   return `{${jsonStr('type')}:${jsonStr('spot_margin_open')},${jsonStr('params')}:${paramsJson}}`;
 }
 
@@ -833,11 +832,11 @@ export function buildNativeSpotMarginCloseAction(
   params: NativeSpotMarginClose,
 ): string {
   validateMarket(params.pair);
-  validateU64(params.limit_px, 'limit_px');
-  if (params.limit_px <= 0) {
+  const limitPxWire = toU64(params.limit_px, 'limit_px');
+  if (limitPxWire <= 0n) {
     throw new RangeError('spot_margin_close requires limit_px > 0');
   }
-  const paramsJson = `{${jsonStr('pair')}:${params.pair},${jsonStr('limit_px')}:${params.limit_px}}`;
+  const paramsJson = `{${jsonStr('pair')}:${params.pair},${jsonStr('limit_px')}:${limitPxWire}}`;
   return `{${jsonStr('type')}:${jsonStr('spot_margin_close')},${jsonStr('params')}:${paramsJson}}`;
 }
 

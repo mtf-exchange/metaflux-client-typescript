@@ -39,6 +39,8 @@ import {
   hexToBytes,
   validateAddress,
   validateCloid,
+  toU64,
+  type U64Input,
   MTF_CHAIN_ID,
 } from './digest.js';
 import { metafluxChainTag, type TypedSignedAction } from './typed.js';
@@ -154,11 +156,11 @@ function encUint(value: bigint, bits: number, field: string): Uint8Array {
   return be32(value);
 }
 
-/// Coerce a `number | bigint` wire value into a `bigint` for word encoding.
-function asBigInt(value: number | bigint, field: string): bigint {
-  if (typeof value === 'bigint') return value;
-  if (!Number.isInteger(value)) throw new RangeError(`${field} must be an integer`);
-  return BigInt(value);
+/// Coerce a `u64` wire value (`number | bigint | string`) into a `bigint` for
+/// word encoding — the SAME normalization the wire JSON uses, so the signed
+/// digest and the POSTed bytes stay identical.
+function asBigInt(value: U64Input, field: string): bigint {
+  return toU64(value, field);
 }
 
 /// `address` -> 20 bytes right-aligned in a 32-byte word (12 zero-byte left pad).
