@@ -109,7 +109,7 @@ const VECTORS: Vector[] = [
   },
   {
     actionType: 'create_vault',
-    payload: { name: 'my-vault', lock_period_secs: 86_400, kind: 1 },
+    payload: { name: 'my-vault', lock_period_secs: 86_400, kind: 'Metaliquidity' },
     nonce: 15n,
     digest: 'a43bee9c8500dd4f6a1109567daa8edbba06e09b91e50b78a4b78fd64ccbcc0f',
   },
