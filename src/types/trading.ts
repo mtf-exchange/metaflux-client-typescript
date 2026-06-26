@@ -10,6 +10,8 @@
 // the gateway forwards to the node). The other types match what the
 // gateway emits.
 
+import type { U64Input } from '../native/digest.js';
+
 /// Side as MTF wire bytes — matches `core_state::primitives::Side`.
 /// 0 = Bid (buy), 1 = Ask (sell). The CCXT REST surface uses the
 /// strings `"buy"` / `"sell"` instead; the Client class translates
@@ -115,10 +117,12 @@ export interface NativeOrder {
   side: NativeSide;
   /// Order kind. Only `"limit"` / `"market"` map server-side today.
   kind: NativeOrderKind;
-  /// Size in fixed-point tick units (`u64` on the wire).
-  size: number;
-  /// Limit price in fixed-point tick units (`u64` on the wire).
-  limit_px: number;
+  /// Size in raw lots (`u64` on the wire), scaled by the market's `sz_decimals`.
+  /// Pass a `bigint`/string for values above 2^53, or use `szToWire(human, dp)`.
+  size: U64Input;
+  /// Limit price in the 1e8 fixed-point plane (`u64` on the wire). Pass a
+  /// `bigint`/string above 2^53, or use `pxToWire(humanPrice)` to convert.
+  limit_px: U64Input;
   /// Time-in-force.
   tif: NativeTif;
   /// Self-trade-prevention mode.
@@ -146,8 +150,9 @@ export interface NativeOrder {
 /// server `NativeTrigger`. Selects the trigger price, market-vs-limit execution
 /// on the cross, and whether the leg is a take-profit or stop-loss.
 export interface NativeTrigger {
-  /// Trigger price in fixed-point tick units (`u64` on the wire).
-  trigger_px: number;
+  /// Trigger price in the 1e8 fixed-point plane (`u64` on the wire). Pass a
+  /// `bigint`/string above 2^53, or use `pxToWire(humanPrice)` to convert.
+  trigger_px: U64Input;
   /// `true` fires a market order on the cross; `false` a limit at the order's
   /// `limit_px`.
   is_market: boolean;
@@ -234,10 +239,10 @@ export interface Modify {
   market: number;
   /// Order id to amend (`u64`).
   oid: number;
-  /// New limit price in tick units (`u64`); omit to leave unchanged.
-  new_px?: number;
-  /// New size in tick units (`u64`); omit to leave unchanged.
-  new_size?: number;
+  /// New limit price in the 1e8 plane (`u64`); omit to leave unchanged.
+  new_px?: U64Input;
+  /// New size in raw lots (`u64`); omit to leave unchanged.
+  new_size?: U64Input;
 }
 
 /// `batch_modify` action payload — N [`Modify`]s under one signature.

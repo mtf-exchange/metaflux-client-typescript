@@ -5,6 +5,7 @@
 // `buildNativeSpotCancelAction`).
 
 import type { NativeSide, NativeStpMode, NativeTif } from './trading.js';
+import type { U64Input } from '../native/digest.js';
 
 /// MTF-native `spot_order` action shape (SE-0 spot CLOB) — byte-for-byte mirror
 /// of the server `NativeSpotOrder`. Sender-authorized (the signer is the trader,
@@ -18,10 +19,12 @@ export interface NativeSpotOrder {
   pair: number;
   /// Side: `"bid"` (buy) or `"ask"` (sell).
   side: NativeSide;
-  /// Base-asset size in raw lots (`u64` on the wire).
-  size: number;
+  /// Base-asset size in raw lots (`u64` on the wire). Pass a `bigint`/string
+  /// above 2^53, or use `szToWire(human, sz_decimals)`.
+  size: U64Input;
   /// Limit price in the 1e8 plane (`u64` on the wire); must be `> 0` in v0.
-  limit_px: number;
+  /// Pass a `bigint`/string above 2^53, or use `pxToWire(humanPrice)`.
+  limit_px: U64Input;
   /// Time-in-force. v0 requires `"ioc"` (defaulted by the builder).
   tif: NativeTif;
   /// Self-trade-prevention mode.
@@ -78,9 +81,9 @@ export interface NativeSpotMarginOpen {
   /// Spot pair id (`u32`).
   pair: number;
   /// Buy size in base raw lots (`u64`).
-  size: number;
+  size: U64Input;
   /// Limit price in the 1e8 plane (`u64`, `> 0`).
-  limit_px: number;
+  limit_px: U64Input;
   /// Quote principal to draw from the Earn pool (whole units), as a decimal
   /// string (`> 0`).
   borrow: string;
@@ -92,7 +95,7 @@ export interface NativeSpotMarginClose {
   /// Spot pair id (`u32`).
   pair: number;
   /// Floor price for the close sell, in the 1e8 plane (`u64`, `> 0`).
-  limit_px: number;
+  limit_px: U64Input;
 }
 
 /// MTF-native `earn_deposit` action params — supply quote into a lending pool

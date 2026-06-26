@@ -20,7 +20,22 @@ export {
   signNativeAction,
   recoverNativeSigner,
   nativeRequestBody,
+  // u64 wire-value normalization (price/size fields accept number|bigint|string).
+  toU64,
+  type U64Input,
 } from './native/digest.js';
+export {
+  // Decimal <-> 1e8/sz_decimals wire-scale conversions. Use these to turn a
+  // human decimal price/size (the /info read plane) into the order wire's
+  // fixed-point u64 — losslessly, no floating point — and back for display.
+  PX_DECIMALS,
+  pxToWire,
+  wireToPx,
+  szToWire,
+  wireToSz,
+  decimalToScaled,
+  scaledToDecimal,
+} from './native/scale.js';
 export {
   // EIP-712 typed-action signing (the structured wallet-signing path). Exported
   // so wallet integrations can build the `eth_signTypedData_v4` payload and sign
