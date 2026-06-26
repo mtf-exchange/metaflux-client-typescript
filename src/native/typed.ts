@@ -85,6 +85,7 @@ type FieldSolidityType =
   | 'uint16'
   | 'uint32'
   | 'uint64'
+  | 'vault-kind'
   | 'presence-bool'
   | 'opt-uint32'
   | 'bytes'
@@ -97,6 +98,15 @@ const MB_CHAIN_CODES: Readonly<Record<string, number>> = Object.freeze({
   Solana: 0,
   Base: 1,
   Arbitrum: 2,
+});
+
+/// `VaultKind` PascalCase name → the `uint8` code the typed `create_vault.kind`
+/// field signs. The POST `params.kind` carries the STRING name (the node
+/// deserializes it as a `VaultKind` enum); the signed word carries this code
+/// (User=0, Metaliquidity=1), matching the node's `vault_kind_u8`.
+const VAULT_KIND_CODES: Readonly<Record<string, number>> = Object.freeze({
+  User: 0,
+  Metaliquidity: 1,
 });
 
 /// One field of a typed struct.
@@ -242,7 +252,7 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
     fields: [
       f('name', 'string', 'name'),
       f('lockPeriodSecs', 'uint64', 'lock_period_secs'),
-      f('kind', 'uint8', 'kind'),
+      f('kind', 'vault-kind', 'kind'),
     ],
   },
   vault_modify: {
@@ -517,6 +527,7 @@ function requireSpec(actionType: string): TypedSpec {
 function solidityTypeName(ty: FieldSolidityType): string {
   if (ty === 'string-decimal') return 'string';
   if (ty === 'chain-u8') return 'uint8';
+  if (ty === 'vault-kind') return 'uint8';
   if (ty === 'presence-bool') return 'bool';
   if (ty === 'opt-uint32') return 'uint32';
   return ty;
@@ -649,6 +660,21 @@ function planField(fld: FieldSpec, payload: Record<string, unknown>): FieldPlan 
       }
       const word = encUintWord(BigInt(code), 8, fld.wireKey);
       return mkPlan(fld, jsonStr(raw as string), code, async () => word);
+    }
+    case 'vault-kind': {
+      // POST `params` carries the STRING kind name (deserialized as the node's
+      // `VaultKind` enum); the signed word + v4 message value are the uint8 code
+      // (User=0, Metaliquidity=1). Omitted ⇒ `User`, matching the node's
+      // `#[serde(default)]`.
+      const name = raw === undefined || raw === null ? 'User' : raw;
+      const code = typeof name === 'string' ? VAULT_KIND_CODES[name] : undefined;
+      if (code === undefined) {
+        throw new RangeError(
+          `${fld.wireKey} must be one of: ${Object.keys(VAULT_KIND_CODES).join(', ')}`,
+        );
+      }
+      const word = encUintWord(BigInt(code), 8, fld.wireKey);
+      return mkPlan(fld, jsonStr(name as string), code, async () => word);
     }
     case 'address': {
       const a = raw as string;
