@@ -116,7 +116,7 @@ export interface SpotAssetCtx {
 
 /// A trigger detail attached to a `FrontendOpenOrder`.
 export interface OrderTrigger {
-  /// Trigger price, fixed-point decimal string.
+  /// Trigger price, canonical decimal string (whole-USDC, tick-snapped).
   trigger_px: string;
   /// Whether the trigger fires above (`true`) or below the price.
   trigger_above: boolean;
@@ -130,9 +130,9 @@ export interface FrontendOpenOrder {
   market_id: number;
   /// Order side.
   side: 'bid' | 'ask';
-  /// Resting price, fixed-point decimal string.
+  /// Resting price, canonical decimal string (whole-USDC, tick-snapped).
   px: string;
-  /// Remaining size, fixed-point decimal string.
+  /// Remaining size, canonical decimal string (whole units).
   size: string;
   /// Time-in-force.
   tif: 'alo' | 'ioc' | 'gtc';

@@ -6,9 +6,11 @@
 
 /// One resting order inside an `OpenOrders` response.
 ///
-/// `px` is x1e8 fixed-point (positive canonical price for **both** sides);
-/// `size` is raw lots (`whole × 10^sz_decimals`). `side` is lowercase
-/// `"bid"`/`"ask"`. `oid` / `market_id` / `inserted_at_ms` are bare integers.
+/// `px` / `size` are CANONICAL decimal strings (positive price for **both**
+/// sides; size in whole units) — the node tick-snaps the price and renders the
+/// size in the per-asset plane, so no client-side rescaling is needed. `side`
+/// is lowercase `"bid"`/`"ask"`. `oid` / `market_id` / `inserted_at_ms` are
+/// bare integers.
 ///
 /// LIVE GATEWAY GAP: a resting order currently reads back with `oid: 0` and
 /// `inserted_at_ms: 0` even though it is on the book — so an order is NOT
@@ -24,9 +26,9 @@ export interface OpenOrder {
   market_id: number;
   /// Order side, lowercase `"bid"` / `"ask"`.
   side: 'bid' | 'ask';
-  /// Resting price, x1e8 fixed-point decimal string.
+  /// Resting price, canonical decimal string (whole-USDC, tick-snapped).
   px: string;
-  /// Remaining size, raw lots (`whole × 10^sz_decimals`) decimal string.
+  /// Remaining size, canonical decimal string (whole units).
   size: string;
   /// Insertion timestamp (consensus ms). See the note: currently `0`.
   inserted_at_ms: number;
@@ -47,9 +49,9 @@ export interface OpenOrders {
 
 /// One aggregated L2 book level.
 export interface L2Level {
-  /// Level price, fixed-point decimal string.
+  /// Level price, canonical decimal string (whole-USDC, tick-snapped).
   px: string;
-  /// Summed size at the level, fixed-point decimal string.
+  /// Summed size at the level, canonical decimal string (whole units).
   size: string;
   /// Resting orders at the level.
   n_orders: number;
@@ -195,12 +197,11 @@ export interface SubAccounts {
 /// forming bar as trades land, this read returns the closed history. Bars are
 /// oldest-first by `open_time`; the newest element is the still-forming bar.
 ///
-/// **Price plane — does NOT match the WS `candles` frame.** This REST read's
-/// `open` / `close` / `high` / `low` are **whole-USDC** human-dollar decimal
-/// strings (`"67042.50"`); the WS `candles` frame carries the SAME bar's OHLC
-/// as RAW 1e8 fixed-point integers (`"6700000000000"`). Rescale if you mix the
-/// two sources. `volume` is base units (coin size, NOT notional); `num_trades`
-/// is a fill count, not notional.
+/// **Price plane.** `open` / `close` / `high` / `low` are whole-USDC human-dollar
+/// decimal strings (`"67042.50"`, tick-snapped) — the SAME canonical plane the
+/// WS `candles` frame now emits, so REST history and the live WS bar line up
+/// with no rescaling. `volume` is base units (coin size, NOT notional);
+/// `num_trades` is a fill count, not notional.
 ///
 /// GATEWAY-served, not node: candles are derived display data folded from the
 /// public trade stream — not committed chain state, so they must be queried
