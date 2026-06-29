@@ -750,3 +750,99 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(so.actionJson.includes('"borrow":"200"')).toBe(true);
   });
 });
+
+// ── agent-resolved `owner` (operator / vault trading) ────────────────────────
+//
+// `cancel_all_orders` is the account set's one owner-supporting action (the
+// orders set's owner-carrying actions live in typed_orders.test.ts). Cross-impl
+// KAT: owner 0xbb..bb, asset 4, nonce 62 — the SAME fixture the Rust SDK pins, so
+// both SDKs (and the node's `CANCEL_ALL_ORDERS_WITH_OWNER_TYPE`) commit to one
+// digest. Asserts: (1) selected encodeType == the node literal; (2) owner-present
+// digest == the pin; (3) it DIFFERS from the owner-less digest; (4) the owner-less
+// digest reproduces the pre-owner KAT (owner-absent is byte-identical to today);
+// and the wire `params` carries the `owner` key the node reads back.
+
+describe.skipIf(!wasmBuilt)(
+  'EIP-712 typed signing — agent-resolved owner (cancel_all_orders)',
+  () => {
+    const OWNER_BIND = addr(0xbb);
+    const OWNER_TYPE =
+      'MetaFluxTransaction:CancelAllOrders(string metafluxChain,address owner,bool hasAsset,uint32 asset,uint64 nonce)';
+
+    it('owner-carrying cancel_all_orders matches the Rust SDK + node WITH_OWNER vector', async () => {
+      const { buildTyped, typedActionDigest, encodeType, accountSupportsOwner } =
+        await import('../src/native/typed.js');
+      // (1) selected encodeType == node CANCEL_ALL_ORDERS_WITH_OWNER_TYPE (verbatim).
+      expect(accountSupportsOwner('cancel_all_orders')).toBe(true);
+      expect(encodeType('cancel_all_orders', true)).toBe(OWNER_TYPE);
+      // (2) owner-present digest == pinned cross-impl vector.
+      const owned = buildTyped('cancel_all_orders', { asset: 4 }, 62n, CHAIN_ID, OWNER_BIND);
+      expect(owned.owner).toBe(OWNER_BIND);
+      // the node reads `params.owner` back to rebuild this WITH_OWNER digest.
+      expect(owned.actionJson.includes(`"owner":"${OWNER_BIND}"`)).toBe(true);
+      const ownerHex = toHex(await typedActionDigest(owned));
+      expect(ownerHex).toBe(
+        'c1d74d89c9b07b884ccde57768b17de760c6efb22fd59066c9595ad0cd8c45ba',
+      );
+      // (3) differs from owner-less; (4) owner-less == pre-owner KAT.
+      const plain = buildTyped('cancel_all_orders', { asset: 4 }, 62n, CHAIN_ID);
+      const plainHex = toHex(await typedActionDigest(plain));
+      expect(plainHex).toBe(
+        '9088140fe0311f99071e2c45e5eff506052fa787e6eb44e0d110a198fb5a3bf7',
+      );
+      expect(ownerHex).not.toBe(plainHex);
+    });
+
+    it('owner is ignored for an action with no owner form (approve_agent)', async () => {
+      const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
+      const payload = {
+        agent: addr(0xa1),
+        name: 'trading-bot',
+        expires_at_ms: 1_700_000_000_000,
+      };
+      const owned = buildTyped('approve_agent', payload, 1n, CHAIN_ID, OWNER_BIND);
+      expect(owned.owner).toBeUndefined();
+      expect(owned.actionJson.includes('"owner"')).toBe(false);
+      const plain = buildTyped('approve_agent', payload, 1n, CHAIN_ID);
+      expect(toHex(await typedActionDigest(owned))).toBe(
+        toHex(await typedActionDigest(plain)),
+      );
+    });
+
+    it('owner threads into the typedDataV4 payload right after metafluxChain', async () => {
+      const { buildTyped, typedDataV4 } = await import('../src/native/typed.js');
+      const owned = buildTyped('cancel_all_orders', { asset: 4 }, 62n, CHAIN_ID, OWNER_BIND);
+      const v4 = typedDataV4(owned);
+      const fields = v4.types[v4.primaryType];
+      expect(fields[0]).toEqual({ name: 'metafluxChain', type: 'string' });
+      expect(fields[1]).toEqual({ name: 'owner', type: 'address' });
+      expect(v4.message.owner).toBe(OWNER_BIND);
+    });
+
+    it('sign with a bound owner → recover round-trips to the signer', async () => {
+      const { signTypedAction, recoverTypedSigner } = await import('../src/native/typed.js');
+      const { deriveAddressFromPubkey, recoverPubkey, signSecp256k1, keccak256 } =
+        await import('../src/wallet/wasm.js');
+      const privKey = new Uint8Array(32).fill(0x5a);
+      const probe = await keccak256(new TextEncoder().encode('probe'));
+      const probePub = await recoverPubkey(await signSecp256k1(privKey, probe), probe);
+      const signer = `0x${toHex(await deriveAddressFromPubkey(probePub))}`;
+      const signed = await signTypedAction(
+        privKey,
+        'cancel_all_orders',
+        { asset: 4 },
+        62n,
+        CHAIN_ID,
+        OWNER_BIND,
+      );
+      const recovered = await recoverTypedSigner(
+        signed,
+        'cancel_all_orders',
+        { asset: 4 },
+        CHAIN_ID,
+        OWNER_BIND,
+      );
+      expect(recovered.toLowerCase()).toBe(signer.toLowerCase());
+    });
+  },
+);

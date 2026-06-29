@@ -521,6 +521,21 @@ function requireSpec(actionType: string): TypedSpec {
 // encodeType / primaryType / types map
 // ============================================================================
 
+/// The account-set actions that take an agent-resolved params-level `owner`
+/// (operator / vault trading). Only `cancel_all_orders` has an owner-carrying
+/// shape today; the orders set's owner-carrying actions live in
+/// `./typed_orders.ts`. When an owner is bound the `address owner` word sits
+/// right after `metafluxChain`, selecting the node's `*_WITH_OWNER_TYPE` —
+/// byte-identical to the Rust SDK's `CANCEL_ALL_ORDERS_WITH_OWNER` shape.
+const ACCOUNT_OWNER_SUPPORTING: ReadonlySet<string> = new Set([
+  'cancel_all_orders',
+]);
+
+/// Whether `actionType` accepts a digest-level agent-resolved `owner`.
+export function accountSupportsOwner(actionType: string): boolean {
+  return ACCOUNT_OWNER_SUPPORTING.has(actionType);
+}
+
 /// Solidity type name for the encodeType string. Decimal fields are `string`;
 /// the MetaBridge `chain-u8` field is a `uint8`; an optional field flattens to a
 /// `bool` presence flag + a `uint32` value in the signed type.
@@ -535,9 +550,15 @@ function solidityTypeName(ty: FieldSolidityType): string {
 
 /// Full encodeType string for a spec:
 /// `MetaFluxTransaction:<Pascal>(string metafluxChain,<fields...>,uint64 nonce)`.
-export function encodeType(actionType: string): string {
+/// Pass `withOwner = true` to insert `address owner` right after
+/// `string metafluxChain` for an owner-supporting action (operator / vault
+/// trading); other actions ignore it and return the owner-less string.
+export function encodeType(actionType: string, withOwner = false): string {
   const spec = requireSpec(actionType);
   const inner = ['string metafluxChain'];
+  if (withOwner && ACCOUNT_OWNER_SUPPORTING.has(actionType)) {
+    inner.push('address owner');
+  }
   for (const fld of spec.fields) inner.push(`${solidityTypeName(fld.ty)} ${fld.name}`);
   inner.push('uint64 nonce');
   return `MetaFluxTransaction:${spec.pascal}(${inner.join(',')})`;
@@ -798,6 +819,12 @@ interface BuiltTyped {
   readonly plans: readonly FieldPlan[];
   /// The exact `action` JSON string to POST (and that the digest covers).
   readonly actionJson: string;
+  /// The agent-resolved owner bound into the digest (owner-supporting actions
+  /// only — operator / vault trading). `undefined` for an owner-less digest. When
+  /// set, `address owner` enters the encodeType + struct hash right after
+  /// `metafluxChain`, and the wire `params` carries the `owner` key (the node
+  /// reads it back to reconstruct the same `*_WITH_OWNER` digest).
+  readonly owner?: string;
 }
 
 /// Build a typed action from a snake_case payload. `payload` carries ONLY the
@@ -808,21 +835,39 @@ export function buildTyped(
   payload: Record<string, unknown>,
   nonce: bigint,
   chainId: number = MTF_CHAIN_ID,
+  owner?: string,
 ): BuiltTyped {
   if (nonce < 0n) throw new RangeError('nonce must be non-negative');
   if (nonce >= 1n << 64n) throw new RangeError('nonce overflows u64');
   const spec = requireSpec(actionType);
   const chainTag = metafluxChainTag(chainId);
+  // The agent-resolved `owner` binds only for owner-supporting actions (operator
+  // / vault trading); other actions ignore a passed owner, matching the Rust SDK.
+  const ownerBound = owner !== undefined && ACCOUNT_OWNER_SUPPORTING.has(actionType);
+  if (ownerBound) validateAddress(owner, 'owner');
   const plans = spec.fields.map((fld) => planField(fld, payload));
   // The POST `action.params` omits flattened-optional presence flags and absent
   // optional values (`omitFromParams`), so the wire shape matches the server's
-  // native action exactly while every spec field is still signed.
-  const params = plans
+  // native action exactly while every spec field is still signed. When an owner
+  // is bound it rides in `params.owner` (the key the node reads back); its
+  // position in the JSON object is irrelevant to the digest (which covers the
+  // EIP-712 struct, not the bytes), so it is emitted first for readability.
+  const fieldParams = plans
     .filter((p) => !p.omitFromParams)
-    .map((p) => `${jsonStr(p.wireKey)}:${p.jsonValue}`)
-    .join(',');
-  const actionJson = `{${jsonStr('type')}:${jsonStr(spec.wireType)},${jsonStr('params')}:{${params}}}`;
-  return { actionType, chainId, chainTag, nonce, plans, actionJson };
+    .map((p) => `${jsonStr(p.wireKey)}:${p.jsonValue}`);
+  const paramEntries = ownerBound
+    ? [`${jsonStr('owner')}:${jsonStr(owner)}`, ...fieldParams]
+    : fieldParams;
+  const actionJson = `{${jsonStr('type')}:${jsonStr(spec.wireType)},${jsonStr('params')}:{${paramEntries.join(',')}}}`;
+  return {
+    actionType,
+    chainId,
+    chainTag,
+    nonce,
+    plans,
+    actionJson,
+    owner: ownerBound ? owner : undefined,
+  };
 }
 
 /// Compute the EIP-712 domain separator (4-field: name, version, chainId,
@@ -845,11 +890,17 @@ async function domainSeparator(chainId: number): Promise<Uint8Array> {
 /// `hashStruct(s) = keccak256(typeHash || encodeData)` where encodeData is the
 /// metafluxChain word, then each action field's word, then the nonce word.
 async function hashStruct(built: BuiltTyped): Promise<Uint8Array> {
-  const typeHash = await keccak256(enc.encode(encodeType(built.actionType)));
+  const typeHash = await keccak256(
+    enc.encode(encodeType(built.actionType, built.owner !== undefined)),
+  );
   const chainWord = await keccak256(enc.encode(built.chainTag));
+  // Agent-resolved owner: bound right after metafluxChain (owner-supporting
+  // actions only). Absent ⇒ no word, digest byte-identical to the owner-less form.
+  const ownerWords =
+    built.owner !== undefined ? [encAddrWord(built.owner, 'owner')] : [];
   const fieldWords = await Promise.all(built.plans.map((p) => p.word()));
   const nonceWord = be32(built.nonce);
-  const words = [typeHash, chainWord, ...fieldWords, nonceWord];
+  const words = [typeHash, chainWord, ...ownerWords, ...fieldWords, nonceWord];
   return keccak256(concatBytes(words));
 }
 
@@ -890,12 +941,18 @@ export function typedDataV4(built: BuiltTyped): TypedDataV4 {
   const fields: { name: string; type: string }[] = [
     { name: 'metafluxChain', type: 'string' },
   ];
+  // Agent-resolved owner sits right after metafluxChain, matching the encodeType
+  // string + struct-hash word order.
+  if (built.owner !== undefined) {
+    fields.push({ name: 'owner', type: 'address' });
+  }
   for (const fld of spec.fields) {
     fields.push({ name: fld.name, type: solidityTypeName(fld.ty) });
   }
   fields.push({ name: 'nonce', type: 'uint64' });
 
   const message: Record<string, MessageValue> = { metafluxChain: built.chainTag };
+  if (built.owner !== undefined) message['owner'] = built.owner;
   for (const p of built.plans) message[p.name] = p.messageValue;
   // nonce rides the v4 message as a decimal string (uint64 may exceed 2^53).
   message['nonce'] = built.nonce.toString();
@@ -940,9 +997,10 @@ export async function signTypedAction(
   payload: Record<string, unknown>,
   nonce: bigint,
   chainId: number = MTF_CHAIN_ID,
+  owner?: string,
 ): Promise<TypedSignedAction> {
   if (privateKey.length !== 32) throw new RangeError('privateKey must be exactly 32 bytes');
-  const built = buildTyped(actionType, payload, nonce, chainId);
+  const built = buildTyped(actionType, payload, nonce, chainId, owner);
   const digest = await typedActionDigest(built);
   const sig = await signSecp256k1(privateKey, digest);
   return { actionJson: built.actionJson, nonce, signature: `0x${toHex(sig)}` };
@@ -955,8 +1013,9 @@ export async function recoverTypedSigner(
   actionType: string,
   payload: Record<string, unknown>,
   chainId: number = MTF_CHAIN_ID,
+  owner?: string,
 ): Promise<string> {
-  const built = buildTyped(actionType, payload, signed.nonce, chainId);
+  const built = buildTyped(actionType, payload, signed.nonce, chainId, owner);
   const digest = await typedActionDigest(built);
   const sigHex = signed.signature.startsWith('0x')
     ? signed.signature.slice(2)
