@@ -169,12 +169,11 @@ export class InfoApi {
   /// (omitted = unbounded / from 0). Bars come oldest-first by `open_time`; the
   /// newest element is the still-forming bar.
   ///
-  /// **Price plane — does NOT match the WS `candles` frame.** The returned
-  /// `open` / `close` / `high` / `low` are whole-USDC human-dollar decimal
-  /// strings (`"67042.50"`); the WS `candles` frame carries the SAME bar's OHLC
-  /// as RAW 1e8 fixed-point integers (`"6700000000000"`). Rescale if you mix the
-  /// two sources. `volume` is base units (coin size, NOT notional); `num_trades`
-  /// is a fill count.
+  /// **Price plane.** The returned `open` / `close` / `high` / `low` are
+  /// whole-USDC human-dollar decimal strings (`"67042.50"`, tick-snapped) — the
+  /// SAME canonical plane the WS `candles` frame now emits, so REST history and
+  /// the live WS bar line up with no rescaling. `volume` is base units (coin
+  /// size, NOT notional); `num_trades` is a fill count.
   ///
   /// GATEWAY-served, not node: must hit `<net>-gateway.mtf.exchange/info`; a
   /// bare node returns `unknown info type: candle`. An empty array is the

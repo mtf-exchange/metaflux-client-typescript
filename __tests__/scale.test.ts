@@ -65,6 +65,62 @@ describe('scale: decimal <-> fixed-point wire', () => {
   });
 });
 
+describe('round-to-grid: snap px/size to the market tick / lot', () => {
+  const grid = {
+    tick_size: '0.01', // whole-USDC price tick
+    step_size: '0.001', // size-plane lot
+    min_order: '0.01', // size-plane minimum
+    sz_decimals: 3,
+  };
+
+  it('snaps px to a tick multiple (toward zero) and returns the 1e8 wire', async () => {
+    const { snapPxToWire } = await import('../src/native/scale.js');
+    // 67042.579 at a $0.01 tick → 67042.57 → wire 1e8.
+    expect(snapPxToWire('67042.579', '0.01')).toBe(6_704_257_000_000n);
+    // Already on grid is unchanged.
+    expect(snapPxToWire('67042.57', '0.01')).toBe(6_704_257_000_000n);
+    // A coarse tick snaps harder: $0.5 tick, 100.9 → 100.5.
+    expect(snapPxToWire('100.9', '0.5')).toBe(10_050_000_000n);
+    // tick "0" = no grid → straight pxToWire.
+    expect(snapPxToWire('1.23456789', '0')).toBe(123_456_789n);
+  });
+
+  it('snaps size to a lot multiple (toward zero) and returns the wire size', async () => {
+    const { snapSizeToWire } = await import('../src/native/scale.js');
+    // 1.2349 at a 0.001 lot, szd=3 → 1.234 → 1234 raw.
+    expect(snapSizeToWire('1.2349', grid)).toBe(1234n);
+    // On-grid unchanged.
+    expect(snapSizeToWire('1.234', grid)).toBe(1234n);
+    // step "0" = no grid → straight szToWire (truncate to szd).
+    expect(snapSizeToWire('1.2349', { ...grid, step_size: '0' })).toBe(1234n);
+  });
+
+  it('enforces min_order (throws below the minimum)', async () => {
+    const { snapSizeToWire } = await import('../src/native/scale.js');
+    // 0.005 snaps to 0.005 (>= 0.001 lot) but is below the 0.01 minimum.
+    expect(() => snapSizeToWire('0.005', grid)).toThrow(/min_order/);
+    // Exactly at the minimum is fine.
+    expect(snapSizeToWire('0.01', grid)).toBe(10n);
+  });
+
+  it('roundOrderToGrid returns wire bigints plus snapped decimal strings', async () => {
+    const { roundOrderToGrid } = await import('../src/native/scale.js');
+    const out = roundOrderToGrid('67042.579', '1.2349', grid);
+    expect(out.limit_px).toBe(6_704_257_000_000n);
+    expect(out.size).toBe(1234n);
+    expect(out.px).toBe('67042.57');
+    expect(out.sz).toBe('1.234');
+  });
+
+  it('snaps losslessly above JS double precision', async () => {
+    const { snapPxToWire } = await import('../src/native/scale.js');
+    // Off-grid in the 9th decimal, beyond 2^53 once on the 1e8 wire.
+    const wire = snapPxToWire('123456789.123456789', '0.01');
+    expect(wire).toBe(12_345_678_912_000_000n);
+    expect(wire > BigInt(Number.MAX_SAFE_INTEGER)).toBe(true);
+  });
+});
+
 describe('toU64: number | bigint | string normalize identically', () => {
   it('same bigint for every representation of one value', async () => {
     const { toU64 } = await import('../src/native/digest.js');

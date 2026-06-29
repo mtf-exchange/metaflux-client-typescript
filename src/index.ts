@@ -25,9 +25,10 @@ export {
   type U64Input,
 } from './native/digest.js';
 export {
-  // Decimal <-> 1e8/sz_decimals wire-scale conversions. Use these to turn a
-  // human decimal price/size (the /info read plane) into the order wire's
-  // fixed-point u64 — losslessly, no floating point — and back for display.
+  // Decimal <-> 1e8/sz_decimals wire-scale conversions. Turn a human decimal
+  // price/size into the order REQUEST wire's fixed-point u64 — losslessly, no
+  // floating point. The wire->decimal inverses are for request-plane display
+  // only; `/info` and WS responses are ALREADY canonical decimal strings.
   PX_DECIMALS,
   pxToWire,
   wireToPx,
@@ -35,6 +36,13 @@ export {
   wireToSz,
   decimalToScaled,
   scaledToDecimal,
+  // Round-to-grid: snap a human px/size to the market tick / lot before
+  // building an order (the node REJECTS off-grid px/size). Opt-in.
+  snapPxToWire,
+  snapSizeToWire,
+  roundOrderToGrid,
+  type MarketGrid,
+  type SnappedOrder,
 } from './native/scale.js';
 export {
   // EIP-712 typed-action signing (the structured wallet-signing path). Exported
