@@ -446,3 +446,217 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing — trading set', () =
     ).rejects.toThrow();
   });
 });
+
+// ── agent-resolved `owner` (operator / vault trading) ────────────────────────
+//
+// Cross-impl KATs for the seven owner-supporting trading actions. Each pins the
+// SAME digest the Rust SDK + the node commit to (owner 0xbb..bb, chain 114514,
+// nonce 1 — the Rust SDK's `*_WITH_OWNER` fixtures, so both SDKs pin identical
+// vectors). For each: (1) the SDK's selected encodeType bytes equal the node's
+// `*_WITH_OWNER_TYPE` literal (copied verbatim from the node's typed-order
+// signing contract); (2) the owner-present digest matches the pinned vector; (3)
+// it DIFFERS from the owner-less digest (the owner is cryptographically bound);
+// and (4) the owner-LESS digest reproduces the pre-owner KAT — owner-absent is
+// byte-identical to today. `batch_order` (owner inside its `BatchOrder.owner`
+// struct) is covered separately above.
+
+const OWNER_BIND = addr(0xbb);
+const RUST_CLOID = '0xabababababababababababababababab';
+
+/// The Rust SDK's `modify()` fixture (distinct from `sampleModify()` above).
+function rustModify(): Modify {
+  return { market: 1, oid: 1234, new_px: 6_900_000_000_000, new_size: 200 };
+}
+
+interface OwnerVector {
+  actionType: string;
+  payload: TypedOrderPayload;
+  /// The node's `*_WITH_OWNER_TYPE` literal (verbatim).
+  ownerType: string;
+  /// Owner-present digest pin (owner 0xbb..bb, chain 114514, nonce 1).
+  ownerDigest: string;
+  /// Owner-less digest pin (= the pre-owner KAT — back-compat).
+  plainDigest: string;
+}
+
+const OWNER_VECTORS: OwnerVector[] = [
+  {
+    actionType: 'modify',
+    payload: { params: rustModify() },
+    ownerType:
+      'MetaFluxTransaction:Modify(string metafluxChain,address owner,uint32 market,uint64 oid,bool hasNewPx,uint64 newPx,bool hasNewSize,uint64 newSize,string cloid,bool alwaysPlace,uint64 nonce)',
+    ownerDigest: '6c9f289d2785cd12fdad8f5933623cfcde275ba17f83d196dc667930577607a0',
+    plainDigest: '2ef6437095dd5d2a71265b78abe9ef5ef5db97d385d27e768225f326eff98d19',
+  },
+  {
+    actionType: 'cancel_by_cloid',
+    payload: { params: { asset: 1, cloid: RUST_CLOID } as CancelByCloid },
+    ownerType:
+      'MetaFluxTransaction:CancelByCloid(string metafluxChain,address owner,uint32 asset,string cloid,uint64 nonce)',
+    ownerDigest: '607915958cc50aa3688744ce281f477a2a13ed74f7b49dd3b24492c2ebd10d40',
+    plainDigest: '575fdab951085e30a1f260cae0a8fc2dfdc416247a3e4f5707a0b09d25a2fc24',
+  },
+  {
+    actionType: 'spot_order',
+    payload: {
+      order: {
+        pair: 3,
+        side: 'bid',
+        size: 50,
+        limit_px: 100_000_000,
+        tif: 'ioc',
+        stp_mode: 'cancel_oldest',
+        cloid: RUST_CLOID,
+      } as NativeSpotOrder,
+    },
+    ownerType:
+      'MetaFluxTransaction:SpotOrder(string metafluxChain,address owner,uint32 pair,string side,uint64 size,uint64 limitPx,string tif,string stpMode,string cloid,uint64 nonce)',
+    ownerDigest: '974960f541953bf10ad3677c41ebfa9d8cbeb90868f74ccdf44590327e7163fc',
+    plainDigest: '981902cfbf00fc9c9bb26acdebfe356cd0e2b8da69199ed9b8ae2a316cf1cb34',
+  },
+  {
+    actionType: 'spot_cancel',
+    payload: { cancel: { pair: 3, oid: 99 } as NativeSpotCancel },
+    ownerType:
+      'MetaFluxTransaction:SpotCancel(string metafluxChain,address owner,uint32 pair,uint64 oid,uint64 nonce)',
+    ownerDigest: '378a4b73e59a10e121c05f47c82f599147f66faf9ff6510d489d7baedfabb8f5',
+    plainDigest: '5f794c0c7a2c1b473efd5e86a4386385ce4696ad2cdc8d849eb9b30745c5f7fc',
+  },
+  {
+    actionType: 'batch_modify',
+    payload: {
+      params: { modifications: [rustModify(), { market: 2, oid: 5678 }] } as BatchModify,
+    },
+    ownerType:
+      'MetaFluxTransaction:BatchModify(string metafluxChain,address owner,bytes32 modifications,uint64 nonce)',
+    ownerDigest: 'a38064007bd676e1c7f524138bfd74853861a7e7ca8d971429bf16110ead06da',
+    plainDigest: 'c0914a0623f6032bdc85adb0b572fab74d8c5f775bef10455bcebd5454e3dd14',
+  },
+  {
+    actionType: 'batch_cancel',
+    payload: {
+      params: {
+        cancels: [
+          { owner: addr(0x11), market: 1, oid: 1234 },
+          { owner: addr(0x11), market: 2, oid: 5678 },
+        ],
+      } as BatchCancel,
+    },
+    ownerType:
+      'MetaFluxTransaction:BatchCancel(string metafluxChain,address owner,bytes32 cancels,uint64 nonce)',
+    ownerDigest: '331396c719d6bbf49572ec3366a430b78eb5193d73c5475ccd204c8a6d681aef',
+    plainDigest: '46d484036118744ef5996146ec9d35e1a54f550913238564831d5cc33d3af449',
+  },
+  {
+    actionType: 'twap_cancel',
+    payload: { params: { twap_id: 42 } as TwapCancel },
+    ownerType:
+      'MetaFluxTransaction:TwapCancel(string metafluxChain,address owner,uint64 twapId,uint64 nonce)',
+    ownerDigest: '2fe790c3e954f69cdd91734c4608c5568bf698a9ef19aa65f40356c3c0b9e3ce',
+    plainDigest: '08ebfec844ed708f1085d0251450503f309e0f44c450943227c4cf7e0b3a589f',
+  },
+];
+
+describe.skipIf(!wasmBuilt)(
+  'EIP-712 typed signing — agent-resolved owner (trading set)',
+  () => {
+    it('owner-supporting actions cover exactly the seven non-batch_order actions', async () => {
+      const { supportsOwner } = await import('../src/native/typed_orders.js');
+      for (const v of OWNER_VECTORS) expect(supportsOwner(v.actionType)).toBe(true);
+      // batch_order carries its owner in `BatchOrder.owner`, NOT the digest-level
+      // owner — so it is NOT a digest-level owner-supporting action.
+      expect(supportsOwner('batch_order')).toBe(false);
+      // Actions with no owner form at all.
+      expect(supportsOwner('submit_order')).toBe(false);
+      expect(supportsOwner('cancel_order')).toBe(false);
+      expect(supportsOwner('schedule_cancel')).toBe(false);
+      expect(supportsOwner('twap_order')).toBe(false);
+    });
+
+    it('the 7 owner-supporting actions match the Rust SDK + node *_WITH_OWNER vectors', async () => {
+      const { buildTypedOrder, typedOrderDigest, encodeOrderType } = await import(
+        '../src/native/typed_orders.js'
+      );
+      for (const v of OWNER_VECTORS) {
+        // (1) selected encodeType == node *_WITH_OWNER_TYPE (verbatim).
+        expect(encodeOrderType(v.actionType, true), `${v.actionType} owner type`).toBe(
+          v.ownerType,
+        );
+        // (2) owner-present digest == pinned cross-impl vector.
+        const owned = await buildTypedOrder(
+          v.actionType,
+          v.payload,
+          '',
+          1n,
+          CHAIN_ID,
+          OWNER_BIND,
+        );
+        expect(owned.withOwner, `${v.actionType} withOwner`).toBe(true);
+        expect(owned.owner, `${v.actionType} owner`).toBe(OWNER_BIND);
+        const ownerHex = toHex(await typedOrderDigest(owned));
+        expect(ownerHex, `${v.actionType} owner digest`).toBe(v.ownerDigest);
+        // (3) differs from owner-less; (4) owner-less == pre-owner KAT.
+        const plain = await buildTypedOrder(v.actionType, v.payload, '', 1n, CHAIN_ID);
+        expect(plain.withOwner, `${v.actionType} owner-less withOwner`).toBe(false);
+        const plainHex = toHex(await typedOrderDigest(plain));
+        expect(plainHex, `${v.actionType} owner-less digest`).toBe(v.plainDigest);
+        expect(ownerHex, `${v.actionType} owner binds`).not.toBe(plainHex);
+      }
+    });
+
+    it('owner is ignored for an action with no owner form (submit_order)', async () => {
+      const { buildTypedOrder, typedOrderDigest, encodeOrderType } = await import(
+        '../src/native/typed_orders.js'
+      );
+      // The owner-carrying encodeType selector falls back to the base type.
+      expect(encodeOrderType('submit_order', true)).toBe(encodeOrderType('submit_order'));
+      const order = sampleOrder();
+      const owned = await buildTypedOrder(
+        'submit_order',
+        { order },
+        '',
+        40n,
+        CHAIN_ID,
+        OWNER_BIND,
+      );
+      expect(owned.withOwner).toBe(false);
+      expect(owned.owner).toBeUndefined();
+      const plain = await buildTypedOrder('submit_order', { order }, '', 40n, CHAIN_ID);
+      expect(toHex(await typedOrderDigest(owned))).toBe(
+        toHex(await typedOrderDigest(plain)),
+      );
+    });
+
+    it('sign with a bound owner → recover round-trips to the signer (modify)', async () => {
+      const { signTypedOrder, recoverTypedOrderSigner } = await import(
+        '../src/native/typed_orders.js'
+      );
+      const { deriveAddressFromPubkey, recoverPubkey, signSecp256k1, keccak256 } =
+        await import('../src/wallet/wasm.js');
+      const privKey = new Uint8Array(32).fill(0x5a);
+      const probe = await keccak256(new TextEncoder().encode('probe'));
+      const probePub = await recoverPubkey(await signSecp256k1(privKey, probe), probe);
+      const signer = `0x${toHex(await deriveAddressFromPubkey(probePub))}`;
+      // The signer is an approved agent of OWNER_BIND (the vault); the wire JSON
+      // carries `params.owner` so the node rebuilds the same WITH_OWNER digest.
+      const actionJson = `{"type":"modify","params":{"owner":"${OWNER_BIND}","market":1,"oid":1234}}`;
+      const signed = await signTypedOrder(
+        privKey,
+        'modify',
+        { params: rustModify() },
+        actionJson,
+        1n,
+        CHAIN_ID,
+        OWNER_BIND,
+      );
+      const recovered = await recoverTypedOrderSigner(
+        signed,
+        'modify',
+        { params: rustModify() },
+        CHAIN_ID,
+        OWNER_BIND,
+      );
+      expect(recovered.toLowerCase()).toBe(signer.toLowerCase());
+    });
+  },
+);

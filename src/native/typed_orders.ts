@@ -105,14 +105,49 @@ const ENCODE_TYPES: Readonly<Record<string, string>> = Object.freeze({
     'MetaFluxTransaction:BatchCancel(string metafluxChain,bytes32 cancels,uint64 nonce)',
 });
 
-/// Owner-carrying `batch_order` encodeType — the params-level `owner` (address)
-/// is inserted at position 2 (right after metafluxChain, before `bytes32 orders`),
-/// for operator / vault trading where the orders' owner differs from the signer.
-/// Selected ONLY when `BatchOrder.owner` is present; an owner-less batch uses the
-/// owner-less `ENCODE_TYPES.batch_order` above so existing signatures still verify.
-/// Byte-identical to the Rust SDK's owner-carrying BatchOrder type string.
-const BATCH_ORDER_OWNER_TYPE =
-  'MetaFluxTransaction:BatchOrder(string metafluxChain,address owner,bytes32 orders,string grouping,uint64 nonce)';
+/// Owner-carrying encodeType strings — the agent-resolved params-level `owner`
+/// (address) is inserted at position 2 (right after metafluxChain, before the
+/// action's own fields), for operator / vault trading where the orders' owner
+/// differs from the signer. Selected ONLY when an `owner` is bound; an owner-LESS
+/// action uses the owner-less `ENCODE_TYPES` above so existing signatures still
+/// verify (owner-absent digest byte-identical to today). These mirror the node's
+/// `*_WITH_OWNER_TYPE` and the Rust SDK's `TY_*_WITH_OWNER` constants byte-for-byte.
+///
+/// `batch_order` carries its `owner` inside its own params struct (the
+/// `BatchOrder.owner` field); the other seven take a digest-level `owner`
+/// argument. Both land the `address owner` word at the same position 2.
+const ENCODE_TYPES_WITH_OWNER: Readonly<Record<string, string>> = Object.freeze({
+  spot_order:
+    'MetaFluxTransaction:SpotOrder(string metafluxChain,address owner,uint32 pair,string side,uint64 size,uint64 limitPx,string tif,string stpMode,string cloid,uint64 nonce)',
+  spot_cancel:
+    'MetaFluxTransaction:SpotCancel(string metafluxChain,address owner,uint32 pair,uint64 oid,uint64 nonce)',
+  cancel_by_cloid:
+    'MetaFluxTransaction:CancelByCloid(string metafluxChain,address owner,uint32 asset,string cloid,uint64 nonce)',
+  modify:
+    'MetaFluxTransaction:Modify(string metafluxChain,address owner,uint32 market,uint64 oid,bool hasNewPx,uint64 newPx,bool hasNewSize,uint64 newSize,string cloid,bool alwaysPlace,uint64 nonce)',
+  batch_modify:
+    'MetaFluxTransaction:BatchModify(string metafluxChain,address owner,bytes32 modifications,uint64 nonce)',
+  twap_cancel:
+    'MetaFluxTransaction:TwapCancel(string metafluxChain,address owner,uint64 twapId,uint64 nonce)',
+  batch_order:
+    'MetaFluxTransaction:BatchOrder(string metafluxChain,address owner,bytes32 orders,string grouping,uint64 nonce)',
+  batch_cancel:
+    'MetaFluxTransaction:BatchCancel(string metafluxChain,address owner,bytes32 cancels,uint64 nonce)',
+});
+
+/// The trading actions that take a DIGEST-LEVEL agent-resolved `owner` (passed to
+/// [`buildTypedOrder`] / [`signTypedOrder`]). `batch_order` is excluded — it
+/// carries its owner inside its `BatchOrder.owner` params field — matching the
+/// Rust SDK's `supports_owner` gating.
+const OWNER_SUPPORTING_ACTIONS: ReadonlySet<string> = new Set([
+  'spot_order',
+  'spot_cancel',
+  'cancel_by_cloid',
+  'modify',
+  'batch_modify',
+  'twap_cancel',
+  'batch_cancel',
+]);
 
 /// The set of snake_case `action.type` tags the trading-set typed scheme covers.
 export const TYPED_ORDER_ACTION_TYPES: readonly string[] = Object.freeze(
@@ -125,12 +160,21 @@ export function isTypedOrderAction(actionType: string): boolean {
   return Object.prototype.hasOwnProperty.call(ENCODE_TYPES, actionType);
 }
 
-/// Full encodeType string for a trading action. For `batch_order`, pass
-/// `withOwner = true` to select the owner-carrying variant (the params-level
-/// `owner` word at position 2); the default owner-less variant is unchanged.
+/// Whether `actionType` accepts a digest-level agent-resolved `owner` (the
+/// `*_WITH_OWNER` shape), used for operator / vault trading. `batch_order` is
+/// `false` here (its owner rides in `BatchOrder.owner`).
+export function supportsOwner(actionType: string): boolean {
+  return OWNER_SUPPORTING_ACTIONS.has(actionType);
+}
+
+/// Full encodeType string for a trading action. Pass `withOwner = true` to select
+/// the owner-carrying variant (the params-level `owner` address word at position
+/// 2) for an action that has one (`batch_order` + the seven owner-supporting
+/// actions); other actions ignore it and return the owner-less variant.
 export function encodeOrderType(actionType: string, withOwner = false): string {
-  if (actionType === 'batch_order' && withOwner) {
-    return BATCH_ORDER_OWNER_TYPE;
+  if (withOwner) {
+    const owned = ENCODE_TYPES_WITH_OWNER[actionType];
+    if (owned !== undefined) return owned;
   }
   const t = ENCODE_TYPES[actionType];
   if (t === undefined) {
@@ -349,9 +393,17 @@ async function encodeOrderData(
   payload: TypedOrderPayload,
   chainTag: MetafluxChainTag,
   nonce: bigint,
+  owner?: string,
 ): Promise<Uint8Array[]> {
   const chainWord = await encString(chainTag);
   const nonceWord = encUint(nonce, 64, 'nonce');
+  // Agent-resolved owner: bound right after metafluxChain for the seven
+  // owner-supporting actions (operator / vault trading). `batch_order` carries
+  // its owner inside its own struct, so it is NOT in this set (empty here).
+  const ownerWords: Uint8Array[] =
+    owner !== undefined && OWNER_SUPPORTING_ACTIONS.has(actionType)
+      ? [encAddr(owner, 'owner')]
+      : [];
   switch (actionType) {
     case 'submit_order': {
       const order = payload.order as NativeOrder;
@@ -367,6 +419,7 @@ async function encodeOrderData(
       const cloid = o.cloid === undefined ? '' : (validateCloid(o.cloid), o.cloid);
       return [
         chainWord,
+        ...ownerWords,
         encUint(asBigInt(o.pair, 'pair'), 32, 'pair'),
         await encString(checkEnum(VALID_SIDE, o.side, 'side')),
         encUint(asBigInt(o.size, 'size'), 64, 'size'),
@@ -381,6 +434,7 @@ async function encodeOrderData(
       const c = payload.cancel as NativeSpotCancel;
       return [
         chainWord,
+        ...ownerWords,
         encUint(asBigInt(c.pair, 'pair'), 32, 'pair'),
         encUint(asBigInt(c.oid, 'oid'), 64, 'oid'),
         nonceWord,
@@ -391,6 +445,7 @@ async function encodeOrderData(
       validateCloid(p.cloid);
       return [
         chainWord,
+        ...ownerWords,
         encUint(asBigInt(p.asset, 'asset'), 32, 'asset'),
         await encString(p.cloid),
         nonceWord,
@@ -398,12 +453,12 @@ async function encodeOrderData(
     }
     case 'modify': {
       const m = payload.params as Modify;
-      return [chainWord, ...(await modifyWords(m)), nonceWord];
+      return [chainWord, ...ownerWords, ...(await modifyWords(m)), nonceWord];
     }
     case 'batch_modify': {
       const p = payload.params as BatchModify;
       const items = await Promise.all(p.modifications.map(modifyWords));
-      return [chainWord, await hashItems(items), nonceWord];
+      return [chainWord, ...ownerWords, await hashItems(items), nonceWord];
     }
     case 'schedule_cancel': {
       const p = payload.params as ScheduleCancel;
@@ -430,6 +485,7 @@ async function encodeOrderData(
       const p = payload.params as TwapCancel;
       return [
         chainWord,
+        ...ownerWords,
         encUint(asBigInt(p.twap_id, 'twap_id'), 64, 'twap_id'),
         nonceWord,
       ];
@@ -458,7 +514,7 @@ async function encodeOrderData(
     case 'batch_cancel': {
       const p = payload.params as BatchCancel;
       const items = p.cancels.map(cancelWords);
-      return [chainWord, await hashItems(items), nonceWord];
+      return [chainWord, ...ownerWords, await hashItems(items), nonceWord];
     }
     default:
       throw new RangeError(`'${actionType}' is not a trading typed action`);
@@ -508,10 +564,15 @@ export interface BuiltTypedOrder {
   readonly nonce: bigint;
   readonly actionJson: string;
   readonly words: readonly Uint8Array[];
-  /// True for an owner-carrying `batch_order` — selects the owner variant of the
-  /// encodeType string (matching the extra `owner` word in `words`). False for
-  /// every other action and for an owner-less batch.
+  /// True for an owner-carrying digest — selects the owner variant of the
+  /// encodeType string (matching the extra `owner` word in `words`). Set for an
+  /// owner-carrying `batch_order` (its `BatchOrder.owner`) AND for any of the
+  /// seven owner-supporting actions signed with a bound `owner`. False otherwise.
   readonly withOwner: boolean;
+  /// The digest-level agent-resolved owner bound for the seven owner-supporting
+  /// actions. `undefined` for an owner-less digest and for `batch_order` (whose
+  /// owner rides in `BatchOrder.owner`, not this field).
+  readonly owner?: string;
 }
 
 /// Build a typed trading action from its wire payload + the canonical action
@@ -524,6 +585,7 @@ export async function buildTypedOrder(
   actionJson: string,
   nonce: bigint,
   chainId: number = MTF_CHAIN_ID,
+  owner?: string,
 ): Promise<BuiltTypedOrder> {
   if (!isTypedOrderAction(actionType)) {
     throw new RangeError(`'${actionType}' is not a trading typed action`);
@@ -531,11 +593,24 @@ export async function buildTypedOrder(
   if (nonce < 0n) throw new RangeError('nonce must be non-negative');
   if (nonce >= 1n << 64n) throw new RangeError('nonce overflows u64');
   const chainTag = metafluxChainTag(chainId);
-  const words = await encodeOrderData(actionType, payload, chainTag, nonce);
+  const words = await encodeOrderData(actionType, payload, chainTag, nonce, owner);
+  // The digest-level `owner` binds only for the seven owner-supporting actions;
+  // `batch_order` reports `withOwner` off its in-struct `BatchOrder.owner`.
+  const ownerBound = owner !== undefined && OWNER_SUPPORTING_ACTIONS.has(actionType);
   const withOwner =
-    actionType === 'batch_order' &&
-    (payload.params as BatchOrder | undefined)?.owner !== undefined;
-  return { actionType, chainId, chainTag, nonce, actionJson, words, withOwner };
+    ownerBound ||
+    (actionType === 'batch_order' &&
+      (payload.params as BatchOrder | undefined)?.owner !== undefined);
+  return {
+    actionType,
+    chainId,
+    chainTag,
+    nonce,
+    actionJson,
+    words,
+    withOwner,
+    owner: ownerBound ? owner : undefined,
+  };
 }
 
 /// `hashStruct(s) = keccak256(typeHash || encodeData)` for a built trading action.
@@ -570,9 +645,10 @@ export async function signTypedOrder(
   actionJson: string,
   nonce: bigint,
   chainId: number = MTF_CHAIN_ID,
+  owner?: string,
 ): Promise<TypedSignedAction> {
   if (privateKey.length !== 32) throw new RangeError('privateKey must be exactly 32 bytes');
-  const built = await buildTypedOrder(actionType, payload, actionJson, nonce, chainId);
+  const built = await buildTypedOrder(actionType, payload, actionJson, nonce, chainId, owner);
   const digest = await typedOrderDigest(built);
   const sig = await signSecp256k1(privateKey, digest);
   return { actionJson, nonce, signature: `0x${toHex(sig)}` };
@@ -585,8 +661,16 @@ export async function recoverTypedOrderSigner(
   actionType: string,
   payload: TypedOrderPayload,
   chainId: number = MTF_CHAIN_ID,
+  owner?: string,
 ): Promise<string> {
-  const built = await buildTypedOrder(actionType, payload, signed.actionJson, signed.nonce, chainId);
+  const built = await buildTypedOrder(
+    actionType,
+    payload,
+    signed.actionJson,
+    signed.nonce,
+    chainId,
+    owner,
+  );
   const digest = await typedOrderDigest(built);
   const sigHex = signed.signature.startsWith('0x')
     ? signed.signature.slice(2)
