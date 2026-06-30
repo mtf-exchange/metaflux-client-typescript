@@ -63,13 +63,23 @@ export function metafluxChainTag(chainId: number): MetafluxChainTag {
 
 /// Supported EIP-712 leaf solidity types for the typed actions.
 ///
-/// `presence-bool` / `opt-uint32` are the two halves of an OPTIONAL wire field
-/// that the server flattens into a presence `bool` + value pair (the same
-/// `Option<T>` → `(hasX: bool, x)` rule the node's `to_typed` applies). Both
+/// `presence-bool` / `opt-uint32` / `opt-uint64` are the halves of an OPTIONAL
+/// wire field that the server flattens into a presence `bool` + value pair (the
+/// same `Option<T>` → `(hasX: bool, x)` rule the node's `to_typed` applies). Both
 /// read the SAME snake_case wire key: the presence half signs `true`/`false`
 /// for present/absent, the value half signs the value (or `0` when absent). The
 /// POST `action.params` carries only the original optional key (present or
 /// omitted), never the flattened pair — exactly like the server's native action.
+/// (`opt-uint64` is the 64-bit value half, for the RFQ / FBA optional u64s.)
+///
+/// `side-u8` backs the RFQ / FBA `side`: the POST `params.side` carries the core
+/// `Side` PascalCase NAME (`"Bid"`/`"Ask"`), the signed word + v4 message value
+/// are the `uint8` code (Bid=0, Ask=1) — the same string-in / code-signed split
+/// `chain-u8` / `vault-kind` use.
+///
+/// `const-false-bool` signs a constant `false` and is NEVER written to the POST
+/// `action.params` — it backs the `pm_unenroll` alias, whose paramless wire maps
+/// to the `UserPortfolioMargin{enroll:false}` typed digest.
 ///
 /// `bytes` / `bytes32` back the encrypted-order ciphertext / commitment: a
 /// `Uint8Array` POSTed as a JSON byte array. `bytes` hashes `keccak256(raw)`;
@@ -86,8 +96,11 @@ type FieldSolidityType =
   | 'uint32'
   | 'uint64'
   | 'vault-kind'
+  | 'side-u8'
   | 'presence-bool'
   | 'opt-uint32'
+  | 'opt-uint64'
+  | 'const-false-bool'
   | 'bytes'
   | 'bytes32';
 
@@ -109,6 +122,17 @@ const VAULT_KIND_CODES: Readonly<Record<string, number>> = Object.freeze({
   Metaliquidity: 1,
 });
 
+/// Core `Side` PascalCase name → the `uint8` code the typed RFQ / FBA `side`
+/// field signs. The POST `params.side` carries the STRING name (the node's
+/// `core_state::Side` enum has NO `rename_all`, so it deserializes PascalCase);
+/// the signed word + v4 message value carry this code (Bid=0, Ask=1). Distinct
+/// from the perp/spot order `side`, which signs the snake_case `"bid"`/`"ask"`
+/// string verbatim (see `./typed_orders.ts`).
+const SIDE_CODES: Readonly<Record<string, number>> = Object.freeze({
+  Bid: 0,
+  Ask: 1,
+});
+
 /// One field of a typed struct.
 interface FieldSpec {
   /// EIP-712 / camelCase field name (also the `message` key, per v4).
@@ -128,13 +152,19 @@ interface TypedSpec {
   /// Ordered action-specific fields. The leading `metafluxChain` and trailing
   /// `nonce` are appended automatically.
   readonly fields: readonly FieldSpec[];
+  /// When `true` AND no field contributes a POST param (every field is signed
+  /// but omitted), the action JSON is emitted WITHOUT a `params` object — i.e.
+  /// `{"type":<wireType>}`. Backs the paramless `pm_unenroll` alias (its only
+  /// field is a `const-false-bool` that signs `enroll=false` but is never on the
+  /// wire), matching the node's bare `{"type":"pm_unenroll"}` envelope.
+  readonly emitNoParams?: boolean;
 }
 
 function f(name: string, ty: FieldSolidityType, wireKey: string): FieldSpec {
   return { name, ty, wireKey };
 }
 
-// The 41 reachable typed actions. Field order is CONSENSUS-FROZEN — it is both
+// The reachable typed actions. Field order is CONSENSUS-FROZEN — it is both
 // the encodeType order and the `eth_signTypedData_v4` message order.
 const TYPED_SPECS: Record<string, TypedSpec> = {
   // ---- transfers (3) ----
@@ -495,6 +525,73 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('revealDeadlineMs', 'uint64', 'reveal_deadline_ms'),
     ],
   },
+  // ---- RFQ / FBA microstructure (3) + 2 aliases ----
+  //
+  // RFQ / FBA are sender-authorized (NO owner — the recovered signer is the
+  // actor). `side` is the core `Side` PascalCase string on the wire, signed as a
+  // `uint8` code (Bid=0/Ask=1); the numeric fields are RAW u64 wire values
+  // (fixed-point lots/price), NOT decimal-scaled. `limit_px` / `stp_group` are
+  // `Option<u64>` flattened to a presence bool + a u64 value (`0` when absent),
+  // the key emitted on the wire ONLY when present.
+  rfq_request: {
+    pascal: 'RfqRequest',
+    wireType: 'rfq_request',
+    fields: [
+      f('market', 'uint32', 'market'),
+      f('side', 'side-u8', 'side'),
+      f('size', 'uint64', 'size'),
+      f('hasLimitPx', 'presence-bool', 'limit_px'),
+      f('limitPx', 'opt-uint64', 'limit_px'),
+      f('expiryMs', 'uint64', 'expiry_ms'),
+      f('hasStpGroup', 'presence-bool', 'stp_group'),
+      f('stpGroup', 'opt-uint64', 'stp_group'),
+    ],
+  },
+  rfq_accept: {
+    pascal: 'RfqAccept',
+    wireType: 'rfq_accept',
+    fields: [
+      f('rfqId', 'uint64', 'rfq_id'),
+      f('quoteIdx', 'uint32', 'quote_idx'),
+      f('size', 'uint64', 'size'),
+    ],
+  },
+  fba_submit: {
+    pascal: 'FbaSubmit',
+    wireType: 'fba_submit',
+    fields: [
+      f('market', 'uint32', 'market'),
+      f('side', 'side-u8', 'side'),
+      f('size', 'uint64', 'size'),
+      f('price', 'uint64', 'price'),
+      f('hasStpGroup', 'presence-bool', 'stp_group'),
+      f('stpGroup', 'opt-uint64', 'stp_group'),
+    ],
+  },
+  // `encrypted_order_submit` — a NEW /exchange tag that ALIASES the existing
+  // `SubmitEncryptedOrder` digest: SAME pascal + SAME 5 fields as
+  // `submit_encrypted_order`, only the wire `type` tag differs. One signing form.
+  encrypted_order_submit: {
+    pascal: 'SubmitEncryptedOrder',
+    wireType: 'encrypted_order_submit',
+    fields: [
+      f('ciphertext', 'bytes', 'ciphertext'),
+      f('commitment', 'bytes32', 'commitment'),
+      f('threshold', 'uint8', 'threshold'),
+      f('targetBlock', 'uint64', 'target_block'),
+      f('revealDeadlineMs', 'uint64', 'reveal_deadline_ms'),
+    ],
+  },
+  // `pm_unenroll` — a NEW paramless /exchange tag that ALIASES the
+  // `UserPortfolioMargin{enroll:false}` digest: SAME pascal + SAME `bool enroll`
+  // field as `user_portfolio_margin`, but `enroll` is forced `false` and never
+  // written to the wire (the bare `{"type":"pm_unenroll"}` envelope).
+  pm_unenroll: {
+    pascal: 'UserPortfolioMargin',
+    wireType: 'pm_unenroll',
+    fields: [f('enroll', 'const-false-bool', 'enroll')],
+    emitNoParams: true,
+  },
 };
 
 /// The set of snake_case `action.type` tags the typed scheme covers.
@@ -502,7 +599,7 @@ export const TYPED_ACTION_TYPES: readonly string[] = Object.freeze(
   Object.values(TYPED_SPECS).map((s) => s.wireType),
 );
 
-/// Whether the given snake_case action type is one of the 30 typed actions.
+/// Whether the given snake_case action type is one of the typed actions.
 export function isTypedAction(actionType: string): boolean {
   return Object.prototype.hasOwnProperty.call(TYPED_SPECS, actionType);
 }
@@ -543,8 +640,11 @@ function solidityTypeName(ty: FieldSolidityType): string {
   if (ty === 'string-decimal') return 'string';
   if (ty === 'chain-u8') return 'uint8';
   if (ty === 'vault-kind') return 'uint8';
+  if (ty === 'side-u8') return 'uint8';
   if (ty === 'presence-bool') return 'bool';
+  if (ty === 'const-false-bool') return 'bool';
   if (ty === 'opt-uint32') return 'uint32';
+  if (ty === 'opt-uint64') return 'uint64';
   return ty;
 }
 
@@ -697,6 +797,18 @@ function planField(fld: FieldSpec, payload: Record<string, unknown>): FieldPlan 
       const word = encUintWord(BigInt(code), 8, fld.wireKey);
       return mkPlan(fld, jsonStr(name as string), code, async () => word);
     }
+    case 'side-u8': {
+      // POST `params.side` carries the core `Side` STRING name ("Bid"/"Ask");
+      // the signed word + v4 message value are the uint8 code (Bid=0, Ask=1).
+      const code = typeof raw === 'string' ? SIDE_CODES[raw] : undefined;
+      if (code === undefined) {
+        throw new RangeError(
+          `${fld.wireKey} must be one of: ${Object.keys(SIDE_CODES).join(', ')}`,
+        );
+      }
+      const word = encUintWord(BigInt(code), 8, fld.wireKey);
+      return mkPlan(fld, jsonStr(raw as string), code, async () => word);
+    }
     case 'address': {
       const a = raw as string;
       const word = encAddrWord(a, fld.wireKey);
@@ -713,6 +825,13 @@ function planField(fld: FieldSpec, payload: Record<string, unknown>): FieldPlan 
       if (typeof raw !== 'boolean') throw new RangeError(`${fld.wireKey} must be a boolean`);
       const word = encUintWord(raw ? 1n : 0n, 8, fld.wireKey);
       return mkPlan(fld, raw ? 'true' : 'false', raw, async () => word);
+    }
+    case 'const-false-bool': {
+      // Always signs `false`; never written to the POST params (the wire is the
+      // bare paramless tag). Backs the `pm_unenroll` → `UserPortfolioMargin`
+      // `enroll=false` alias.
+      const word = encUintWord(0n, 8, fld.wireKey);
+      return mkPlan(fld, 'false', false, async () => word, true);
     }
     case 'uint8':
     case 'uint16':
@@ -744,6 +863,15 @@ function planField(fld: FieldSpec, payload: Record<string, unknown>): FieldPlan 
         async () => word,
         !present,
       );
+    }
+    case 'opt-uint64': {
+      // The 64-bit value half of a flattened optional. Signs the uint64 value,
+      // or `0` when absent (matching the server's `Option::unwrap_or(0)`). On the
+      // wire the optional key is emitted ONLY when present (omitted otherwise).
+      const present = isPresent(raw);
+      const v = present ? asBigInt(raw, fld.wireKey) : 0n;
+      const word = encUintWord(v, 64, fld.wireKey);
+      return mkPlan(fld, v.toString(), numberFor(v, fld.wireKey), async () => word, !present);
     }
     case 'bytes': {
       // `Uint8Array` POSTed as a JSON byte array (the server's native wire
@@ -858,7 +986,12 @@ export function buildTyped(
   const paramEntries = ownerBound
     ? [`${jsonStr('owner')}:${jsonStr(owner)}`, ...fieldParams]
     : fieldParams;
-  const actionJson = `{${jsonStr('type')}:${jsonStr(spec.wireType)},${jsonStr('params')}:{${paramEntries.join(',')}}}`;
+  // A paramless alias (`pm_unenroll`) emits the bare `{"type":<wireType>}`
+  // envelope when no field contributes a wire param, matching the node.
+  const actionJson =
+    spec.emitNoParams === true && paramEntries.length === 0
+      ? `{${jsonStr('type')}:${jsonStr(spec.wireType)}}`
+      : `{${jsonStr('type')}:${jsonStr(spec.wireType)},${jsonStr('params')}:{${paramEntries.join(',')}}}`;
   return {
     actionType,
     chainId,

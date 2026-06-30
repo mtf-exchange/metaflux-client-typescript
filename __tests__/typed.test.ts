@@ -526,11 +526,17 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(toHex(base)).not.toBe(toHex(otherChain));
   });
 
-  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 44 reachable actions', async () => {
+  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 49 reachable actions', async () => {
     const { isTypedAction, TYPED_ACTION_TYPES } = await import('../src/native/typed.js');
-    expect(TYPED_ACTION_TYPES.length).toBe(44);
+    expect(TYPED_ACTION_TYPES.length).toBe(49);
     expect(isTypedAction('approve_agent')).toBe(true);
     expect(isTypedAction('submit_order')).toBe(false);
+    // The 5 W1 RFQ / FBA / encrypted-alias / pm-alias actions.
+    expect(isTypedAction('rfq_request')).toBe(true);
+    expect(isTypedAction('rfq_accept')).toBe(true);
+    expect(isTypedAction('fba_submit')).toBe(true);
+    expect(isTypedAction('encrypted_order_submit')).toBe(true);
+    expect(isTypedAction('pm_unenroll')).toBe(true);
     // The 3 actions added for the web claim/vault-deposit flows.
     expect(isTypedAction('claim_referral_rewards')).toBe(true);
     expect(isTypedAction('claim_builder_rewards')).toBe(true);
