@@ -3,7 +3,7 @@
 // (vaults, leverage/margin, TWAP, staking, MetaBridge, encrypted, batch). The
 // 5 original builders are byte-pinned separately in `native.test.ts`.
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -190,82 +190,13 @@ describe('real native write-action builders (JSON shape)', () => {
   });
 });
 
-describe('forward-compat write-action builders (RFQ / FBA / cross-chain / encrypted / vault_distribute)', () => {
+describe('forward-compat write-action builders (cross-chain / vault_distribute)', () => {
   it('vault_distribute: pnl as a decimal string, vault_id as a number', async () => {
     const { buildNativeVaultDistributeAction } = await import(
       '../src/native/actions.js'
     );
     expect(buildNativeVaultDistributeAction({ vault_id: 42, pnl: '1000.5' })).toBe(
       '{"type":"vault_distribute","params":{"vault_id":42,"pnl":"1000.5"}}',
-    );
-  });
-
-  it('rfq_request: wrapper key `rfq`, PascalCase side, null optional keys present', async () => {
-    const { buildNativeRfqRequestAction } = await import('../src/native/actions.js');
-    expect(
-      buildNativeRfqRequestAction({
-        market: 7,
-        side: 'Bid',
-        size: 1000n,
-        limit_px: null,
-        expiry_ms: 0,
-        stp_group: null,
-      }),
-    ).toBe(
-      '{"type":"rfq_request","rfq":{"market":7,"side":"Bid","size":1000,"limit_px":null,"expiry_ms":0,"stp_group":null}}',
-    );
-  });
-
-  it('rfq_request: emits present limit_px (i128) + stp_group', async () => {
-    const { buildNativeRfqRequestAction } = await import('../src/native/actions.js');
-    expect(
-      buildNativeRfqRequestAction({
-        market: 1,
-        side: 'Ask',
-        size: 5n,
-        limit_px: -3n,
-        expiry_ms: 1700000000000,
-        stp_group: 9,
-      }),
-    ).toBe(
-      '{"type":"rfq_request","rfq":{"market":1,"side":"Ask","size":5,"limit_px":-3,"expiry_ms":1700000000000,"stp_group":9}}',
-    );
-  });
-
-  it('rfq_request: rejects a snake_case side token', async () => {
-    const { buildNativeRfqRequestAction } = await import('../src/native/actions.js');
-    expect(() =>
-      buildNativeRfqRequestAction({
-        market: 1,
-        // @ts-expect-error — snake_case is not a CoreSide.
-        side: 'bid',
-        size: 1n,
-        limit_px: null,
-        expiry_ms: 0,
-        stp_group: null,
-      }),
-    ).toThrow();
-  });
-
-  it('rfq_accept: wrapper key `accept`', async () => {
-    const { buildNativeRfqAcceptAction } = await import('../src/native/actions.js');
-    expect(
-      buildNativeRfqAcceptAction({ rfq_id: 5, quote_idx: 0, size: 1000n }),
-    ).toBe('{"type":"rfq_accept","accept":{"rfq_id":5,"quote_idx":0,"size":1000}}');
-  });
-
-  it('fba_submit: wrapper key `submit`, `price` (not limit_px), null stp_group present', async () => {
-    const { buildNativeFbaSubmitAction } = await import('../src/native/actions.js');
-    expect(
-      buildNativeFbaSubmitAction({
-        market: 7,
-        side: 'Ask',
-        size: 1000n,
-        price: 5000000000n,
-        stp_group: null,
-      }),
-    ).toBe(
-      '{"type":"fba_submit","submit":{"market":7,"side":"Ask","size":1000,"price":5000000000,"stp_group":null}}',
     );
   });
 
@@ -302,23 +233,6 @@ describe('forward-compat write-action builders (RFQ / FBA / cross-chain / encryp
     ).toThrow();
   });
 
-  it('encrypted_order_submit: wrapper key `encrypted`, 3 fields only', async () => {
-    const { buildNativeEncryptedOrderSubmitAction } = await import(
-      '../src/native/actions.js'
-    );
-    const commitment = '[' + new Array(32).fill(0).join(',') + ']';
-    const out = buildNativeEncryptedOrderSubmitAction({
-      ciphertext: new Uint8Array([1, 2, 255]),
-      commitment: new Uint8Array(32),
-      reveal_deadline_ms: 123,
-    });
-    expect(out).toBe(
-      `{"type":"encrypted_order_submit","encrypted":{"ciphertext":[1,2,255],"commitment":${commitment},"reveal_deadline_ms":123}}`,
-    );
-    // Distinct from submit_encrypted_order: no threshold / target_block keys.
-    expect(out).not.toContain('threshold');
-    expect(out).not.toContain('target_block');
-  });
 });
 
 describe.skipIf(!wasmBuilt)('real native write-action sign → recover', () => {
@@ -351,26 +265,165 @@ describe.skipIf(!wasmBuilt)('real native write-action sign → recover', () => {
     expect(recovered.toLowerCase()).toBe(expected.toLowerCase());
   });
 
-  it('rfq_request (forward-compat) signs over its exact bytes and recovers the signer', async () => {
-    const { buildNativeRfqRequestAction, signNativeAction, recoverNativeSigner } =
-      await import('../src/native/index.js');
-    const privKey = new Uint8Array(32).fill(0x66);
-    const expected = await signerAddress(privKey);
-    const actionJson = buildNativeRfqRequestAction({
-      market: 7,
-      side: 'Bid',
-      size: 1000n,
-      limit_px: null,
-      expiry_ms: 0,
-      stp_group: null,
-    });
-    const signed = await signNativeAction(privKey, actionJson, 3n, KAT_CHAIN_ID);
-    // The signed envelope carries the EXACT builder bytes (raw, not re-parsed).
-    expect(signed.actionJson).toBe(actionJson);
-    const recovered = await recoverNativeSigner(signed, KAT_CHAIN_ID);
-    expect(recovered.toLowerCase()).toBe(expected.toLowerCase());
-  });
 });
+
+// ── W1 microstructure convenience methods route through the typed path ──
+//
+// The legacy `rfqRequest` / `rfqAccept` / `fbaSubmit` / `encryptedOrderSubmit` /
+// `pmUnenroll` methods emitted the pre-W1 OPAQUE sender-authorized shape that
+// the typed-only `/exchange` REJECTS. They now sign the W1 typed structs via
+// `submitTyped`. The contract: each convenience method's signed `/exchange` body
+// is BYTE-IDENTICAL to the generic `submitTyped(<tag>, payload)` path for the
+// same input (so the digest can never diverge), carries `sig_scheme:"typed"`,
+// and never re-emits the old opaque wrapper keys (`rfq`/`accept`/`submit`/
+// `encrypted`). The typed digests themselves are pinned in `typed_w1.test.ts`.
+describe.skipIf(!wasmBuilt)(
+  'W1 microstructure convenience methods == generic typed path',
+  () => {
+    const PRIV = new Uint8Array(32).fill(0x3c);
+    let bodies: string[] = [];
+    let savedFetch: typeof globalThis.fetch;
+
+    beforeEach(() => {
+      bodies = [];
+      savedFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(
+        async (_url: unknown, init: { body?: unknown } = {}) => {
+          bodies.push(String(init.body ?? ''));
+          return { ok: true, status: 200, text: async () => '{}' } as Response;
+        },
+      ) as unknown as typeof globalThis.fetch;
+    });
+
+    afterEach(() => {
+      globalThis.fetch = savedFetch;
+    });
+
+    async function bodyOf(call: () => Promise<unknown>): Promise<string> {
+      bodies = [];
+      await call();
+      expect(bodies.length).toBe(1);
+      const body = bodies[0];
+      if (body === undefined) throw new Error('no request body captured');
+      return body;
+    }
+
+    async function client() {
+      const { Client } = await import('../src/client.js');
+      return new Client({ baseUrl: 'http://localhost:0', privateKey: PRIV });
+    }
+
+    // Each row: convenience invocation + the equivalent generic typed call +
+    // the old opaque wrapper key that must NOT reappear.
+    const CASES: ReadonlyArray<{
+      readonly name: string;
+      readonly tag: string;
+      readonly payload: Record<string, unknown>;
+      readonly conv: (c: Awaited<ReturnType<typeof client>>, n: bigint) => Promise<unknown>;
+      readonly opaqueKey: string;
+    }> = [
+      {
+        name: 'rfqRequest',
+        tag: 'rfq_request',
+        payload: {
+          market: 7,
+          side: 'Bid',
+          size: 1000n,
+          limit_px: 42_000n,
+          expiry_ms: 1_700_000_000_000,
+          stp_group: 3,
+        },
+        conv: (c, n) =>
+          c.rfqRequest(
+            {
+              market: 7,
+              side: 'Bid',
+              size: 1000n,
+              limit_px: 42_000n,
+              expiry_ms: 1_700_000_000_000,
+              stp_group: 3,
+            },
+            { nonce: n },
+          ),
+        opaqueKey: '"rfq":',
+      },
+      {
+        name: 'rfqAccept',
+        tag: 'rfq_accept',
+        payload: { rfq_id: 99, quote_idx: 1, size: 500n },
+        conv: (c, n) => c.rfqAccept({ rfq_id: 99, quote_idx: 1, size: 500n }, { nonce: n }),
+        opaqueKey: '"accept":',
+      },
+      {
+        name: 'fbaSubmit',
+        tag: 'fba_submit',
+        payload: { market: 5, side: 'Ask', size: 250n, price: 30_000n, stp_group: 9 },
+        conv: (c, n) =>
+          c.fbaSubmit(
+            { market: 5, side: 'Ask', size: 250n, price: 30_000n, stp_group: 9 },
+            { nonce: n },
+          ),
+        opaqueKey: '"submit":',
+      },
+      {
+        name: 'encryptedOrderSubmit',
+        tag: 'encrypted_order_submit',
+        payload: {
+          ciphertext: new Uint8Array([0xde, 0xad, 0xbe, 0xef]),
+          commitment: new Uint8Array(32).fill(7),
+          threshold: 2,
+          target_block: 1000,
+          reveal_deadline_ms: 1_700_000_000_000,
+        },
+        conv: (c, n) =>
+          c.encryptedOrderSubmit(
+            {
+              ciphertext: new Uint8Array([0xde, 0xad, 0xbe, 0xef]),
+              commitment: new Uint8Array(32).fill(7),
+              threshold: 2,
+              target_block: 1000,
+              reveal_deadline_ms: 1_700_000_000_000,
+            },
+            { nonce: n },
+          ),
+        opaqueKey: '"encrypted":',
+      },
+    ];
+
+    for (const tc of CASES) {
+      it(`${tc.name} body matches submitTyped(${tc.tag}) byte-for-byte`, async () => {
+        const c = await client();
+        const conv = await bodyOf(() => tc.conv(c, 7n));
+        const generic = await bodyOf(() => c.submitTyped(tc.tag, tc.payload, { nonce: 7n }));
+        expect(conv).toBe(generic);
+        // Typed scheme + canonical tag, never the old opaque wrapper.
+        const parsed = JSON.parse(conv) as {
+          sig_scheme: string;
+          action: { type: string; params?: unknown };
+        };
+        expect(parsed.sig_scheme).toBe('typed');
+        expect(parsed.action.type).toBe(tc.tag);
+        expect(parsed.action.params).toBeTypeOf('object');
+        expect(conv).not.toContain(tc.opaqueKey);
+      });
+    }
+
+    it('pmUnenroll signs the paramless typed alias (== submitTyped(pm_unenroll))', async () => {
+      const c = await client();
+      const conv = await bodyOf(() => c.pmUnenroll({ nonce: 4n }));
+      const generic = await bodyOf(() => c.submitTyped('pm_unenroll', {}, { nonce: 4n }));
+      expect(conv).toBe(generic);
+      const parsed = JSON.parse(conv) as {
+        sig_scheme: string;
+        action: { type: string; params?: unknown };
+      };
+      expect(parsed.sig_scheme).toBe('typed');
+      expect(parsed.action).toEqual({ type: 'pm_unenroll' });
+      // NOT the legacy opaque user_portfolio_margin envelope.
+      expect(conv).not.toContain('user_portfolio_margin');
+    });
+  },
+);
 
 // ── O8: a Market order is take-only — the SDK forces tif="ioc" ──
 // The node lowers a Market kind to a marketable limit; a Market+Gtc/Alo would

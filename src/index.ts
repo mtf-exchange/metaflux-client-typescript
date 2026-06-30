@@ -116,12 +116,10 @@ export {
   buildNativeMbWithdrawAction,
   buildNativeSetMetaliquidityWhitelistAction,
   buildNativeRegisterMetaliquidityOperatorAction,
-  // RFQ / FBA / cross-chain / encrypted (forward-compat) builders.
-  buildNativeRfqRequestAction,
-  buildNativeRfqAcceptAction,
-  buildNativeFbaSubmitAction,
+  // cross-chain (forward-compat) builder. RFQ / FBA / encrypted-order are now
+  // signed via the W1 typed path (`Client.rfqRequest` / `rfqAccept` / `fbaSubmit`
+  // / `encryptedOrderSubmit` → `submitTyped`), not opaque action builders.
   buildNativeCrossChainSendAction,
-  buildNativeEncryptedOrderSubmitAction,
   // Spot CLOB + spot margin (leveraged spot) + Earn (lending pool).
   buildNativeSpotOrderAction,
   buildNativeSpotCancelAction,

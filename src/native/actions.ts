@@ -15,7 +15,6 @@ import {
   validateAddress,
   validateCloid,
   validateDecimalString,
-  validateI128,
   validateMarket,
   validateU8,
   validateU16,
@@ -35,11 +34,8 @@ import type {
   CancelByCloid,
   ClaimRewards,
   ConvertToMultiSigUser,
-  CoreSide,
   CreateVault,
   CrossChainSend,
-  EncryptedOrderSubmit,
-  FbaSubmit,
   LinkStakingUser,
   MbWithdraw,
   Modify,
@@ -58,8 +54,6 @@ import type {
   NativeTrigger,
   PriorityBid,
   RegisterMetaliquidityOperator,
-  RfqAccept,
-  RfqRequest,
   ScheduleCancel,
   SetDisplayName,
   SetMetaliquidityWhitelist,
@@ -874,35 +868,21 @@ export function buildNativeEarnWithdrawAction(
 }
 
 // ============================================================================
-// RFQ / FBA / cross-chain / encrypted (forward-compat).
+// cross-chain (forward-compat).
 //
-// The node recognizes these action tags but currently lowers them to
-// `UnsupportedAction` on the public `/exchange` path (the real handlers run on
-// the EVM core-writer path). The SDK emits the byte-correct wire shape each core
-// param struct expects, so these become live the moment the node bridges them —
-// no SDK change required. Note the per-action wrapper keys differ:
-// `rfq` / `accept` / `submit` / `msg` / `encrypted` (NOT `params`).
+// The node recognizes the `cross_chain_send` tag but currently lowers it to
+// `UnsupportedAction` on the public `/exchange` path (the real handler runs on
+// the EVM core-writer path). The SDK emits the byte-correct wire shape the core
+// param struct expects, so it becomes live the moment the node bridges it.
 //
-// Traps mirrored from the node's plain `#[derive(Serialize)]`:
-//   - `side` is PascalCase (`"Bid"`/`"Ask"`), distinct from the snake_case
-//     `"bid"`/`"ask"` the perp/spot order builders use.
-//   - `size` is a `u128` and `limit_px`/`price` are `i128`, emitted as bare JSON
-//     numbers (the size/px planes can exceed 2^53, so they ride as `bigint`).
-//   - `limit_px` (RFQ) / `stp_group` (RFQ + FBA) carry no serde default on the
-//     node, so the key MUST be present — emit `null` when absent, do NOT omit.
-//   - byte arrays (`recipient`, `ciphertext`, `commitment`) are JSON arrays of
-//     byte-numbers, NOT 0x-hex strings.
+// NOTE: the RFQ / FBA / encrypted-order builders that used to live here emitted
+// the pre-W1 OPAQUE sender-authorized shape (per-action `rfq` / `accept` /
+// `submit` / `encrypted` wrapper keys, u128/i128 numerics) which the typed-only
+// `/exchange` REJECTS. They were migrated to the W1 typed path — `rfq_request`
+// / `rfq_accept` / `fba_submit` / `encrypted_order_submit` are now signed via
+// `../native/typed` (the `Client.rfqRequest` / `rfqAccept` / `fbaSubmit` /
+// `encryptedOrderSubmit` convenience methods route through `submitTyped`).
 // ============================================================================
-
-/// Render a PascalCase core side token (`"Bid"`/`"Ask"`), failing loud on any
-/// other value (a snake_case `"bid"`/`"ask"` here would be silently rejected by
-/// the core handler).
-function coreSideToken(side: CoreSide, field: string): string {
-  if (side !== 'Bid' && side !== 'Ask') {
-    throw new RangeError(`${field} must be "Bid" or "Ask" (PascalCase CoreSide)`);
-  }
-  return jsonStr(side);
-}
 
 /// Serialize a byte buffer as a JSON array of unsigned byte-numbers, optionally
 /// pinning an exact length.
@@ -916,50 +896,6 @@ function byteArrayJson(bytes: Uint8Array, field: string, len?: number): string {
   return `[${Array.from(bytes).join(',')}]`;
 }
 
-/// `rfq_request` — taker opens an RFQ session. Wrapper key is **`rfq`**. `side`
-/// is PascalCase; `limit_px` (`i128`) and `stp_group` (`u64`) keys are ALWAYS
-/// present (`null` when absent — the node has no serde default).
-export function buildNativeRfqRequestAction(params: RfqRequest): string {
-  validateMarket(params.market);
-  validateU128(params.size, 'size');
-  validateU64(params.expiry_ms, 'expiry_ms');
-  if (params.limit_px !== null) {
-    validateI128(params.limit_px, 'limit_px');
-  }
-  if (params.stp_group !== null) {
-    validateU64(params.stp_group, 'stp_group');
-  }
-  const limitPx = params.limit_px === null ? 'null' : params.limit_px.toString();
-  const stpGroup = params.stp_group === null ? 'null' : `${params.stp_group}`;
-  const rfqJson = `{${jsonStr('market')}:${params.market},${jsonStr('side')}:${coreSideToken(params.side, 'side')},${jsonStr('size')}:${params.size},${jsonStr('limit_px')}:${limitPx},${jsonStr('expiry_ms')}:${params.expiry_ms},${jsonStr('stp_group')}:${stpGroup}}`;
-  return `{${jsonStr('type')}:${jsonStr('rfq_request')},${jsonStr('rfq')}:${rfqJson}}`;
-}
-
-/// `rfq_accept` — taker crosses against a specific resting quote. Wrapper key is
-/// **`accept`** (NOT `rfq`).
-export function buildNativeRfqAcceptAction(params: RfqAccept): string {
-  validateU64(params.rfq_id, 'rfq_id');
-  validateU32(params.quote_idx, 'quote_idx');
-  validateU128(params.size, 'size');
-  const acceptJson = `{${jsonStr('rfq_id')}:${params.rfq_id},${jsonStr('quote_idx')}:${params.quote_idx},${jsonStr('size')}:${params.size}}`;
-  return `{${jsonStr('type')}:${jsonStr('rfq_accept')},${jsonStr('accept')}:${acceptJson}}`;
-}
-
-/// `fba_submit` — submit into a market's frequent-batch-auction pool. Wrapper
-/// key is **`submit`**. The price field is **`price`** (NOT `limit_px`); `side`
-/// is PascalCase; `stp_group` key is ALWAYS present (`null` when absent).
-export function buildNativeFbaSubmitAction(params: FbaSubmit): string {
-  validateMarket(params.market);
-  validateU128(params.size, 'size');
-  validateI128(params.price, 'price');
-  if (params.stp_group !== null) {
-    validateU64(params.stp_group, 'stp_group');
-  }
-  const stpGroup = params.stp_group === null ? 'null' : `${params.stp_group}`;
-  const submitJson = `{${jsonStr('market')}:${params.market},${jsonStr('side')}:${coreSideToken(params.side, 'side')},${jsonStr('size')}:${params.size},${jsonStr('price')}:${params.price},${jsonStr('stp_group')}:${stpGroup}}`;
-  return `{${jsonStr('type')}:${jsonStr('fba_submit')},${jsonStr('submit')}:${submitJson}}`;
-}
-
 /// `cross_chain_send` — initiate a chain-agnostic cross-chain transfer. Wrapper
 /// key is **`msg`**. `recipient` is a 32-byte array; `amount` (`u128`) is a bare
 /// JSON number (NOT hex).
@@ -971,17 +907,4 @@ export function buildNativeCrossChainSendAction(params: CrossChainSend): string 
   validateU64(params.nonce, 'nonce');
   const msgJson = `{${jsonStr('dst_chain_id')}:${params.dst_chain_id},${jsonStr('recipient')}:${recipient},${jsonStr('token')}:${params.token},${jsonStr('amount')}:${params.amount},${jsonStr('nonce')}:${params.nonce}}`;
   return `{${jsonStr('type')}:${jsonStr('cross_chain_send')},${jsonStr('msg')}:${msgJson}}`;
-}
-
-/// `encrypted_order_submit` — submit a threshold-encrypted order. Wrapper key is
-/// **`encrypted`**. Only 3 fields — DISTINCT from `submit_encrypted_order`
-/// (5 fields, key `params`). `ciphertext`/`commitment` are byte arrays.
-export function buildNativeEncryptedOrderSubmitAction(
-  params: EncryptedOrderSubmit,
-): string {
-  const ct = byteArrayJson(params.ciphertext, 'ciphertext');
-  const cm = byteArrayJson(params.commitment, 'commitment', 32);
-  validateU64(params.reveal_deadline_ms, 'reveal_deadline_ms');
-  const encJson = `{${jsonStr('ciphertext')}:${ct},${jsonStr('commitment')}:${cm},${jsonStr('reveal_deadline_ms')}:${params.reveal_deadline_ms}}`;
-  return `{${jsonStr('type')}:${jsonStr('encrypted_order_submit')},${jsonStr('encrypted')}:${encJson}}`;
 }

@@ -33,16 +33,12 @@ import {
   buildNativeCrossChainSendAction,
   buildNativeEarnDepositAction,
   buildNativeEarnWithdrawAction,
-  buildNativeEncryptedOrderSubmitAction,
-  buildNativeFbaSubmitAction,
   buildNativeLinkStakingUserAction,
   buildNativeMbWithdrawAction,
   buildNativeModifyAction,
   buildNativeOrderAction,
   buildNativePriorityBidAction,
   buildNativeRegisterMetaliquidityOperatorAction,
-  buildNativeRfqAcceptAction,
-  buildNativeRfqRequestAction,
   buildNativeScheduleCancelAction,
   buildNativeSetDisplayNameAction,
   buildNativeSetMetaliquidityWhitelistAction,
@@ -828,13 +824,14 @@ export class Client {
 
   /// Unenroll the signing account from portfolio margin via `POST /exchange`.
   ///
-  /// Convenience wrapper over `userPortfolioMargin({ enroll: false })`. The
-  /// node's `pm_unenroll` action tag is an unmapped stub, so this deliberately
-  /// emits the bridged `user_portfolio_margin` action (NOT a `pm_unenroll` tag).
+  /// Signs the W1 `pm_unenroll` typed alias — a paramless `{"type":"pm_unenroll"}`
+  /// envelope whose EIP-712 digest is exactly the `UserPortfolioMargin{enroll:
+  /// false}` struct (same primary type, `enroll` forced `false`). Routes through
+  /// the typed `/exchange` path, NOT the legacy opaque `user_portfolio_margin`.
   async pmUnenroll(
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.userPortfolioMargin({ enroll: false }, opts);
+    return this.submitTyped('pm_unenroll', {}, opts);
   }
 
   // ── account & agent settings ───────────────────
@@ -966,6 +963,23 @@ export class Client {
     );
   }
 
+  /// Submit a threshold-encrypted order via the W1 `encrypted_order_submit`
+  /// typed alias (`POST /exchange`). Carries the SAME 5-field payload as
+  /// `submitEncryptedOrder` and signs the SAME `SubmitEncryptedOrder` EIP-712
+  /// digest (only the wire `type` tag differs). `ciphertext` signs as EIP-712
+  /// `bytes` (`keccak256(raw)`), `commitment` as a `bytes32`; both POST as JSON
+  /// byte arrays.
+  async encryptedOrderSubmit(
+    params: EncryptedOrderSubmit,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'encrypted_order_submit',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
   // ── vaults ───────────────────────────────────
 
   /// Create a new vault via `POST /exchange`. The signing wallet becomes the
@@ -1051,65 +1065,64 @@ export class Client {
     );
   }
 
-  // ── RFQ / FBA / cross-chain / encrypted (forward-compat) ──────────────────
+  // ── RFQ / FBA microstructure (W1 typed path) ──────────────────────────────
   //
-  // The node recognizes these action tags but currently lowers them to
-  // `UnsupportedAction` on the public `/exchange` path (the real handlers run
-  // on the EVM core-writer path). The SDK emits the byte-correct wire shape each
-  // core param struct expects, so these become live the moment the node bridges
-  // them — no SDK change required. All SENDER-AUTHORIZED (the recovered signer
-  // is the taker / submitter).
+  // These sign the node's frozen `RfqRequest` / `RfqAccept` / `FbaSubmit`
+  // EIP-712 typed structs and POST the canonical `{"type":...,"params":{...}}`
+  // envelope the typed-only `/exchange` admits — routed through `submitTyped`,
+  // the SAME path as the generic typed actions (the convenience signature only
+  // pins the action tag + param type). All SENDER-AUTHORIZED (the recovered
+  // signer is the taker / submitter; RFQ / FBA carry no `owner`). Numeric fields
+  // are RAW `u64` wire values; `side` POSTs the core PascalCase name and signs
+  // the uint8 code; `limit_px` / `stp_group` are optional (omit when absent).
 
-  /// Open an RFQ session as a taker (`rfq_request`) via `POST /exchange`.
-  /// Wrapper key is `rfq`; `side` is PascalCase; the `limit_px` / `stp_group`
-  /// keys are always present (`null` when absent).
+  /// Open an RFQ session as a taker (`rfq_request`, typed scheme).
   async rfqRequest(
     params: RfqRequest,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeRfqRequestAction(params), opts);
+    return this.submitTyped(
+      'rfq_request',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
   }
 
-  /// Cross against a specific resting RFQ quote (`rfq_accept`) via
-  /// `POST /exchange`. Wrapper key is `accept`.
+  /// Cross against a specific resting RFQ quote (`rfq_accept`, typed scheme).
   async rfqAccept(
     params: RfqAccept,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeRfqAcceptAction(params), opts);
+    return this.submitTyped(
+      'rfq_accept',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
   }
 
-  /// Submit an order into a market's frequent-batch-auction pool (`fba_submit`)
-  /// via `POST /exchange`. Wrapper key is `submit`; the price field is `price`
-  /// (NOT `limit_px`); `side` is PascalCase; `stp_group` key is always present.
+  /// Submit an order into a market's frequent-batch-auction pool (`fba_submit`,
+  /// typed scheme). The price field is `price` (NOT `limit_px`); `side` is the
+  /// core PascalCase name; `stp_group` is optional (omit when absent).
   async fbaSubmit(
     params: FbaSubmit,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeFbaSubmitAction(params), opts);
+    return this.submitTyped(
+      'fba_submit',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
   }
 
   /// Initiate a chain-agnostic cross-chain transfer (`cross_chain_send`) via
   /// `POST /exchange`. Wrapper key is `msg`; `recipient` is a 32-byte array and
-  /// `amount` is a bare number (NOT hex).
+  /// `amount` is a bare number (NOT hex). Forward-compat: the node lowers this
+  /// tag to `UnsupportedAction` until it bridges the handler.
   async crossChainSend(
     params: CrossChainSend,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
     return this.postSenderAuthorized(buildNativeCrossChainSendAction(params), opts);
-  }
-
-  /// Submit a threshold-encrypted order via the `encrypted_order_submit` tag
-  /// (`POST /exchange`). Wrapper key is `encrypted`; only 3 fields — DISTINCT
-  /// from `submitEncryptedOrder` (5 fields, key `params`, a different handler).
-  async encryptedOrderSubmit(
-    params: EncryptedOrderSubmit,
-    opts: { nonce?: bigint; chainId?: number } = {},
-  ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(
-      buildNativeEncryptedOrderSubmitAction(params),
-      opts,
-    );
   }
 
   /// Sign a pre-built sender-authorized action JSON and POST it to `/exchange`.
