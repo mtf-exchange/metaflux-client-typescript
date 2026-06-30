@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { NativeOrder } from '../src/types/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkgDir = resolve(__dirname, '..', 'pkg');
@@ -369,4 +370,121 @@ describe.skipIf(!wasmBuilt)('real native write-action sign → recover', () => {
     const recovered = await recoverNativeSigner(signed, KAT_CHAIN_ID);
     expect(recovered.toLowerCase()).toBe(expected.toLowerCase());
   });
+});
+
+// ── O8: a Market order is take-only — the SDK forces tif="ioc" ──
+// The node lowers a Market kind to a marketable limit; a Market+Gtc/Alo would
+// REST the unfilled remainder on the book at the caller's price (the footgun).
+// The build boundary coerces Market -> Ioc so the SIGNED bytes can never rest.
+describe('O8: Market orders are coerced to IOC', () => {
+  const baseMarket = {
+    owner: ADDR,
+    market: 1,
+    side: 'bid' as const,
+    kind: 'market' as const,
+    size: 1000,
+    limit_px: 0,
+    stp_mode: 'cancel_oldest' as const,
+    reduce_only: false,
+  };
+
+  function tifInActionJson(json: string): string {
+    const m = /"tif":"([^"]+)"/.exec(json);
+    if (m === null) throw new Error('no tif in action JSON');
+    return m[1];
+  }
+
+  it('submit_order: Market + Gtc -> tif:"ioc" in the action JSON', async () => {
+    const { buildNativeOrderAction } = await import('../src/native/actions.js');
+    const json = buildNativeOrderAction({ ...baseMarket, tif: 'gtc' });
+    expect(tifInActionJson(json)).toBe('ioc');
+    expect(json).toContain('"kind":"market"');
+  });
+
+  it('submit_order: Market + Alo -> tif:"ioc"', async () => {
+    const { buildNativeOrderAction } = await import('../src/native/actions.js');
+    expect(
+      tifInActionJson(buildNativeOrderAction({ ...baseMarket, tif: 'alo' })),
+    ).toBe('ioc');
+  });
+
+  it('submit_order: Market + Ioc stays "ioc"', async () => {
+    const { buildNativeOrderAction } = await import('../src/native/actions.js');
+    expect(
+      tifInActionJson(buildNativeOrderAction({ ...baseMarket, tif: 'ioc' })),
+    ).toBe('ioc');
+  });
+
+  it('submit_order: Limit tif is UNTOUCHED', async () => {
+    const { buildNativeOrderAction } = await import('../src/native/actions.js');
+    for (const tif of ['gtc', 'ioc', 'alo'] as const) {
+      const json = buildNativeOrderAction({
+        ...baseMarket,
+        kind: 'limit',
+        limit_px: 5_000_000_000,
+        tif,
+      });
+      expect(tifInActionJson(json)).toBe(tif);
+    }
+  });
+
+  it('batch_order: each Market leg -> ioc, Limit leg untouched', async () => {
+    const { buildNativeBatchOrderAction } = await import('../src/native/actions.js');
+    const json = buildNativeBatchOrderAction({
+      orders: [
+        { ...baseMarket, tif: 'gtc' },
+        { ...baseMarket, kind: 'limit', limit_px: 5_000_000_000, tif: 'gtc' },
+        { ...baseMarket, tif: 'alo' },
+      ],
+    });
+    const tifs = [...json.matchAll(/"tif":"([^"]+)"/g)].map((m) => m[1]);
+    expect(tifs).toEqual(['ioc', 'gtc', 'ioc']);
+  });
+
+  it('coerceMarketTif returns a copy and never mutates its input', async () => {
+    const { coerceMarketTif } = await import('../src/native/digest.js');
+    const original: NativeOrder = { ...baseMarket, tif: 'gtc' };
+    const coerced = coerceMarketTif(original);
+    expect(original.tif).toBe('gtc'); // input untouched
+    expect(coerced.tif).toBe('ioc'); // coerced copy
+    expect(coerceMarketTif({ ...baseMarket, kind: 'limit', tif: 'gtc' }).tif).toBe(
+      'gtc',
+    ); // limit untouched
+  });
+
+  // The coercion MUST happen BEFORE the EIP-712 digest, so the SIGNED bytes
+  // carry "ioc" (the node verifies the signed tif).
+  it.skipIf(!wasmBuilt)(
+    'typed digest: a Market order signs as IOC regardless of the requested tif',
+    async () => {
+      const { buildNativeOrderAction } = await import('../src/native/actions.js');
+      const { buildTypedOrder, typedOrderDigest } = await import(
+        '../src/native/typed_orders.js'
+      );
+      const nonce = 7n;
+
+      const digestFor = async (order: NativeOrder): Promise<string> => {
+        const built = await buildTypedOrder(
+          'submit_order',
+          { order },
+          buildNativeOrderAction(order),
+          nonce,
+          KAT_CHAIN_ID,
+        );
+        return toHex(await typedOrderDigest(built));
+      };
+
+      // Coerced Market+Gtc signs identically to an explicit Market+Ioc.
+      expect(await digestFor({ ...baseMarket, tif: 'gtc' })).toBe(
+        await digestFor({ ...baseMarket, tif: 'ioc' }),
+      );
+
+      // tif is genuinely part of the signed bytes: a Limit's digest moves with
+      // it, so coercing Market -> Ioc really changes what gets signed.
+      const limitBase = { ...baseMarket, kind: 'limit' as const, limit_px: 5_000_000_000 };
+      expect(await digestFor({ ...limitBase, tif: 'gtc' })).not.toBe(
+        await digestFor({ ...limitBase, tif: 'ioc' }),
+      );
+    },
+  );
 });
