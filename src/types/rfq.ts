@@ -1,10 +1,10 @@
 // MTF-native RFQ (Request-for-Quote) action payload types.
 //
-// Forward-compat: the node recognizes the `rfq_request` / `rfq_accept` action
-// tags but currently lowers them to `UnsupportedAction` on the public
-// `/exchange` path (the real handlers run on the EVM core-writer path). The SDK
-// emits the byte-correct wire shape each core param struct expects, so these
-// go live the moment the node bridges them — no SDK change required.
+// These ride the W1 typed (`sig_scheme:"typed"`) path: the SDK signs the
+// node's frozen `RfqRequest` / `RfqAccept` EIP-712 structs and POSTs the
+// canonical `{"type":...,"params":{...}}` envelope the typed-only `/exchange`
+// admits. The typed encoding is the single source of truth (`../native/typed`);
+// these interfaces only describe the snake_case payload the typed specs read.
 
 /// Order side as the **core** RFQ / FBA action handlers deserialize it:
 /// PascalCase `"Bid"` / `"Ask"`.
@@ -12,44 +12,40 @@
 /// Deliberately distinct from the snake_case `NativeSide` (`"bid"`/`"ask"`)
 /// used by the perp/spot order builders: the node's `core_state::Side` enum
 /// carries no `#[serde(rename_all)]`, so the `rfq_request` / `fba_submit`
-/// payloads expect PascalCase tokens. Reusing the snake_case side would
-/// silently emit `"bid"`/`"ask"` that the core handlers reject.
+/// payloads expect PascalCase tokens. The typed `side-u8` field POSTs this
+/// PascalCase NAME and signs the `uint8` code (Bid=0, Ask=1).
 export type CoreSide = 'Bid' | 'Ask';
 
 /// `rfq_request` — a taker opens an RFQ session asking MMs to quote. Mirrors the
-/// node's `core_state` `RfqRequestParams`. The action envelope wraps this under
-/// the key **`rfq`** (not `params`).
+/// node's frozen `RfqRequest` typed struct.
 ///
-/// `limit_px` and `stp_group` carry NO serde default on the node, so the keys
-/// must always be present — an absent value serializes as JSON `null` (the SDK
-/// does NOT skip them).
+/// All numeric fields are RAW `u64` wire values (fixed-point lots / price), NOT
+/// decimal-scaled — pass a `number` or `bigint`. `limit_px` and `stp_group` are
+/// `Option<u64>`: the typed digest flattens each to a presence bool + a value
+/// word, and the POST `params` carries the key ONLY when present (omit, or pass
+/// `null`, to leave it absent).
 export interface RfqRequest {
   /// Market to request a quote on (`u32`).
   market: number;
-  /// Taker side — serializes PascalCase (`"Bid"`/`"Ask"`).
+  /// Taker side — POSTs PascalCase (`"Bid"`/`"Ask"`), signs the uint8 code.
   side: CoreSide;
-  /// Requested size (`u128`, `> 0`). `bigint` — emitted as a bare JSON number.
-  size: bigint;
-  /// Optional worst-acceptable price (`i128`). The key is ALWAYS present:
-  /// `null` when absent (do NOT omit). `bigint` — emitted as a bare number.
-  limit_px: bigint | null;
+  /// Requested size (`u64`, `> 0`).
+  size: number | bigint;
+  /// Optional worst-acceptable price (`u64`). Omit or pass `null` when absent.
+  limit_px?: number | bigint | null;
   /// Server-clock expiry (ms, `u64`). `0` lets the node default to `ts_ms + 5000`.
-  expiry_ms: number;
-  /// Optional STP group id (`u64`). The key is ALWAYS present: `null` when
-  /// absent (do NOT omit).
-  stp_group: number | null;
+  expiry_ms: number | bigint;
+  /// Optional STP group id (`u64`). Omit or pass `null` when absent.
+  stp_group?: number | bigint | null;
 }
 
 /// `rfq_accept` — a taker crosses against a specific resting quote. Mirrors the
-/// node's `RfqAcceptParams`. The action envelope wraps this under the key
-/// **`accept`** — note the family inconsistency (`rfq_request` uses `rfq`,
-/// `rfq_accept` uses `accept`).
+/// node's frozen `RfqAccept` typed struct.
 export interface RfqAccept {
   /// Parent RFQ session id (`u64`).
-  rfq_id: number;
+  rfq_id: number | bigint;
   /// Index of the accepted quote in the session's quote vector (`u32`).
   quote_idx: number;
-  /// Accepted size (`u128`, `<= min(request.size, quote.max_size)`). `bigint` —
-  /// emitted as a bare JSON number.
-  size: bigint;
+  /// Accepted size (`u64`, `<= min(request.size, quote.max_size)`).
+  size: number | bigint;
 }

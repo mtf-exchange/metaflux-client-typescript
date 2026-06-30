@@ -1,32 +1,30 @@
 // MTF-native FBA (Frequent Batch Auction) action payload type.
 //
-// Forward-compat: the node recognizes the `fba_submit` action tag but currently
-// lowers it to `UnsupportedAction` on the public `/exchange` path. The SDK emits
-// the byte-correct shape the core `FbaSubmitParams` decoder expects, so it goes
-// live the moment the node bridges the handler — no SDK change required.
+// Rides the W1 typed (`sig_scheme:"typed"`) path: the SDK signs the node's
+// frozen `FbaSubmit` EIP-712 struct and POSTs the canonical
+// `{"type":"fba_submit","params":{...}}` envelope the typed-only `/exchange`
+// admits. The typed encoding (`../native/typed`) is the single source of truth.
 
 import type { CoreSide } from './rfq.js';
 
 /// `fba_submit` — submit an order into a market's frequent-batch-auction pool.
-/// Mirrors the node's `core_state` `FbaSubmitParams`. The action envelope wraps
-/// this under the key **`submit`**.
+/// Mirrors the node's frozen `FbaSubmit` typed struct.
 ///
-/// Traps mirrored from the node: `side` is PascalCase (`CoreSide`), the price
-/// field is named **`price`** (NOT `limit_px` as in spot/perp orders), and
-/// `stp_group` carries no serde default so the key must be present (`null` when
-/// absent).
+/// Traps mirrored from the node: `side` is PascalCase (`CoreSide`); the price
+/// field is named **`price`** (NOT `limit_px` as in spot/perp orders). All
+/// numeric fields are RAW `u64` wire values, NOT decimal-scaled. `stp_group` is
+/// `Option<u64>`: the typed digest flattens it to a presence bool + value, and
+/// the POST `params` carries the key ONLY when present (omit, or pass `null`).
 export interface FbaSubmit {
   /// Target market (`u32`).
   market: number;
-  /// Side — serializes PascalCase (`"Bid"`/`"Ask"`).
+  /// Side — POSTs PascalCase (`"Bid"`/`"Ask"`), signs the uint8 code.
   side: CoreSide;
-  /// Submitted size (`u128`, `>= pool.min_lot`). `bigint` — emitted as a bare
-  /// JSON number.
-  size: bigint;
-  /// Limit / worst-acceptable price (`i128`, `> 0`). Field is **`price`** per
-  /// the core struct — NOT `limit_px`. `bigint` — emitted as a bare number.
-  price: bigint;
-  /// Optional STP group (`u64`). The key is ALWAYS present: `null` when absent
-  /// (do NOT omit).
-  stp_group: number | null;
+  /// Submitted size (`u64`, `>= pool.min_lot`).
+  size: number | bigint;
+  /// Limit / worst-acceptable price (`u64`, `> 0`). Field is **`price`** per the
+  /// core struct — NOT `limit_px`.
+  price: number | bigint;
+  /// Optional STP group (`u64`). Omit or pass `null` when absent.
+  stp_group?: number | bigint | null;
 }
