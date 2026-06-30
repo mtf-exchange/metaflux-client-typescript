@@ -33,6 +33,7 @@
 
 import {
   be32,
+  coerceMarketTif,
   domainSeparator,
   jsonStr,
   toHex,
@@ -279,7 +280,12 @@ function checkEnum(set: ReadonlySet<string>, v: string, field: string): string {
 /// Flatten one wire perp order into its 15 signed struct-hash words. The `owner`
 /// field on the wire order is NOT part of the typed digest (the server's typed
 /// map omits it); only the named order fields are bound.
-async function orderWords(o: NativeOrder): Promise<Uint8Array[]> {
+async function orderWords(oIn: NativeOrder): Promise<Uint8Array[]> {
+  // A Market order is take-only: coerce its tif to "ioc" BEFORE building the
+  // EIP-712 digest words so the SIGNED bytes carry "ioc" (the node verifies the
+  // signed tif). Mirrors the same coercion in the action-JSON builders, so the
+  // wire JSON and the digest stay consistent. See `coerceMarketTif`.
+  const o = coerceMarketTif(oIn);
   // Builder carve: absent -> fee 0 + zero address.
   let builderFee = 0;
   let builderUser = ZERO_ADDRESS;

@@ -25,7 +25,7 @@ import {
   recoverPubkey,
   signSecp256k1,
 } from '../wallet/wasm.js';
-import type { NativeSignedAction } from '../types/index.js';
+import type { NativeOrder, NativeSignedAction } from '../types/index.js';
 
 const MTF_DOMAIN_TYPE =
   'EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)';
@@ -148,6 +148,24 @@ export function toHex(bytes: Uint8Array): string {
 /// raw control bytes into the signed payload.
 export function jsonStr(s: string): string {
   return JSON.stringify(s);
+}
+
+/// Force `tif` to `"ioc"` when `kind === "market"`, returning a coerced COPY
+/// (the input is never mutated); any other order is returned unchanged.
+///
+/// A market order is take-only by definition. The node LOWERS a `market` kind
+/// to a marketable limit before matching; were the order's `tif` `gtc` (or
+/// `alo`), the unfilled remainder would REST on the book at the caller's price —
+/// a silent resting limit where the caller asked for an immediate take (the
+/// footgun). Apply this at the BUILD boundary, BEFORE the canonical action JSON
+/// AND the EIP-712 digest, so the SIGNED bytes carry `ioc` (the node verifies
+/// the signed `tif`); a market order can then never rest. Limit orders keep
+/// whatever `tif` the caller chose.
+export function coerceMarketTif(order: NativeOrder): NativeOrder {
+  if (order.kind === 'market' && order.tif !== 'ioc') {
+    return { ...order, tif: 'ioc' };
+  }
+  return order;
 }
 
 /// Sign a pre-built action JSON string with the given private key.

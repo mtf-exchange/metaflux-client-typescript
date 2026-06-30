@@ -10,6 +10,7 @@
 // spot_order / spot_cancel) are byte-pinned by `__tests__/native.test.ts`.
 
 import {
+  coerceMarketTif,
   jsonStr,
   validateAddress,
   validateCloid,
@@ -85,7 +86,10 @@ import type {
 /// `builder` are omitted entirely when absent (matching the server's
 /// `#[serde(default)]` + KAT vector, where neither appears). The returned
 /// string is BOTH what gets signed and what gets sent — do not re-serialize.
-export function buildNativeOrderAction(order: NativeOrder): string {
+export function buildNativeOrderAction(orderIn: NativeOrder): string {
+  // A Market order is take-only: coerce its tif to "ioc" before serializing so
+  // the signed bytes can never rest on the book. See `coerceMarketTif`.
+  const order = coerceMarketTif(orderIn);
   validateAddress(order.owner, 'owner');
   validateMarket(order.market);
   validateU64(order.size, 'size');
@@ -246,7 +250,10 @@ export function buildNativeSpotCancelAction(cancel: NativeSpotCancel): string {
 
 /// Build the inner `{...}` body of one perp order (the value under `order` in
 /// submit_order, and each element of a batch_order). Mirrors `NativeOrder`.
-function buildOrderBody(order: NativeOrder): string {
+function buildOrderBody(orderIn: NativeOrder): string {
+  // Coerce a Market leg's tif to "ioc" before serializing (see
+  // `coerceMarketTif`) so a batch Market order can never rest.
+  const order = coerceMarketTif(orderIn);
   validateAddress(order.owner, 'owner');
   validateMarket(order.market);
   validateU64(order.size, 'size');
