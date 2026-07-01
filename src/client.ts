@@ -731,8 +731,10 @@ export class Client {
   }
 
   /// Cancel all of the sender's open orders (optionally one asset) via
-  /// `POST /exchange`. NOTE: `cancel_all_orders` has no typed form (the server
-  /// keeps it on the opaque scheme), so this always signs under the legacy scheme.
+  /// `POST /exchange`, signed under the legacy opaque scheme. The server DOES
+  /// have typed `cancel_all_orders` forms (both owner-less and owner-carrying);
+  /// for the typed path — including the agent-resolved `owner` (cancel another
+  /// account's orders as its approved agent) — use `cancelAllOrdersTyped`.
   async cancelAllOrders(
     params: CancelAllOrders = {},
     opts: { nonce?: bigint; chainId?: number } = {},
@@ -1320,10 +1322,17 @@ export class Client {
   /// Sign one of the typed actions with this client's private key (the local
   /// signing path — agents / tests) and POST it under the typed `/exchange`.
   /// `payload` carries only the action-specific snake_case fields.
+  ///
+  /// `opts.owner` binds an agent-resolved `owner` into the digest + POST `params`
+  /// for an owner-supporting action (today only `cancel_all_orders`): the client's
+  /// key signs the `*_WITH_OWNER` form (`address owner` at position 2) and the node
+  /// acts on `owner`'s account — the approved-agent path where the signer is NOT
+  /// the owner, so no signer==owner cross-check applies. Ignored (owner-less,
+  /// byte-identical) for actions with no owner form.
   async submitTyped(
     actionType: string,
     payload: Record<string, unknown>,
-    opts: { nonce?: bigint; chainId?: number } = {},
+    opts: { nonce?: bigint; chainId?: number; owner?: string } = {},
   ): Promise<NativeExchangeAck> {
     if (this.privateKey === undefined) {
       throw new Error(
@@ -1337,6 +1346,7 @@ export class Client {
       payload,
       nonce,
       opts.chainId,
+      opts.owner,
     );
     return this.postTyped(signed);
   }
@@ -1686,9 +1696,15 @@ export class Client {
   /// (`cancel_all_orders`, typed scheme). Omit `asset` to cancel across all
   /// assets (it flattens to a presence flag + value in the signed digest; the
   /// POST omits it when absent).
+  ///
+  /// Pass `opts.owner` to act as an approved AGENT of another account: the
+  /// client's key signs the owner-carrying digest (`address owner` at position 2,
+  /// selecting the node's `CANCEL_ALL_ORDERS_WITH_OWNER` form) and the POST
+  /// `params` carries `owner` (0x-hex), so the node cancels `owner`'s orders. Omit
+  /// it to cancel the signer's own orders (owner-less digest, byte-identical).
   async cancelAllOrdersTyped(
     params: CancelAllOrders = {},
-    opts: { nonce?: bigint; chainId?: number } = {},
+    opts: { nonce?: bigint; chainId?: number; owner?: string } = {},
   ): Promise<NativeExchangeAck> {
     return this.submitTyped(
       'cancel_all_orders',
