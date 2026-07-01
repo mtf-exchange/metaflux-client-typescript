@@ -850,5 +850,37 @@ describe.skipIf(!wasmBuilt)(
       );
       expect(recovered.toLowerCase()).toBe(signer.toLowerCase());
     });
+
+    it('the POST /exchange body carries the owner (0x-hex) in params, no sig_scheme', async () => {
+      const { signTypedAction, typedRequestBody, encodeType } = await import(
+        '../src/native/typed.js'
+      );
+      // the owner-form encodeType the node's CANCEL_ALL_ORDERS_WITH_OWNER_TYPE expects.
+      expect(encodeType('cancel_all_orders', true)).toBe(OWNER_TYPE);
+      const privKey = new Uint8Array(32).fill(0x5a);
+      const signed = await signTypedAction(
+        privKey,
+        'cancel_all_orders',
+        { asset: 4 },
+        62n,
+        CHAIN_ID,
+        OWNER_BIND,
+      );
+      // The exact bytes `Client.cancelAllOrdersTyped({owner}) -> submitTyped ->
+      // postTyped` POSTs: `{action, nonce, signature}` (typed-only — NO sig_scheme).
+      const body = typedRequestBody(signed);
+      expect(body.includes(`"owner":"${OWNER_BIND}"`)).toBe(true);
+      expect(body.includes('"type":"cancel_all_orders"')).toBe(true);
+      expect(body.includes('sig_scheme')).toBe(false);
+      // Owner-less body omits the owner key entirely (byte-identical to today).
+      const plain = await signTypedAction(
+        privKey,
+        'cancel_all_orders',
+        { asset: 4 },
+        62n,
+        CHAIN_ID,
+      );
+      expect(typedRequestBody(plain).includes('"owner"')).toBe(false);
+    });
   },
 );
