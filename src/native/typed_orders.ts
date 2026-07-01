@@ -643,7 +643,7 @@ export async function typedOrderDigest(built: BuiltTypedOrder): Promise<Uint8Arr
 /// Sign a typed trading action with a 32-byte private key (the local / agent /
 /// test path). Builds the same 0x1901 digest a wallet's `eth_signTypedData_v4`
 /// would, and returns the `{ actionJson, nonce, signature }` ready for
-/// `POST /exchange` with `sig_scheme:"typed"`.
+/// `POST /exchange` with the typed `/exchange`.
 export async function signTypedOrder(
   privateKey: Uint8Array,
   actionType: string,
@@ -686,15 +686,14 @@ export async function recoverTypedOrderSigner(
   return `0x${toHex(addr)}`;
 }
 
-/// Assemble the `POST /exchange` request body STRING for the typed scheme:
-/// `{"action":<actionJson>,"nonce":<u64>,"signature":"0x..","sig_scheme":"typed"}`.
+/// Assemble the `POST /exchange` request body STRING:
+/// `{"action":<actionJson>,"nonce":<u64>,"signature":"0x.."}`.
 /// Identical envelope to `./typed.ts::typedRequestBody`; restated here so the
 /// trading-set path is self-contained.
 export function typedOrderRequestBody(signed: TypedSignedAction): string {
   return (
     `{${jsonStr('action')}:${signed.actionJson},` +
     `${jsonStr('nonce')}:${signed.nonce},` +
-    `${jsonStr('signature')}:${jsonStr(signed.signature)},` +
-    `${jsonStr('sig_scheme')}:${jsonStr('typed')}}`
+    `${jsonStr('signature')}:${jsonStr(signed.signature)}}`
   );
 }

@@ -398,10 +398,10 @@ describe.skipIf(!wasmBuilt)(
         expect(conv).toBe(generic);
         // Typed scheme + canonical tag, never the old opaque wrapper.
         const parsed = JSON.parse(conv) as {
-          sig_scheme: string;
+          sig_scheme?: string;
           action: { type: string; params?: unknown };
         };
-        expect(parsed.sig_scheme).toBe('typed');
+        expect(parsed.sig_scheme).toBeUndefined();
         expect(parsed.action.type).toBe(tc.tag);
         expect(parsed.action.params).toBeTypeOf('object');
         expect(conv).not.toContain(tc.opaqueKey);
@@ -414,10 +414,10 @@ describe.skipIf(!wasmBuilt)(
       const generic = await bodyOf(() => c.submitTyped('pm_unenroll', {}, { nonce: 4n }));
       expect(conv).toBe(generic);
       const parsed = JSON.parse(conv) as {
-        sig_scheme: string;
+        sig_scheme?: string;
         action: { type: string; params?: unknown };
       };
-      expect(parsed.sig_scheme).toBe('typed');
+      expect(parsed.sig_scheme).toBeUndefined();
       expect(parsed.action).toEqual({ type: 'pm_unenroll' });
       // NOT the legacy opaque user_portfolio_margin envelope.
       expect(conv).not.toContain('user_portfolio_margin');

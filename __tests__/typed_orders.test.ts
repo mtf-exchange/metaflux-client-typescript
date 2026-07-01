@@ -380,7 +380,7 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing — trading set', () =
     expect(d0).not.toBe(d1);
   });
 
-  it('typed trading request body carries sig_scheme:"typed" + the verbatim action', async () => {
+  it('typed trading request body omits the vestigial sig_scheme, carries the verbatim action', async () => {
     const { signTypedOrder, typedOrderRequestBody } = await import(
       '../src/native/typed_orders.js'
     );
@@ -397,10 +397,10 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing — trading set', () =
     );
     const body = typedOrderRequestBody(signed);
     expect(body.includes(`"action":${actionJson}`)).toBe(true);
-    expect(body.includes('"sig_scheme":"typed"')).toBe(true);
+    expect(body.includes('"sig_scheme"')).toBe(false);
     expect(body.includes('"nonce":49')).toBe(true);
-    const parsed = JSON.parse(body) as { sig_scheme: string; nonce: number };
-    expect(parsed.sig_scheme).toBe('typed');
+    const parsed = JSON.parse(body) as { sig_scheme?: string; nonce: number };
+    expect(parsed.sig_scheme).toBeUndefined();
     expect(parsed.nonce).toBe(49);
   });
 

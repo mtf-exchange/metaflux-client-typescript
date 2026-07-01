@@ -1,6 +1,6 @@
 // MTF-native FBA (Frequent Batch Auction) action payload type.
 //
-// Rides the W1 typed (`sig_scheme:"typed"`) path: the SDK signs the node's
+// Rides the W1 typed (the typed `/exchange`) path: the SDK signs the node's
 // frozen `FbaSubmit` EIP-712 struct and POSTs the canonical
 // `{"type":"fba_submit","params":{...}}` envelope the typed-only `/exchange`
 // admits. The typed encoding (`../native/typed`) is the single source of truth.

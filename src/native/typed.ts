@@ -1111,7 +1111,7 @@ export function typedDataV4(built: BuiltTyped): TypedDataV4 {
   };
 }
 
-/// A signed typed action ready for `POST /exchange` with `sig_scheme:"typed"`.
+/// A signed typed action ready for `POST /exchange` with the typed `/exchange`.
 export interface TypedSignedAction {
   /// The exact `action` JSON string (signed + POSTed verbatim).
   readonly actionJson: string;
@@ -1158,14 +1158,13 @@ export async function recoverTypedSigner(
   return `0x${toHex(addr)}`;
 }
 
-/// Assemble the `POST /exchange` request body STRING for the typed scheme:
-/// `{"action":<actionJson>,"nonce":<u64>,"signature":"0x..","sig_scheme":"typed"}`.
+/// Assemble the `POST /exchange` request body STRING:
+/// `{"action":<actionJson>,"nonce":<u64>,"signature":"0x.."}`.
 /// The `action` bytes are embedded verbatim (the signed bytes == the sent bytes).
 export function typedRequestBody(signed: TypedSignedAction): string {
   return (
     `{${jsonStr('action')}:${signed.actionJson},` +
     `${jsonStr('nonce')}:${signed.nonce},` +
-    `${jsonStr('signature')}:${jsonStr(signed.signature)},` +
-    `${jsonStr('sig_scheme')}:${jsonStr('typed')}}`
+    `${jsonStr('signature')}:${jsonStr(signed.signature)}}`
   );
 }
