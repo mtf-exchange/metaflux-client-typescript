@@ -1,6 +1,6 @@
 // MTF-native RFQ (Request-for-Quote) action payload types.
 //
-// These ride the W1 typed (`sig_scheme:"typed"`) path: the SDK signs the
+// These ride the W1 typed (the typed `/exchange`) path: the SDK signs the
 // node's frozen `RfqRequest` / `RfqAccept` EIP-712 structs and POSTs the
 // canonical `{"type":...,"params":{...}}` envelope the typed-only `/exchange`
 // admits. The typed encoding is the single source of truth (`../native/typed`);

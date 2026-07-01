@@ -485,7 +485,7 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(recovered.toLowerCase()).toBe(owner.toLowerCase());
   });
 
-  it('typedRequestBody carries sig_scheme:"typed" + the verbatim action', async () => {
+  it('typedRequestBody omits the vestigial sig_scheme, carries the verbatim action', async () => {
     const { signTypedAction, typedRequestBody } = await import('../src/native/typed.js');
     const privKey = new Uint8Array(32).fill(0x42);
     const payload = { ntl: '1000', to_perp: false };
@@ -498,15 +498,15 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     );
     const body = typedRequestBody(signed);
     expect(body.includes(`"action":${signed.actionJson}`)).toBe(true);
-    expect(body.includes('"sig_scheme":"typed"')).toBe(true);
+    expect(body.includes('"sig_scheme"')).toBe(false);
     expect(body.includes('"nonce":29')).toBe(true);
     const parsed = JSON.parse(body) as {
       action: unknown;
       nonce: number;
       signature: string;
-      sig_scheme: string;
+      sig_scheme?: string;
     };
-    expect(parsed.sig_scheme).toBe('typed');
+    expect(parsed.sig_scheme).toBeUndefined();
     expect(parsed.nonce).toBe(29);
     expect(JSON.parse(signed.actionJson)).toEqual(parsed.action);
   });

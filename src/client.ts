@@ -1188,14 +1188,14 @@ export class Client {
   }
 
   // ============================================================================
-  // Trading-set typed scheme (`sig_scheme:"typed"`) — order / cancel / TWAP /
+  // Trading-set typed scheme (the typed `/exchange`) — order / cancel / TWAP /
   // batch actions. These are the DEFAULT path for the order builders below; the
   // server still accepts the legacy opaque scheme during migration, reachable
   // via `{ legacy: true }` in the call options.
   // ============================================================================
 
   /// Sign a trading action under the typed (EIP-712) scheme and POST it with
-  /// `sig_scheme:"typed"`. `actionJson` is the canonical action bytes (built by
+  /// the typed `/exchange`. `actionJson` is the canonical action bytes (built by
   /// the `./native/actions.js` builders); `payload` carries the order / cancel /
   /// params body the typed digest is computed over. SENDER-AUTHORIZED (no owner
   /// cross-check); use [`postTypedOrderOwnerChecked`] when an owner must match.
@@ -1278,11 +1278,11 @@ export class Client {
   }
 
   // ============================================================================
-  // EIP-712 typed-action scheme (`sig_scheme:"typed"`).
+  // EIP-712 typed-action scheme (the typed `/exchange`).
   //
   // The wallet-signed actions below are sent as proper EIP-712 typed structs
   // so a wallet (`eth_signTypedData_v4`) renders the named fields. The POST body
-  // carries `sig_scheme:"typed"` + the same canonical `action` JSON that was
+  // carries the typed `/exchange` + the same canonical `action` JSON that was
   // hashed. Everything else keeps the legacy opaque scheme above.
   //
   // The chain id for these is the MTF-native chain id (`MTF_CHAIN_ID`, testnet
@@ -1305,7 +1305,7 @@ export class Client {
   }
 
   /// POST an already-signed typed action (e.g. from a wallet's
-  /// `eth_signTypedData_v4`) to `/exchange` under `sig_scheme:"typed"`. Pass the
+  /// `eth_signTypedData_v4`) to `/exchange` under the typed `/exchange`. Pass the
   /// `{ actionJson, nonce }` from [`typedData`] plus the 0x-hex 65-byte signature.
   async postTyped(
     signed: TypedSignedAction,
@@ -1318,7 +1318,7 @@ export class Client {
   }
 
   /// Sign one of the typed actions with this client's private key (the local
-  /// signing path — agents / tests) and POST it under `sig_scheme:"typed"`.
+  /// signing path — agents / tests) and POST it under the typed `/exchange`.
   /// `payload` carries only the action-specific snake_case fields.
   async submitTyped(
     actionType: string,
@@ -1397,7 +1397,7 @@ export class Client {
   // ── typed margin / staking / vault / spot-margin / earn / bridge ───────────
   //
   // These mirror the legacy-scheme methods of the same root name but sign under
-  // `sig_scheme:"typed"`. They carry a `Typed` suffix so both schemes remain
+  // the typed `/exchange`. They carry a `Typed` suffix so both schemes remain
   // reachable (decimal fields are canonical strings, hashed verbatim).
 
   /// Add or remove isolated margin (`update_isolated_margin`, typed scheme).
@@ -1554,7 +1554,7 @@ export class Client {
   // ── Core ↔ MetaFluxEVM transfer + sub-accounts + staking moves (typed) ─────
   //
   // These were previously un-mapped on the typed-only `/exchange` (so a typed
-  // request was rejected); they now sign under `sig_scheme:"typed"`. The methods
+  // request was rejected); they now sign under the typed `/exchange`. The methods
   // already present on the legacy/native path (`cancelAllOrders`,
   // `userDexAbstraction`, `userSetAbstraction`, `priorityBid`,
   // `submitEncryptedOrder`) gain a `Typed` suffix so both schemes stay reachable.
