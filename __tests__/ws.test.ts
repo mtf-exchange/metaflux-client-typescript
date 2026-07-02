@@ -157,13 +157,15 @@ describe('WsClient wire protocol', () => {
     ws.close();
   });
 
-  it('exposes the exact 17 native gateway channel names', () => {
+  it('exposes the exact 19 native gateway channel names (web_data2 GONE)', () => {
     expect([...WS_CHANNELS]).toEqual([
       'l2_book',
       'bbo',
       'trades',
       'active_asset_ctx',
       'all_mids',
+      'explorer_block',
+      'explorer_txs',
       'candles',
       'fills',
       'user_events',
@@ -177,26 +179,46 @@ describe('WsClient wire protocol', () => {
       'spot_state',
       'active_asset_data',
     ]);
+    expect(WS_CHANNELS).not.toContain('web_data2');
   });
 
-  it('subscribe helpers format coin as a decimal asset-id string', async () => {
+  it('subscribe helpers send the coin market SYMBOL', async () => {
     const ws = new WsClient('wss://x/ws', { autoReconnect: false });
     const p = ws.connect();
     const sock = MockSocket.instances[0]!;
     sock.open();
     await p;
 
-    await ws.subscribeL2Book(1);
+    await ws.subscribeL2Book('BTC');
     expect(sock.sent).toContain(
-      '{"method":"subscribe","subscription":{"type":"l2_book","coin":"1"}}',
+      '{"method":"subscribe","subscription":{"type":"l2_book","coin":"BTC"}}',
     );
-    await ws.subscribeCandles(7, '5m');
+    await ws.subscribeCandles('ETH', '5m');
     expect(sock.sent).toContain(
-      '{"method":"subscribe","subscription":{"type":"candles","coin":"7","interval":"5m"}}',
+      '{"method":"subscribe","subscription":{"type":"candles","coin":"ETH","interval":"5m"}}',
     );
     await ws.subscribeAllMids();
     expect(sock.sent).toContain(
       '{"method":"subscribe","subscription":{"type":"all_mids"}}',
+    );
+    await ws.subscribeExplorerBlock();
+    expect(sock.sent).toContain(
+      '{"method":"subscribe","subscription":{"type":"explorer_block"}}',
+    );
+    await ws.subscribeExplorerTxs();
+    expect(sock.sent).toContain(
+      '{"method":"subscribe","subscription":{"type":"explorer_txs"}}',
+    );
+    await ws.subscribeUserFundings('0x00000000000000000000000000000000000000aa');
+    expect(sock.sent).toContain(
+      '{"method":"subscribe","subscription":{"type":"user_fundings","user":"0x00000000000000000000000000000000000000aa"}}',
+    );
+    await ws.subscribeActiveAssetData(
+      '0x00000000000000000000000000000000000000aa',
+      'BTC',
+    );
+    expect(sock.sent).toContain(
+      '{"method":"subscribe","subscription":{"type":"active_asset_data","coin":"BTC","user":"0x00000000000000000000000000000000000000aa"}}',
     );
     ws.close();
   });

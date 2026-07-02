@@ -1,11 +1,12 @@
-// HL-node parity response interfaces for `POST /info`.
+// Node-snapshot / parity response interfaces for `POST /info`.
 //
-// Source of truth: the KB spec metaflux-knowledges/api/rest/info.md (the
-// hl_parity query shapes). Field names are the exact snake_case keys the node
-// emits inside `{type, data}.data`. Money magnitudes that can exceed 2^53 are
-// typed `string`.
+// Source of truth: the KB spec metaflux-knowledges/api/rest/info.md. Field
+// names are the exact snake_case keys the node emits inside `{type, data}.data`.
+// Money magnitudes that can exceed 2^53 are typed `string`.
 
-/// One spot pair inside `SpotMeta`.
+import type { MarketInfo } from './core.js';
+
+/// One spot pair inside `SpotMeta` (also `markets.spot.pairs`).
 export interface SpotPair {
   /// Numeric pair id — also the compact `coin` label spot prints carry on the
   /// WS `trades` / `candles` / `fills` channels.
@@ -17,15 +18,25 @@ export interface SpotPair {
   base: number;
   /// Quote asset id.
   quote: number;
-  /// Taker fee (bps); `0` if unset.
-  taker_fee_bps: number;
+  /// Taker fee, decimal bps string; `"0"` if unset.
+  taker_fee_bps: string;
   /// Min notional (USDC cents), decimal string; `"0"` if unset.
   min_notional: string;
   /// Whether the pair is active for trading.
   active: boolean;
+  /// Pair mark price, decimal string.
+  mark_px: string;
+  /// Order-book mid price, decimal string; `null` when one-sided.
+  mid_px: string | null;
+  /// Previous-day close price, decimal string; `null` if unset.
+  prev_day_px: string | null;
+  /// 24h notional (USD) volume, decimal string.
+  day_ntl_vlm: string;
+  /// Circulating base-token supply, decimal string.
+  circulating_supply: string;
 }
 
-/// One token registry entry inside `SpotMeta`.
+/// One token registry entry inside `SpotMeta` (also `markets.spot.tokens`).
 export interface SpotToken {
   /// Token asset id.
   id: number;
@@ -35,9 +46,18 @@ export interface SpotToken {
   sz_decimals: number;
   /// Native (ERC-20-style) token decimals (e.g. USDC = 6, BTC = 8).
   wei_decimals: number;
+  /// `0x` EVM contract bound to the token, or `null` when it has no binding.
+  evm_contract: string | null;
+  /// Whether the token is a canonical (genesis-seeded) listing.
+  is_canonical: boolean;
+  /// Token system address (0x).
+  system_address: string;
+  /// Deterministic token id hash (`0x` + 32 bytes).
+  token_id: string;
 }
 
-/// `spot_meta` — spot pair universe + token registry.
+/// `spot_meta` — spot pair universe + token registry. The same object is
+/// embedded as `markets.spot`.
 export interface SpotMeta {
   /// Registered spot pairs (token-registration sentinels excluded).
   pairs: SpotPair[];
@@ -45,17 +65,30 @@ export interface SpotMeta {
   tokens: SpotToken[];
 }
 
-/// One spot balance inside `SpotClearinghouseState`.
+/// `markets` — the full market universe: every perp market plus the spot
+/// pair/token registry, in one read.
+export interface Markets {
+  /// Registered perp markets.
+  perp: MarketInfo[];
+  /// Spot universe (same object as the `spot_meta` read).
+  spot: SpotMeta;
+}
+
+/// One spot balance inside `SpotClearinghouseState` (and the WS `spot_state`
+/// stream).
 export interface SpotBalance {
   /// Spot asset id.
   asset: number;
-  /// Token / pair name, else `asset:<id>`.
+  /// Token symbol, else `asset:<id>`.
   name: string;
-  /// Balance, decimal string (truncated toward zero).
-  balance: string;
+  /// Total balance (spendable + hold), whole-token decimal string.
+  total: string;
+  /// Amount reserved by resting spot orders, whole-token decimal string.
+  hold: string;
 }
 
-/// `spot_clearinghouse_state` — per-account spot token balances.
+/// `spot_clearinghouse_state` — per-account spot token balances. With
+/// `account_state` this replaces the removed `web_data2` composite.
 export interface SpotClearinghouseState {
   /// Echo of the requested 0x address.
   address: string;
@@ -75,43 +108,10 @@ export interface ExchangeStatus {
   scheduled_freeze_height: number | null;
   /// `true` once any MIP-3 market/pair spec is registered.
   mip3_enabled: boolean;
-}
-
-/// One perp asset context inside the HL-compat `meta_and_asset_ctxs` response —
-/// the per-market price / volume / funding snapshot (camelCase HL field names,
-/// all magnitudes decimal strings). Positional: the ctx at index `i` pairs with
-/// the universe asset at index `i`.
-export interface PerpAssetCtx {
-  /// 24h notional (USD) volume, decimal string.
-  dayNtlVlm: string;
-  /// Previous-day close price, decimal string.
-  prevDayPx: string;
-  /// Current mark price, decimal string.
-  markPx: string;
-  /// Current mid price, decimal string (may be absent when one-sided).
-  midPx?: string;
-  /// Current funding rate, decimal string.
-  funding: string;
-  /// Open interest (base units), decimal string.
-  openInterest: string;
-  /// Current oracle price, decimal string.
-  oraclePx: string;
-}
-
-/// One spot asset context inside the HL-compat `spot_meta_and_asset_ctxs`
-/// response — the per-pair price / volume / supply snapshot (camelCase HL field
-/// names, all magnitudes decimal strings). Positional with the spot universe.
-export interface SpotAssetCtx {
-  /// 24h notional (USD) volume, decimal string.
-  dayNtlVlm: string;
-  /// Previous-day close price, decimal string.
-  prevDayPx: string;
-  /// Current mark price, decimal string.
-  markPx: string;
-  /// Current mid price, decimal string (may be absent when one-sided).
-  midPx?: string;
-  /// Circulating token supply, decimal string.
-  circulatingSupply: string;
+  /// Whether the chain is currently upgrade-frozen.
+  frozen: boolean;
+  /// Whether startup replay has completed (reads are live).
+  replay_complete: boolean;
 }
 
 /// A trigger detail attached to a `FrontendOpenOrder`.
@@ -120,22 +120,27 @@ export interface OrderTrigger {
   trigger_px: string;
   /// Whether the trigger fires above (`true`) or below the price.
   trigger_above: boolean;
+  /// `true` on a parked (off-book) TP/SL / stop row. Absent on the trigger
+  /// block of a resting book order.
+  is_parked?: boolean;
 }
 
 /// One order inside `FrontendOpenOrders` — `open_orders` plus frontend detail.
+/// Parked TP/SL / stop triggers are surfaced too, with `tif: "trigger"` and a
+/// populated `trigger` block.
 export interface FrontendOpenOrder {
   /// On-chain order id.
   oid: number;
-  /// Asset id.
-  market_id: number;
+  /// Market symbol (e.g. `"BTC"`).
+  coin: string;
   /// Order side.
   side: 'bid' | 'ask';
   /// Resting price, canonical decimal string (whole-USDC, tick-snapped).
   px: string;
   /// Remaining size, canonical decimal string (whole units).
   size: string;
-  /// Time-in-force.
-  tif: 'alo' | 'ioc' | 'gtc';
+  /// Time-in-force; `"trigger"` for an off-book parked stop.
+  tif: 'alo' | 'ioc' | 'gtc' | 'trigger';
   /// Client order id (0x), or `null` if none.
   cloid: string | null;
   /// Trigger detail if registered for the oid, else `null`.
@@ -166,17 +171,29 @@ export interface Liquidatable {
   accounts: LiquidatableAccount[];
 }
 
-/// `active_asset_data` — a user's per-asset leverage / margin-mode / max trade.
+/// `active_asset_data` — a user's per-asset leverage / margin-mode / tradeable
+/// size, keyed by `(address, coin)`. The WS `active_asset_ctx` sibling carries
+/// market-wide context; this read is account-scoped.
+///
+/// The `[buy, sell]` pairs: `available_to_trade` is the per-side NOTIONAL
+/// still openable given free collateral × leverage (whole-USDC), and
+/// `max_trade_szs` the same budget converted to base-unit SIZE at the mark.
 export interface ActiveAssetData {
   /// Echo of the requested 0x address.
   address: string;
-  /// Echo of the requested asset id.
-  asset_id: number;
-  /// Effective leverage (position, else account default, else market max).
+  /// Echo of the requested market symbol.
+  coin: string;
+  /// Effective leverage (per-asset setting, else market max).
   leverage: number;
   /// Effective margin mode.
   margin_mode: 'cross' | 'isolated' | 'strict_iso';
-  /// Per-asset max-order ceiling (size units), decimal string.
+  /// Mark price used for the size conversion, whole-USDC decimal string.
+  mark_px: string;
+  /// `[buy, sell]` notional still openable, whole-USDC decimal strings.
+  available_to_trade: [string, string];
+  /// `[buy, sell]` max order size, base-unit decimal strings.
+  max_trade_szs: [string, string];
+  /// OI-cap-derived market-order ceiling, decimal string.
   max_trade_size: string;
   /// Whether the user has a non-zero position on this asset.
   has_position: boolean;
@@ -184,8 +201,8 @@ export interface ActiveAssetData {
 
 /// One per-asset max market-order notional entry.
 export interface MaxMarketOrderNtl {
-  /// Asset id.
-  asset_id: number;
+  /// Market symbol.
+  coin: string;
   /// OI-cap-derived size ceiling, decimal string.
   max_market_order_ntl: string;
 }
@@ -202,6 +219,8 @@ export interface VaultSummary {
   id: number;
   /// Vault on-chain address (0x).
   address: string;
+  /// Vault display name.
+  name: string;
   /// Vault leader address (0x).
   leader: string;
   /// NAV proxy (high-water mark, USD cents), decimal string.
@@ -324,8 +343,8 @@ export interface UserRole {
 
 /// `perps_at_open_interest_cap` — assets whose OI is at/over the cap.
 export interface PerpsAtOpenInterestCap {
-  /// Asset ids at/over their `oi_cap`, ascending.
-  assets: number[];
+  /// Market symbols at/over their OI cap.
+  assets: string[];
 }
 
 /// One validator L1 vote.
@@ -346,32 +365,14 @@ export interface ValidatorL1Votes {
   votes: ValidatorL1Vote[];
 }
 
-/// One margin-tier row.
-export interface MarginTier {
-  /// Asset id.
-  asset_id: number;
-  /// Effective max leverage.
-  max_leverage: number;
-  /// Maintenance margin ratio, bps string.
-  maint_margin_ratio: string;
-  /// Initial margin ratio, bps string.
-  init_margin_ratio: string;
-}
-
-/// `margin_table` — the margin-tier table (one effective tier per market).
-export interface MarginTable {
-  /// Per-market tiers.
-  tiers: MarginTier[];
-}
-
 /// One perp DEX entry.
 export interface PerpDex {
-  /// DEX index in `Exchange.perp_dexs`.
+  /// DEX index in the exchange's perp-dex list.
   index: number;
   /// Number of asset books in the DEX.
   n_assets: number;
-  /// Asset ids in the DEX.
-  assets: number[];
+  /// Market symbols in the DEX.
+  assets: string[];
 }
 
 /// `perp_dexs` — list the perp DEX(es).
@@ -392,8 +393,8 @@ export interface ValidatorSummary {
   stake: string;
   /// Validator's own contribution, decimal string.
   self_stake: string;
-  /// Commission (basis points).
-  commission_bps: number;
+  /// Commission, decimal bps string.
+  commission_bps: string;
   /// In the active set this epoch.
   is_active: boolean;
   /// Currently jailed.
@@ -422,44 +423,4 @@ export interface ValidatorSummaries {
 export interface GossipRootIps {
   /// Configured gossip peer endpoints (`host:port`); empty on a solo node.
   root_ips: string[];
-}
-
-/// One position row inside `WebData2.clearinghouse`.
-export interface WebData2Position {
-  /// Asset id.
-  asset: number;
-  /// Signed position size, decimal string.
-  size: string;
-  /// Entry notional, decimal string.
-  entry_ntl: string;
-  /// Effective margin mode.
-  mode: 'cross' | 'isolated' | 'strict_iso';
-  /// Per-asset leverage multiple.
-  lev: number;
-}
-
-/// The clearinghouse summary inside `WebData2`.
-export interface WebData2Clearinghouse {
-  /// Cross account value, decimal string.
-  account_value: string;
-  /// Σ per-asset margin used, decimal string.
-  margin_used: string;
-  /// Per-asset open positions.
-  positions: WebData2Position[];
-}
-
-/// `web_data2` — composite "everything for the frontend" snapshot.
-export interface WebData2 {
-  /// Echo of the requested 0x address.
-  address: string;
-  /// Perp clearinghouse summary.
-  clearinghouse: WebData2Clearinghouse;
-  /// Spot balances (reuses `spot_clearinghouse_state.balances`).
-  spot_balances: SpotBalance[];
-  /// Open orders (reuses `frontend_open_orders.orders`).
-  open_orders: FrontendOpenOrder[];
-  /// Vault equities (reuses `user_vault_equities.equities`).
-  vault_equities: VaultEquity[];
-  /// Global exchange status (reuses `exchange_status.data`).
-  exchange_status: ExchangeStatus;
 }

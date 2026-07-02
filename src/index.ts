@@ -131,9 +131,8 @@ export {
   buildNativeEarnWithdrawAction,
 } from './native/actions.js';
 export {
-  // MTF-native `/info` read API + the account-ref union (address | account_id).
+  // MTF-native `/info` read API.
   InfoApi,
-  type AccountRef,
 } from './rest/info.js';
 export type {
   // MTF-native `/info` response shapes. Source of truth:
@@ -143,10 +142,13 @@ export type {
   AccountState,
   AccountPosition,
   Balances,
+  SpotHolding,
   Tier,
   MarginMode,
+  Abstraction,
   MarketInfo,
   MarketKind,
+  MarginTier,
   Funding,
   VaultState,
   StakingState,
@@ -154,16 +156,22 @@ export type {
   PendingUnstake,
   FeeSchedule,
   FeeTier,
+  TradeSide,
   OpenOrders,
   OpenOrder,
   L2Book,
   L2Level,
   RecentTrades,
-  RecentTrade,
+  TradesByTime,
+  TradeRecord,
   UserFills,
+  UserFillsByTime,
   UserFill,
   FundingHistory,
   FundingSample,
+  PredictedFunding,
+  Candle,
+  CandleSnapshot,
   BlockInfo,
   Agents,
   AgentEntry,
@@ -171,15 +179,14 @@ export type {
   SubAccountEntry,
   Mip3ActiveBids,
   Mip3Bid,
-  // HL-node parity shapes.
+  // Node-snapshot parity shapes.
+  Markets,
   SpotMeta,
   SpotPair,
   SpotToken,
   SpotClearinghouseState,
   SpotBalance,
   ExchangeStatus,
-  PerpAssetCtx,
-  SpotAssetCtx,
   FrontendOpenOrders,
   FrontendOpenOrder,
   OrderTrigger,
@@ -202,16 +209,11 @@ export type {
   PerpsAtOpenInterestCap,
   ValidatorL1Votes,
   ValidatorL1Vote,
-  MarginTable,
-  MarginTier,
   PerpDexs,
   PerpDex,
   ValidatorSummaries,
   ValidatorSummary,
   GossipRootIps,
-  WebData2,
-  WebData2Clearinghouse,
-  WebData2Position,
 } from './types/info/index.js';
 export {
   // MTF-native WebSocket client + subscription/channel types.
@@ -226,6 +228,13 @@ export {
   type AllMids,
   type ActiveAssetCtx,
   type ActiveAssetDataFrame,
+  type WsTrade,
+  type WsFill,
+  type WsOrderUpdate,
+  type WsOrderUpdateOrder,
+  type WsUserFunding,
+  type ExplorerBlock,
+  type ExplorerTx,
 } from './ws/ws.js';
 export {
   WasmNotBuiltError,
