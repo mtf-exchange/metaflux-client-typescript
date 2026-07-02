@@ -2,7 +2,7 @@
 // Mocks global fetch and asserts each InfoApi method POSTs the EXACT
 // `{"type": ...}` body the server's `/info` dispatcher expects
 // (per the KB spec metaflux-knowledges/api/rest/info.md), keyed by the real
-// param (0x address / asset_id / coin / market_id / vault), and that the
+// param (`coin` market symbol / 0x `address` / 0x `vault`), and that the
 // `{type, data}` envelope is unwrapped to the typed `data`.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -87,37 +87,30 @@ describe('InfoApi request shapes', () => {
     });
   });
 
-  it('marketInfo sends asset_id (NOT market_id)', async () => {
+  it('marketInfo is keyed by coin SYMBOL (NOT asset_id)', async () => {
     const api = new InfoApi(BASE);
-    nextData = { asset_id: 7, mark_px: '0', oracle_px: '0', open_interest: '0' };
-    const res = await api.marketInfo(7);
+    nextData = { coin: 'BTC', asset_id: 0, mark_px: '0', open_interest: '0' };
+    const res = await api.marketInfo('BTC');
     expect(JSON.parse(captured!.body)).toEqual({
       type: 'market_info',
-      asset_id: 7,
+      coin: 'BTC',
     });
     // Money magnitudes that can exceed 2^53 are decimal strings on the wire.
     expect(typeof res.mark_px).toBe('string');
     expect(typeof res.open_interest).toBe('string');
   });
 
-  it('marketInfoByCoin sends coin', async () => {
+  it('markets returns the {perp, spot} universe object', async () => {
     const api = new InfoApi(BASE);
-    nextType = 'market_info';
-    nextData = { asset_id: 0, name: 'BTC' };
-    await api.marketInfoByCoin('BTC');
-    expect(JSON.parse(captured!.body)).toEqual({
-      type: 'market_info',
-      coin: 'BTC',
-    });
-  });
-
-  it('markets returns the unwrapped array `data`', async () => {
-    const api = new InfoApi(BASE);
-    nextData = [{ asset_id: 0, name: 'BTC' }];
+    nextData = {
+      perp: [{ coin: 'BTC', asset_id: 0 }],
+      spot: { pairs: [], tokens: [] },
+    };
     const res = await api.markets();
     expect(JSON.parse(captured!.body)).toEqual({ type: 'markets' });
-    expect(Array.isArray(res)).toBe(true);
-    expect(res[0]?.name).toBe('BTC');
+    expect(Array.isArray(res.perp)).toBe(true);
+    expect(res.perp[0]?.coin).toBe('BTC');
+    expect(res.spot.pairs).toEqual([]);
   });
 
   it('vaultState is keyed by `vault` 0x address (NOT a numeric vault_id)', async () => {
@@ -147,69 +140,157 @@ describe('InfoApi request shapes', () => {
     expect(JSON.parse(captured!.body)).toEqual({ type: 'fee_schedule' });
   });
 
-  it('openOrders accepts an address ref', async () => {
+  it('openOrders is keyed by 0x address only (account_id param is GONE)', async () => {
     const api = new InfoApi(BASE);
     nextData = { address: ADDR, orders: [] };
-    await api.openOrders({ address: ADDR });
+    await api.openOrders(ADDR);
     expect(JSON.parse(captured!.body)).toEqual({
       type: 'open_orders',
       address: ADDR,
     });
   });
 
-  it('openOrders accepts a numeric account_id ref', async () => {
+  it('l2Book is keyed by coin SYMBOL (market_id param is GONE)', async () => {
     const api = new InfoApi(BASE);
-    nextData = { address: ADDR, account_id: 42, orders: [] };
-    await api.openOrders({ account_id: 42 });
+    nextData = { coin: 'BTC', bids: [], asks: [] };
+    const res = await api.l2Book('BTC');
+    expect(JSON.parse(captured!.body)).toEqual({ type: 'l2_book', coin: 'BTC' });
+    expect(res.coin).toBe('BTC');
+  });
+
+  it('recentTrades is keyed by coin; limit rides ONLY when provided', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { coin: 'BTC', last_trade_ms: 0, trades: [] };
+    await api.recentTrades('BTC');
     expect(JSON.parse(captured!.body)).toEqual({
-      type: 'open_orders',
-      account_id: 42,
+      type: 'recent_trades',
+      coin: 'BTC',
+    });
+    await api.recentTrades('BTC', 50);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'recent_trades',
+      coin: 'BTC',
+      limit: 50,
     });
   });
 
-  it('l2Book sends market_id (u32)', async () => {
+  it('tradesByTime sends coin + start_time/end_time ONLY when provided', async () => {
     const api = new InfoApi(BASE);
-    nextData = { market_id: 0, bids: [], asks: [] };
-    await api.l2Book(0);
-    expect(JSON.parse(captured!.body)).toEqual({ type: 'l2_book', market_id: 0 });
+    nextData = { coin: 'BTC', start_time: null, end_time: null, trades: [] };
+    await api.tradesByTime('BTC');
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'trades_by_time',
+      coin: 'BTC',
+    });
+    await api.tradesByTime('BTC', 1_700_000_000_000, 1_700_000_999_999);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'trades_by_time',
+      coin: 'BTC',
+      start_time: 1_700_000_000_000,
+      end_time: 1_700_000_999_999,
+    });
   });
 
-  it('fundingHistory sends market_id (u32)', async () => {
+  it('tradesByTime decodes symbol-keyed trade records', async () => {
     const api = new InfoApi(BASE);
-    nextData = { market_id: 0, samples: [] };
-    await api.fundingHistory(0);
+    nextData = {
+      coin: 'BTC',
+      start_time: 1_700_000_000_000,
+      end_time: null,
+      trades: [
+        {
+          coin: 'BTC',
+          side: 'A',
+          px: '61643.70000000',
+          sz: '0.00024',
+          time: 1_700_000_000_555,
+          tid: 1234567890,
+          block: 38997,
+          hash: '0x4660d9ccf52ef1abde5e03d1b3f1c110b948d2f71331f086239666781dbde91c',
+        },
+      ],
+    };
+    const res = await api.tradesByTime('BTC', 1_700_000_000_000);
+    expect(res.trades[0]?.coin).toBe('BTC');
+    expect(res.trades[0]?.side).toBe('A');
+    expect(typeof res.trades[0]?.px).toBe('string');
+    expect(typeof res.trades[0]?.tid).toBe('number');
+    expect(res.end_time).toBeNull();
+  });
+
+  it('userFills is keyed by 0x address only', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { address: ADDR, fills: [] };
+    await api.userFills(ADDR);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'user_fills',
+      address: ADDR,
+    });
+  });
+
+  it('userFillsByTime sends address + optional window bounds', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { address: ADDR, start_time: 5, end_time: null, fills: [] };
+    await api.userFillsByTime(ADDR, 5);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'user_fills_by_time',
+      address: ADDR,
+      start_time: 5,
+    });
+  });
+
+  it('fundingHistory is keyed by coin and carries premium + funding_rate', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      coin: 'BTC',
+      samples: [{ ts_ms: 1, premium: '0.0057', funding_rate: '0.0057' }],
+    };
+    const res = await api.fundingHistory('BTC');
     expect(JSON.parse(captured!.body)).toEqual({
       type: 'funding_history',
-      market_id: 0,
+      coin: 'BTC',
     });
+    expect(res.samples[0]?.premium).toBe('0.0057');
+    expect(res.samples[0]?.funding_rate).toBe('0.0057');
   });
 
-  it('candle is keyed by coin SYMBOL + interval (NOT a numeric asset id)', async () => {
+  it('predictedFundings unwraps the per-market array', async () => {
     const api = new InfoApi(BASE);
-    nextData = [];
-    await api.candle('BTC', '1m');
+    nextData = [
+      { coin: 'BTC', predicted_rate: '0.0037', next_funding_time: 1_783_011_600_000 },
+    ];
+    const res = await api.predictedFundings();
+    expect(JSON.parse(captured!.body)).toEqual({ type: 'predicted_fundings' });
+    expect(res[0]?.coin).toBe('BTC');
+    // Clamped, actually-charged rate as a decimal string; boundary is ms.
+    expect(typeof res[0]?.predicted_rate).toBe('string');
+    expect(typeof res[0]?.next_funding_time).toBe('number');
+  });
+
+  it('candleSnapshot is keyed by coin + interval (the single candle query)', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { candles: [] };
+    await api.candleSnapshot('BTC', '1m');
     expect(JSON.parse(captured!.body)).toEqual({
-      type: 'candle',
+      type: 'candle_snapshot',
       coin: 'BTC',
       interval: '1m',
     });
   });
 
-  it('candle includes start_time/end_time ONLY when provided', async () => {
+  it('candleSnapshot includes start_time/end_time ONLY when provided', async () => {
     const api = new InfoApi(BASE);
-    nextData = [];
-    // start_time only.
-    await api.candle('BTC', '1m', 1_700_000_000_000);
+    nextData = { candles: [] };
+    await api.candleSnapshot('BTC', '1m', 1_700_000_000_000);
     expect(JSON.parse(captured!.body)).toEqual({
-      type: 'candle',
+      type: 'candle_snapshot',
       coin: 'BTC',
       interval: '1m',
       start_time: 1_700_000_000_000,
     });
-    // both bounds.
-    await api.candle('BTC', '1m', 1_700_000_000_000, 1_700_000_999_999);
+    await api.candleSnapshot('BTC', '1m', 1_700_000_000_000, 1_700_000_999_999);
     expect(JSON.parse(captured!.body)).toEqual({
-      type: 'candle',
+      type: 'candle_snapshot',
       coin: 'BTC',
       interval: '1m',
       start_time: 1_700_000_000_000,
@@ -217,54 +298,73 @@ describe('InfoApi request shapes', () => {
     });
   });
 
-  it('candle decodes the gateway bar array through the envelope', async () => {
+  it('candleSnapshot decodes the compact bar shape', async () => {
     const api = new InfoApi(BASE);
-    nextData = [
-      {
-        coin: 'BTC',
-        interval: '1m',
-        open_time: 1_700_000_040_000,
-        close_time: 1_700_000_099_999,
-        open: '67000.00',
-        close: '67042.50',
-        high: '67080.00',
-        low: '66990.00',
-        volume: '12.5',
-        num_trades: 37,
-      },
-    ];
-    const bars = await api.candle('BTC', '1m');
-    expect(Array.isArray(bars)).toBe(true);
-    expect(bars).toHaveLength(1);
-    expect(bars[0]?.coin).toBe('BTC');
-    expect(bars[0]?.interval).toBe('1m');
-    expect(bars[0]?.close).toBe('67042.50');
-    // OHLC / volume are decimal strings (whole-USDC plane); times + count
-    // are JSON numbers.
-    expect(typeof bars[0]?.open).toBe('string');
-    expect(typeof bars[0]?.volume).toBe('string');
-    expect(typeof bars[0]?.num_trades).toBe('number');
-    expect(typeof bars[0]?.open_time).toBe('number');
-    expect(bars[0]?.open_time).toBe(1_700_000_040_000);
-    expect(bars[0]?.num_trades).toBe(37);
+    nextData = {
+      candles: [
+        {
+          t: 1_700_000_040_000,
+          T: 1_700_000_099_999,
+          s: 'BTC',
+          i: '1m',
+          o: '67000.00',
+          c: '67042.50',
+          h: '67080.00',
+          l: '66990.00',
+          v: '12.5',
+          q: '837843.75',
+          n: 37,
+        },
+      ],
+    };
+    const res = await api.candleSnapshot('BTC', '1m');
+    expect(res.candles).toHaveLength(1);
+    const bar = res.candles[0]!;
+    expect(bar.s).toBe('BTC');
+    expect(bar.i).toBe('1m');
+    expect(bar.c).toBe('67042.50');
+    // OHLC / volumes are decimal strings; times + count are JSON numbers.
+    expect(typeof bar.o).toBe('string');
+    expect(typeof bar.v).toBe('string');
+    expect(typeof bar.q).toBe('string');
+    expect(typeof bar.n).toBe('number');
+    expect(bar.t).toBe(1_700_000_040_000);
   });
 
-  it('activeAssetData is keyed by address + asset_id', async () => {
+  it('agents / subAccounts are keyed by 0x address only', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { address: ADDR, agents: [] };
+    await api.agents(ADDR);
+    expect(JSON.parse(captured!.body)).toEqual({ type: 'agents', address: ADDR });
+    nextData = { address: ADDR, sub_accounts: [] };
+    await api.subAccounts(ADDR);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'sub_accounts',
+      address: ADDR,
+    });
+  });
+
+  it('activeAssetData is keyed by address + coin SYMBOL', async () => {
     const api = new InfoApi(BASE);
     nextData = {
       address: ADDR,
-      asset_id: 3,
+      coin: 'BTC',
       leverage: 10,
       margin_mode: 'cross',
+      mark_px: '61589.39',
+      available_to_trade: ['500000000', '500000000'],
+      max_trade_szs: ['8118.28099', '8118.28099'],
       max_trade_size: '0',
       has_position: false,
     };
-    await api.activeAssetData(ADDR, 3);
+    const res = await api.activeAssetData(ADDR, 'BTC');
     expect(JSON.parse(captured!.body)).toEqual({
       type: 'active_asset_data',
       address: ADDR,
-      asset_id: 3,
+      coin: 'BTC',
     });
+    expect(res.available_to_trade).toHaveLength(2);
+    expect(res.max_trade_szs).toHaveLength(2);
   });
 
   it('maxBuilderFee is keyed by (address, builder)', async () => {
@@ -283,37 +383,50 @@ describe('InfoApi request shapes', () => {
     nextData = {
       pairs: [
         {
-          id: 101,
+          id: 110,
           name: 'BTC/USDC',
-          base: 0,
+          base: 101,
           quote: 100,
-          taker_fee_bps: 5,
-          min_notional: '1000',
+          taker_fee_bps: '5',
+          min_notional: '1',
           active: true,
+          mark_px: '50000',
+          mid_px: '50000',
+          prev_day_px: null,
+          day_ntl_vlm: '0',
+          circulating_supply: '0',
         },
       ],
       tokens: [
-        { id: 0, name: 'BTC', sz_decimals: 5, wei_decimals: 8 },
-        { id: 100, name: 'USDC', sz_decimals: 2, wei_decimals: 6 },
+        {
+          id: 100,
+          name: 'USDC',
+          sz_decimals: 2,
+          wei_decimals: 6,
+          evm_contract: null,
+          is_canonical: true,
+          system_address: '0x80abd3bd8c42d2a279e4fa00f20bb30637734371',
+          token_id: '0xf23ea17597e324c04f842e6d8bfffe75636f0af88e7c7ab93ea755d9056396bc',
+        },
       ],
     };
     const res = await api.spotMeta();
     expect(JSON.parse(captured!.body)).toEqual({ type: 'spot_meta' });
     // `name` is the derived `{base}/{quote}` display name; `id` is the
     // numeric pair id spot prints carry as `coin` on the WS feeds.
-    expect(res.pairs[0]?.id).toBe(101);
+    expect(res.pairs[0]?.id).toBe(110);
     expect(res.pairs[0]?.name).toBe('BTC/USDC');
-    expect(res.pairs[0]?.min_notional).toBe('1000');
-    expect(res.tokens).toHaveLength(2);
-    expect(res.tokens[0]?.name).toBe('BTC');
-    expect(res.tokens[1]?.wei_decimals).toBe(6);
+    // taker_fee_bps is a decimal STRING on this surface.
+    expect(res.pairs[0]?.taker_fee_bps).toBe('5');
+    expect(res.tokens[0]?.wei_decimals).toBe(6);
+    expect(res.tokens[0]?.is_canonical).toBe(true);
   });
 
   it('spotClearinghouseState is keyed by 0x address (NOT `user`)', async () => {
     const api = new InfoApi(BASE);
     nextData = {
       address: ADDR,
-      balances: [{ asset: 101, name: 'BTC/USDC', balance: '500' }],
+      balances: [{ asset: 101, name: 'BTC', total: '500', hold: '10' }],
     };
     const res = await api.spotClearinghouseState(ADDR);
     expect(JSON.parse(captured!.body)).toEqual({
@@ -322,25 +435,9 @@ describe('InfoApi request shapes', () => {
     });
     expect(res.address).toBe(ADDR);
     expect(res.balances[0]?.asset).toBe(101);
-    // `balance` is a decimal string (truncated toward zero) on the wire.
-    expect(res.balances[0]?.balance).toBe('500');
-  });
-
-  it('webData2 is keyed by 0x address', async () => {
-    const api = new InfoApi(BASE);
-    nextData = {
-      address: ADDR,
-      clearinghouse: { account_value: '0', margin_used: '0', positions: [] },
-      spot_balances: [],
-      open_orders: [],
-      vault_equities: [],
-      exchange_status: {},
-    };
-    await api.webData2(ADDR);
-    expect(JSON.parse(captured!.body)).toEqual({
-      type: 'web_data2',
-      address: ADDR,
-    });
+    // total/hold are decimal strings on the wire.
+    expect(res.balances[0]?.total).toBe('500');
+    expect(res.balances[0]?.hold).toBe('10');
   });
 
   it('raw passes an arbitrary typed body through and unwraps `data`', async () => {
@@ -368,39 +465,58 @@ describe('InfoApi request shapes', () => {
 });
 
 describe('InfoApi deployed-gateway read shapes', () => {
-  it('marketInfo decodes lowercase kind + sz_decimals + mark/oracle px', async () => {
+  it('marketInfo decodes coin key + margin_tiers ladder', async () => {
     const api = new InfoApi(BASE);
     nextType = 'market_info';
     nextData = {
+      coin: 'BTC',
       asset_id: 0,
-      name: 'BTC',
       kind: 'perp',
       sz_decimals: 5,
-      mark_px: '50000',
-      oracle_px: '50000',
-      tick_size: '1000000',
-      step_size: '1',
-      min_order: '1',
+      mark_px: '61443.6',
+      oracle_px: '61286.1',
+      mid_px: null,
+      prev_day_px: '61276',
+      change_24h: '0.00273516',
+      day_ntl_vlm: '3772.890084',
+      premium: '0.0058341',
+      tick_size: '0.1',
+      step_size: '0.00001',
+      min_order: '0.00001',
       max_leverage: 50,
-      maint_margin_ratio: '300',
+      maint_margin_ratio: '1320',
       init_margin_ratio: '200',
+      margin_tiers: [
+        { max_open_interest: '100000', max_leverage: 50, maint_margin_ratio: '100' },
+        { max_open_interest: '500000', max_leverage: 20, maint_margin_ratio: '250' },
+        { max_open_interest: null, max_leverage: 5, maint_margin_ratio: '1000' },
+      ],
       funding: {
-        rate_per_hr: '0',
-        cap_per_hr: '0',
+        rate_per_hr: '58',
+        cap_per_hr: '1120',
         interval_ms: 3600000,
-        next_payment_ts: 0,
+        next_payment_ts: 1783011600000,
       },
-      mark_source: 'MedianOfOraclesAndMid',
+      mark_source: 'oracle_median',
       fba_enabled: false,
-      open_interest: '0',
+      open_interest: '0.02346',
+      disable_open: false,
+      disable_close: false,
+      halted: false,
+      strict_isolated: false,
     };
-    const m = await api.marketInfo(0);
-    expect(m.kind).toBe('perp');
+    const m = await api.marketInfo('BTC');
+    expect(m.coin).toBe('BTC');
     // sz_decimals is load-bearing for raw-lot size encoding.
     expect(m.sz_decimals).toBe(5);
-    expect(typeof m.sz_decimals).toBe('number');
-    expect(m.mark_px).toBe('50000');
-    expect(m.oracle_px).toBe('50000');
+    // margin_tiers: upper-bound bands, null = unbounded top band.
+    expect(m.margin_tiers).toHaveLength(3);
+    expect(m.margin_tiers[0]?.max_open_interest).toBe('100000');
+    expect(m.margin_tiers[2]?.max_open_interest).toBeNull();
+    expect(m.margin_tiers[0]?.max_leverage).toBe(50);
+    // maint_margin_ratio bands are bps STRINGS.
+    expect(m.margin_tiers[0]?.maint_margin_ratio).toBe('100');
+    expect(m.mid_px).toBeNull();
   });
 
   it('feeSchedule decodes string bps + tiers[] + burn_ratio (optional top-level pair)', async () => {
@@ -434,28 +550,61 @@ describe('InfoApi deployed-gateway read shapes', () => {
     expect(f2.taker_bps).toBeUndefined();
   });
 
-  it('openOrders decodes the live gateway oid:0 fixture (lowercase side, market_id key)', async () => {
+  it('openOrders decodes coin-keyed rows (lowercase side, cloid nullable)', async () => {
     const api = new InfoApi(BASE);
     nextData = {
       address: ADDR,
       orders: [
         {
-          oid: 0,
-          market_id: 0,
+          oid: 12345,
+          coin: 'BTC',
           side: 'bid',
-          px: '2500000000000',
+          px: '25000',
           size: '60',
-          inserted_at_ms: 0,
+          cloid: null,
+          inserted_at_ms: 1_700_000_000_000,
         },
       ],
     };
-    const o = await api.openOrders({ address: ADDR });
-    expect(o.account_id).toBeUndefined();
+    const o = await api.openOrders(ADDR);
+    expect(o.orders[0]?.coin).toBe('BTC');
     expect(o.orders[0]?.side).toBe('bid');
-    expect(o.orders[0]?.px).toBe('2500000000000');
-    expect(o.orders[0]?.size).toBe('60');
-    // Live gateway gap: oid reads back as 0 (not cancellable by oid).
-    expect(o.orders[0]?.oid).toBe(0);
+    expect(o.orders[0]?.px).toBe('25000');
+    expect(o.orders[0]?.oid).toBe(12345);
+    expect(o.orders[0]?.cloid).toBeNull();
+  });
+
+  it('userFills decodes the committed fill-ring record shape', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      address: ADDR,
+      fills: [
+        {
+          coin: 0,
+          side: 'B',
+          px: '67042.50',
+          sz: '0.125',
+          time: 1_700_000_000_555,
+          oid: 12345,
+          tid: 90123,
+          fee: '4.19',
+          closed_pnl: '0',
+          dir: 'Open Long',
+          start_position: '0',
+          block: 562,
+          hash: '0x2315b79b9e82c2deb279a59448bf7841f3767d30d874e5b544d75bb9fd1e9b0c',
+        },
+      ],
+    };
+    const res = await api.userFills(ADDR);
+    const f = res.fills[0]!;
+    // Fill rings render the NUMERIC asset id (unlike the symbol-keyed tape).
+    expect(f.coin).toBe(0);
+    expect(f.side).toBe('B');
+    expect(f.dir).toBe('Open Long');
+    expect(typeof f.fee).toBe('string');
+    expect(typeof f.closed_pnl).toBe('string');
+    expect(f.tid).toBe(90123);
   });
 });
 

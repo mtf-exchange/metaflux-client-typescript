@@ -1,17 +1,20 @@
 // Re-export barrel for the `/info` response type modules, split by domain:
 //   core.ts      — node / account / market / vault / staking / fee shapes
-//   reads.ts     — book / trade / account-history reads
-//   hl-parity.ts — the HL-node parity query shapes
+//   reads.ts     — book / trade / funding / candle / account-history reads
+//   hl-parity.ts — the node-snapshot parity query shapes
 
 export type {
   NodeInfo,
   AccountState,
   AccountPosition,
   Balances,
+  SpotHolding,
   Tier,
   MarginMode,
+  Abstraction,
   MarketInfo,
   MarketKind,
+  MarginTier,
   Funding,
   VaultState,
   StakingState,
@@ -21,17 +24,22 @@ export type {
   FeeTier,
 } from './core.js';
 export type {
+  TradeSide,
   OpenOrders,
   OpenOrder,
   L2Book,
   L2Level,
   RecentTrades,
-  RecentTrade,
+  TradesByTime,
+  TradeRecord,
   UserFills,
+  UserFillsByTime,
   UserFill,
   FundingHistory,
   FundingSample,
+  PredictedFunding,
   Candle,
+  CandleSnapshot,
   BlockInfo,
   Agents,
   AgentEntry,
@@ -41,14 +49,13 @@ export type {
   Mip3Bid,
 } from './reads.js';
 export type {
+  Markets,
   SpotMeta,
   SpotPair,
   SpotToken,
   SpotClearinghouseState,
   SpotBalance,
   ExchangeStatus,
-  PerpAssetCtx,
-  SpotAssetCtx,
   FrontendOpenOrders,
   FrontendOpenOrder,
   OrderTrigger,
@@ -71,14 +78,9 @@ export type {
   PerpsAtOpenInterestCap,
   ValidatorL1Votes,
   ValidatorL1Vote,
-  MarginTable,
-  MarginTier,
   PerpDexs,
   PerpDex,
   ValidatorSummaries,
   ValidatorSummary,
   GossipRootIps,
-  WebData2,
-  WebData2Clearinghouse,
-  WebData2Position,
 } from './hl-parity.js';

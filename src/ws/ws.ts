@@ -12,9 +12,8 @@
 //     {"channel":"subscriptionResponse","data":{"method":"subscribe","subscription":{...}}}
 //     {"channel":"l2_book","data":{...}} | {"channel":"error","data":{"error":"..."}}
 //
-// Channel names are the EXACT server `Channel::wire_name()` strings — snake_case
-// MTF-native (`l2_book`, `user_events`), since this SDK speaks MTF-native to the
-// node per ADR-019. (HL SDKs use HL camelCase against the gateway `/hl/ws`.)
+// Channel names are the EXACT server wire strings — snake_case MTF-native
+// (`l2_book`, `user_events`); this SDK speaks the MTF-native surface only.
 // `coin` is the market symbol string and is optional (`user_events` carries none).
 //
 // Transport: the standard `WebSocket` global (browser-native; Node ≥ 22 ships
@@ -22,6 +21,7 @@
 // SDK dependency-free for both runtimes.
 
 import type { Funding } from '../types/info/core.js';
+import type { TradeSide } from '../types/info/reads.js';
 import {
   buildNativeCancelAction,
   buildNativeOrderAction,
@@ -34,18 +34,18 @@ import type {
 } from '../types/index.js';
 
 /// Channel names exactly as the gateway's native `/ws` surface accepts them
-/// (snake_case MTF-native). These are the 17 channels the gateway serves
-/// natively (per `api-gateway::ws::subscriptions::native_name`); SDK-only
-/// channels the gateway never serves (`user_fills`, `user_state`, `vault_nav`,
-/// `rfq`, `mark`, `order_events`, …) are deliberately absent.
+/// (snake_case MTF-native) — the 19 channels the gateway serves natively.
+/// `web_data2` was REMOVED: compose `account_state` + `spot_state` instead.
 export type WsChannel =
-  // per-market (require `coin`)
+  // per-market (require `coin` — the market SYMBOL, e.g. "BTC")
   | 'l2_book'
   | 'bbo'
   | 'trades'
   | 'active_asset_ctx'
   // global (no params)
   | 'all_mids'
+  | 'explorer_block'
+  | 'explorer_txs'
   // per-market + interval (`candles` needs `coin` + `interval`)
   | 'candles'
   // per-account (require `user`)
@@ -63,13 +63,15 @@ export type WsChannel =
   | 'active_asset_data';
 
 /// All known channels — handy for callers that want to subscribe broadly. The
-/// exact 17 native gateway channels.
+/// exact 19 native gateway channels.
 export const WS_CHANNELS: readonly WsChannel[] = [
   'l2_book',
   'bbo',
   'trades',
   'active_asset_ctx',
   'all_mids',
+  'explorer_block',
+  'explorer_txs',
   'candles',
   'fills',
   'user_events',
@@ -88,19 +90,19 @@ export const WS_CHANNELS: readonly WsChannel[] = [
 /// subscribe / unsubscribe frame. The routing key is the combination of the
 /// fields a channel uses:
 ///   - `coin`     — per-market channels (`l2_book`, `bbo`, `trades`,
-///                  `active_asset_ctx`, `candles`, `active_asset_data`). A
-///                  **decimal asset-id STRING** (`"1"`), NOT a number: the node
-///                  resolves it via `str::parse::<u32>`, so a bare JSON number
-///                  is "unknown market" (symbol resolution like `"BTC"` is not
-///                  wired on the native `/ws` surface). Use the `subscribe*`
-///                  helpers to format a numeric market id into the right shape.
+///                  `active_asset_ctx`, `candles`, `active_asset_data`). The
+///                  market SYMBOL string (`"BTC"`); a decimal asset-id string
+///                  is also accepted.
 ///   - `user`     — per-account channels (`fills`, `user_events`,
-///                  `order_updates`, `active_asset_data`, …); the 0x address.
+///                  `order_updates`, `notifications`, `ledger_updates`,
+///                  `user_fundings`, `user_twap_slice_fills`,
+///                  `user_twap_history`, `account_state`, `spot_state`,
+///                  `active_asset_data`); the 0x address.
 ///   - `interval` — `candles` only (`1m`/`5m`/`15m`/`1h`/`4h`/`1d`)
-/// Global channels (`all_mids`) take none.
+/// Global channels (`all_mids`, `explorer_block`, `explorer_txs`) take none.
 export interface WsSubscription {
   type: WsChannel;
-  /// Market asset-id as a decimal STRING (`"1"`) — see the interface note.
+  /// Market symbol (`"BTC"`); a decimal asset-id string is also accepted.
   coin?: string;
   /// User `0x`-hex address (per-account channels).
   user?: string;
@@ -124,23 +126,163 @@ export interface ActiveAssetCtx {
   open_interest: string;
 }
 
-/// `activeAssetData` WS payload — a user's per-asset leverage + tradeable size
-/// snapshot (HL-compat camelCase). The pair fields are `[buy, sell]`:
-/// `maxTradeSzs` is the per-side max order size and `availableToTrade` is the
-/// per-side size still openable given margin. Pushed on the user's per-asset
-/// channel; mirrors the REST `active_asset_data` read in the HL-compat plane.
-/// Named `*Frame` to disambiguate from the REST `ActiveAssetData` read shape.
-export interface ActiveAssetDataFrame {
-  /// User `0x`-hex address.
+/// `active_asset_data` WS payload — a user's per-(user, coin) leverage /
+/// margin-mode / tradeable-size snapshot. The body is the EXACT REST
+/// `active_asset_data` read for the same pair, so the two never drift. Named
+/// `*Frame` for continuity with earlier SDK versions.
+export type ActiveAssetDataFrame = import('../types/info/index.js').ActiveAssetData;
+
+/// One `trades` channel record. The on-subscribe snapshot is a NON-EMPTY
+/// array of recent tape prints (`users: null` on snapshot rows — the
+/// committed tape does not retain taker/maker); each live push is an array of
+/// fresh prints with `users: [taker, maker]` (taker first, the aggressor).
+export interface WsTrade {
+  /// Market symbol (e.g. `"BTC"`).
+  coin: string;
+  /// Taker's side token — `"B"` = buy, `"A"` = sell.
+  side: TradeSide;
+  /// Trade price, whole-USDC decimal string.
+  px: string;
+  /// Trade size, whole units as a decimal string.
+  sz: string;
+  /// Trade timestamp (consensus ms).
+  time: number;
+  /// Deterministic trade id (shared by both legs of the print).
+  tid: number;
+  /// `[taker, maker]` 0x addresses on live pushes; `null` on snapshot rows.
+  users: [string, string] | null;
+  /// Committed block height the trade landed in.
+  block: number;
+  /// Taker action's transaction hash (`0x`-hex); empty when systemic.
+  hash: string;
+}
+
+/// One `fills` channel record — the per-account leg of an executed match.
+/// Both legs of one match share the `tid` the public `trades` print carries.
+export interface WsFill {
+  /// Market symbol (e.g. `"BTC"`).
+  coin: string;
+  /// This leg's side token — `"B"` = buy, `"A"` = sell.
+  side: TradeSide;
+  /// Fill price, whole-USDC decimal string.
+  px: string;
+  /// Fill size, whole units as a decimal string.
+  sz: string;
+  /// Fill timestamp (consensus ms).
+  time: number;
+  /// This party's order id.
+  oid: number;
+  /// Client order id (`0x`-hex); `null` on maker legs and snapshot rows.
+  cloid: string | null;
+  /// Deterministic trade id.
+  tid: number;
+  /// `true` on the taker (aggressor) leg, `false` on the maker leg; `null` on
+  /// snapshot rows (the committed tape does not retain the role).
+  crossed: boolean | null;
+  /// Committed block height.
+  block: number;
+  /// Originating action's transaction hash (`0x`-hex); empty on maker legs.
+  hash: string;
+}
+
+/// The `order` object inside a `WsOrderUpdate`. Fields the event kind does
+/// not carry are `null`, so one shape decodes every lifecycle record.
+export interface WsOrderUpdateOrder {
+  /// Market symbol (e.g. `"BTC"`).
+  coin: string;
+  /// Side token (`"B"` / `"A"`), or `null` when unknown.
+  side: TradeSide | null;
+  /// Limit price, whole-USDC decimal string, or `null`.
+  limit_px: string | null;
+  /// REMAINING size after the commit (whole units), or `null`. On a `filled`
+  /// record this is `orig_sz − filled_sz`; the filled amount itself rides the
+  /// top-level `filled_sz`.
+  sz: string | null;
+  /// Original order size (whole units), or `null`.
+  orig_sz: string | null;
+  /// Order id; `null` on a rejected placement.
+  oid: number | null;
+  /// Client order id (`0x`-hex), or `null`.
+  cloid: string | null;
+  /// Time-in-force label (e.g. `"GTC"`), or `null`.
+  tif: string | null;
+  /// Reduce-only flag, or `null`.
+  reduce_only: boolean | null;
+}
+
+/// One `order_updates` channel record — per-account order lifecycle. Each
+/// push is an array of records; the initial snapshot is `[]`.
+export interface WsOrderUpdate {
+  /// The order's fixed-shape body.
+  order: WsOrderUpdateOrder;
+  /// Lifecycle state. `open` = resting (`order.sz` is the book remainder);
+  /// `filled` = taker completion (cumulative `filled_sz` + `avg_px`; a maker
+  /// leg reports per-match `filled_sz` with `status` still `open` while size
+  /// rests); `rejected` carries `reason` + null `oid`.
+  status: 'open' | 'filled' | 'canceled' | 'rejected' | 'cancel_rejected';
+  /// Filled size (whole units decimal string), or `null`.
+  filled_sz: string | null;
+  /// Average fill price (whole-USDC decimal string), or `null`.
+  avg_px: string | null;
+  /// Rejection reason, or `null`.
+  reason: string | null;
+  /// Record timestamp (consensus ms).
+  time: number;
+}
+
+/// One `user_fundings` channel record — a realized funding payment.
+export interface WsUserFunding {
+  /// Numeric asset id the payment settled on (resolve symbols via `markets`).
+  coin: number;
+  /// Signed whole-USDC payment (`+` received / `−` paid), decimal string.
+  payment: string;
+  /// Signed position size at settlement, whole units as a decimal string.
+  szi: string;
+  /// Per-hour rate applied at that settlement, decimal string.
+  fundingRate: string;
+  /// Settlement timestamp (consensus ms).
+  time: number;
+}
+
+/// One `explorer_block` channel record — a committed-block head. Each frame
+/// is an array of heads (usually one).
+export interface ExplorerBlock {
+  /// Committed block height.
+  height: number;
+  /// Consensus round.
+  round: number;
+  /// Epoch.
+  epoch: number;
+  /// Lowercase 0x block hash.
+  hash: string;
+  /// Leader's validator-set index.
+  proposer: number;
+  /// Decoded transaction count.
+  tx_count: number;
+  /// Block timestamp (consensus ms).
+  time: number;
+}
+
+/// One `explorer_txs` channel record — the global order-status firehose row.
+export interface ExplorerTx {
+  /// Order id (`0` on a rejected placement).
+  oid: number;
+  /// Acting account address (0x).
   user: string;
   /// Market symbol (e.g. `"BTC"`).
   coin: string;
-  /// Effective leverage.
-  leverage: number;
-  /// `[buy, sell]` max order size, base units.
-  maxTradeSzs: [number, number];
-  /// `[buy, sell]` size still openable given available margin, base units.
-  availableToTrade: [number, number];
+  /// Compact lifecycle label: `"open"` / `"filled"` / `"rejected"`.
+  action: string;
+  /// Stable status code: 0 = open, 1 = filled, 2 = rejected.
+  status: number;
+  /// Side code: 0 = bid, 1 = ask.
+  side: number;
+  /// Side token (`"B"` / `"A"`), matching the trade tape.
+  side_str: TradeSide;
+  /// Originating action's transaction hash (`0x`-hex); empty when systemic.
+  hash: string;
+  /// Record timestamp (consensus ms).
+  time: number;
 }
 
 /// A typed inbound frame `{channel, data}`. `data` is left as `unknown` because
@@ -298,38 +440,49 @@ export class WsClient {
 
   // ── convenience subscribe helpers ─────────────────────────────────────────
   //
-  // Format a numeric market id into the `coin` decimal-string the node parses
-  // (`str::parse::<u32>`), so callers never accidentally send a JSON number that
-  // the node drops as "unknown market". Mirrors the Rust `subscribe_*` helpers.
+  // `coin` is the market SYMBOL string (e.g. `"BTC"`) — the canonical key on
+  // the consolidated surface. A decimal asset-id string is also accepted.
 
-  /// Subscribe to L2 book updates for a market id.
-  async subscribeL2Book(marketId: number): Promise<void> {
-    return this.subscribe({ type: 'l2_book', coin: `${marketId}` });
+  /// Subscribe to L2 book updates for a market.
+  async subscribeL2Book(coin: string): Promise<void> {
+    return this.subscribe({ type: 'l2_book', coin });
   }
 
-  /// Subscribe to public trades for a market id.
-  async subscribeTrades(marketId: number): Promise<void> {
-    return this.subscribe({ type: 'trades', coin: `${marketId}` });
+  /// Subscribe to public trades for a market. The on-subscribe snapshot is a
+  /// non-empty array of recent tape prints (`users: null` on snapshot rows).
+  async subscribeTrades(coin: string): Promise<void> {
+    return this.subscribe({ type: 'trades', coin });
   }
 
-  /// Subscribe to best-bid-best-offer ticks for a market id.
-  async subscribeBbo(marketId: number): Promise<void> {
-    return this.subscribe({ type: 'bbo', coin: `${marketId}` });
+  /// Subscribe to best-bid-best-offer ticks for a market.
+  async subscribeBbo(coin: string): Promise<void> {
+    return this.subscribe({ type: 'bbo', coin });
   }
 
   /// Subscribe to per-market mark / oracle / funding / OI context.
-  async subscribeActiveAssetCtx(marketId: number): Promise<void> {
-    return this.subscribe({ type: 'active_asset_ctx', coin: `${marketId}` });
+  async subscribeActiveAssetCtx(coin: string): Promise<void> {
+    return this.subscribe({ type: 'active_asset_ctx', coin });
   }
 
-  /// Subscribe to OHLCV candles for a market id + interval token.
-  async subscribeCandles(marketId: number, interval: string): Promise<void> {
-    return this.subscribe({ type: 'candles', coin: `${marketId}`, interval });
+  /// Subscribe to OHLCV candles for a market + interval token.
+  async subscribeCandles(coin: string, interval: string): Promise<void> {
+    return this.subscribe({ type: 'candles', coin, interval });
   }
 
   /// Subscribe to the global all-market mids stream.
   async subscribeAllMids(): Promise<void> {
     return this.subscribe({ type: 'all_mids' });
+  }
+
+  /// Subscribe to the global committed-block head tape.
+  async subscribeExplorerBlock(): Promise<void> {
+    return this.subscribe({ type: 'explorer_block' });
+  }
+
+  /// Subscribe to the global transaction (order-status) tape. Rows carry the
+  /// originating action's `hash`.
+  async subscribeExplorerTxs(): Promise<void> {
+    return this.subscribe({ type: 'explorer_txs' });
   }
 
   /// Subscribe to per-user fills (0x address).
@@ -347,7 +500,18 @@ export class WsClient {
     return this.subscribe({ type: 'user_events', user });
   }
 
+  /// Subscribe to per-user money movement (deposit / withdraw / transfer).
+  async subscribeLedgerUpdates(user: string): Promise<void> {
+    return this.subscribe({ type: 'ledger_updates', user });
+  }
+
+  /// Subscribe to per-user realized funding payments (0x address).
+  async subscribeUserFundings(user: string): Promise<void> {
+    return this.subscribe({ type: 'user_fundings', user });
+  }
+
   /// Subscribe to the per-user live PERP account-state stream (0x address).
+  /// With `spot_state`, this replaces the removed `web_data2` composite.
   async subscribeAccountState(user: string): Promise<void> {
     return this.subscribe({ type: 'account_state', user });
   }
@@ -358,12 +522,8 @@ export class WsClient {
   }
 
   /// Subscribe to per-(user, market) leverage / margin-mode context.
-  async subscribeActiveAssetData(user: string, marketId: number): Promise<void> {
-    return this.subscribe({
-      type: 'active_asset_data',
-      coin: `${marketId}`,
-      user,
-    });
+  async subscribeActiveAssetData(user: string, coin: string): Promise<void> {
+    return this.subscribe({ type: 'active_asset_data', coin, user });
   }
 
   // ── `post` request/response (signed exchange actions + info reads) ─────────
