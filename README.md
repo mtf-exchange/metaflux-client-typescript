@@ -31,8 +31,22 @@ const client = new Client({
 });
 
 // ---- Reads (no key required) — POST /info, {type,data} envelope unwrapped ----
-const markets = await client.info.markets();
-console.log(markets.map((m) => `${m.name} @ ${m.mark_px}`));
+// Market reads are keyed by `coin` (the market SYMBOL, e.g. "BTC"); account
+// reads by 0x `address`. Numeric market_id/asset_id/account_id params are gone
+// from the read surface (the signed /exchange action plane keeps numeric ids).
+const markets = await client.info.markets(); // { perp: MarketInfo[], spot: SpotMeta }
+console.log(markets.perp.map((m) => `${m.coin} @ ${m.mark_px}`));
+
+// Per-market margin ladder is inline on markets / market_info as margin_tiers
+// (upper-bound OI bands; the top band has max_open_interest: null).
+const btc = await client.info.marketInfo('BTC');
+console.log(btc.margin_tiers);
+
+const book = await client.info.l2Book('BTC');
+const trades = await client.info.tradesByTime('BTC', Date.now() - 3_600_000);
+const funding = await client.info.predictedFundings();
+const bars = await client.info.candleSnapshot('BTC', '1m'); // { candles: [...] }
+console.log(book.bids.length, trades.trades.length, funding.length, bars.candles.length);
 
 const acct = await client.info.accountState(
   '0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025',
@@ -226,16 +240,38 @@ out-of-band signing.
 
 ### WebSocket streams
 
+The gateway serves 19 native snake_case channels: `l2_book`, `bbo`, `trades`,
+`active_asset_ctx`, `all_mids`, `explorer_block`, `explorer_txs`, `candles`,
+`fills`, `user_events`, `order_updates`, `notifications`, `ledger_updates`,
+`user_fundings`, `user_twap_slice_fills`, `user_twap_history`,
+`account_state`, `spot_state`, and `active_asset_data`. `web_data2` was
+removed — compose `account_state` + `spot_state` instead. Per-market channels
+take `coin` (the market symbol); per-account channels take `user` (0x address).
+
 ```ts
-import { WsClient } from '@metaflux-dex/client';
+import { WsClient, type WsTrade } from '@metaflux-dex/client';
 
 const ws = new WsClient('ws://localhost:8080/ws');
 ws.onMessage((f) => {
   if (f.channel === 'l2_book') handleBook(f.data);
+  if (f.channel === 'trades') {
+    // On-subscribe snapshot is a NON-EMPTY array of recent prints with
+    // users: null; live pushes carry users: [taker, maker].
+    for (const t of f.data as WsTrade[]) console.log(t.coin, t.px, t.sz);
+  }
 });
 await ws.connect();
-await ws.subscribe({ type: 'l2_book', coin: 'BTC' });
+await ws.subscribeTrades('BTC');
+await ws.subscribe({ type: 'l2_book', coin: 'BTC' }); // same thing, explicit form
+await ws.subscribeExplorerTxs(); // global tx tape; rows carry the action hash
 ```
+
+Typed record shapes are exported for the data channels (`WsTrade`, `WsFill`,
+`WsOrderUpdate`, `WsUserFunding`, `ExplorerBlock`, `ExplorerTx`,
+`ActiveAssetCtx`, `AllMids`). On `order_updates`, a `filled` record carries
+the cumulative `filled_sz` + `avg_px` while `order.orig_sz` is the original
+size and `order.sz` the post-fill remainder. `user_fundings` records are
+`{coin, payment, szi, fundingRate, time}`.
 
 ### Power-user exports
 
