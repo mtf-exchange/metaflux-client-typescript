@@ -2,7 +2,7 @@
 //
 // The node exposes a faucet at `POST <faucetBaseUrl>/faucet` that credits an
 // address with test USDC + MTF. It runs on its OWN origin (devnet node port 8080;
-// production `https://faucet.devnet.mtf.exchange`), SEPARATE from the trading
+// production `https://api.devnet.mtf.exchange/faucet`), SEPARATE from the trading
 // API base URL — so `requestFaucet` takes a dedicated `faucetBaseUrl` rather
 // than reusing a `Client`'s trading base URL.
 //
@@ -34,7 +34,7 @@ export interface FaucetResponse {
 /// server-side).
 ///
 /// `faucetBaseUrl` is the faucet's OWN origin (e.g. `http://localhost:8080`
-/// on devnet, `https://faucet.devnet.mtf.exchange` in production) — NOT the
+/// on devnet, `https://api.devnet.mtf.exchange/faucet` in production) — NOT the
 /// trading API base URL.
 ///
 /// On success the credit is `"queued"` for the next block; the balance updates

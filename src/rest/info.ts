@@ -215,7 +215,7 @@ export class InfoApi {
   /// provided. Bars come oldest-first (compact keys, `o`/`c`/`h`/`l`
   /// whole-USDC decimal strings); the newest element is the still-forming bar.
   ///
-  /// GATEWAY-served, not node: must hit `<net>-gateway.mtf.exchange/info`; a
+  /// GATEWAY-served, not node: must hit `api.<net>.mtf.exchange/info`; a
   /// bare node returns `unknown info type: candle_snapshot`.
   async candleSnapshot(
     coin: string,
