@@ -53,10 +53,8 @@ import type {
   NativeSpotOrder,
   NativeTrigger,
   PriorityBid,
-  REDACTED,
   ScheduleCancel,
   SetDisplayName,
-  SetMetaliquidityWhitelist,
   SetReferrer,
   SubmitEncryptedOrder,
   TokenDelegate,
@@ -733,37 +731,6 @@ export function buildNativeMbWithdrawAction(params: MbWithdraw): string {
     'mb_withdraw',
     `{${jsonStr('chain')}:${jsonStr(params.chain)},${jsonStr('asset')}:${params.asset},${jsonStr('amount')}:${params.amount},${jsonStr('dst_addr')}:${jsonStr(params.dst_addr)}}`,
   );
-}
-
-// ---- governance / operator ----
-
-/// `REDACTED` — set an MLP whitelist membership (validator).
-export function buildNativeSetMetaliquidityWhitelistAction(
-  params: SetMetaliquidityWhitelist,
-): string {
-  validateAddress(params.address, 'address');
-  return wrapParams(
-    'REDACTED',
-    `{${jsonStr('address')}:${jsonStr(params.address)},${jsonStr('allowed')}:${params.allowed ? 'true' : 'false'}}`,
-  );
-}
-
-/// `REDACTED` — register / revoke a vault strategy operator.
-export function buildNativeREDACTEDAction(
-  params: REDACTED,
-): string {
-  validateU64(params.vault_id, 'vault_id');
-  validateAddress(params.operator, 'operator');
-  const parts: string[] = [
-    `${jsonStr('vault_id')}:${params.vault_id}`,
-    `${jsonStr('operator')}:${jsonStr(params.operator)}`,
-    `${jsonStr('allowed')}:${params.allowed ? 'true' : 'false'}`,
-  ];
-  if (params.expires_at_ms !== undefined) {
-    validateU64(params.expires_at_ms, 'expires_at_ms');
-    parts.push(`${jsonStr('expires_at_ms')}:${params.expires_at_ms}`);
-  }
-  return wrapParams('REDACTED', `{${parts.join(',')}}`);
 }
 
 // ============================================================================

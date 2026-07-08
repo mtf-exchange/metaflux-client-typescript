@@ -72,10 +72,6 @@ export type {
 } from './account.js';
 export type { TokenDelegate, ClaimRewards, LinkStakingUser } from './staking.js';
 export type { TwapOrder, TwapCancel } from './twap.js';
-export type {
-  SetMetaliquidityWhitelist,
-  REDACTED,
-} from './governance.js';
 export type { MbChain, MbWithdraw } from './meta-bridge.js';
 export type {
   VaultKind,
@@ -95,5 +91,4 @@ export type {
   SendAsset,
   UsdClassTransfer,
   Withdraw,
-  REDACTED,
 } from './typed.js';

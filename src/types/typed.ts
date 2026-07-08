@@ -49,14 +49,3 @@ export interface Withdraw {
   /// `true` routes the withdrawal via CCTP.
   use_cctp: boolean;
 }
-
-// ---- account / staking / vault / metaliquidity (15) ----
-
-/// `REDACTED` — set a metaliquidity-set membership (validator
-/// authorized). Distinct from the legacy `REDACTED` shape.
-export interface REDACTED {
-  /// `0x`-hex 20-byte account address.
-  account: string;
-  /// `true` adds to the set, `false` removes.
-  allowed: boolean;
-}

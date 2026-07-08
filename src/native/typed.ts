@@ -195,7 +195,7 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('useCctp', 'bool', 'use_cctp'),
     ],
   },
-  // ---- account / staking / vault / metaliquidity (15) ----
+  // ---- account / staking / vault ----
   approve_agent: {
     pascal: 'ApproveAgent',
     wireType: 'approve_agent',
@@ -297,24 +297,6 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
     pascal: 'SpotMarginClose',
     wireType: 'spot_margin_close',
     fields: [f('pair', 'uint32', 'pair'), f('limitPx', 'uint64', 'limit_px')],
-  },
-  REDACTED: {
-    pascal: 'REDACTED',
-    wireType: 'REDACTED',
-    fields: [
-      f('account', 'address', 'account'),
-      f('allowed', 'bool', 'allowed'),
-    ],
-  },
-  REDACTED: {
-    pascal: 'REDACTED',
-    wireType: 'REDACTED',
-    fields: [
-      f('vaultId', 'uint64', 'vault_id'),
-      f('operator', 'address', 'operator'),
-      f('allowed', 'bool', 'allowed'),
-      f('expiresAtMs', 'uint64', 'expires_at_ms'),
-    ],
   },
   // ---- margin (2) ----
   update_isolated_margin: {

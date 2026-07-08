@@ -150,23 +150,6 @@ const VECTORS: Vector[] = [
     nonce: 30n,
     digest: '9b047067f8fd3f6ad9b10da914450e2e3f03c5057bdb10a8e90126d26b94b742',
   },
-  {
-    actionType: 'REDACTED',
-    payload: { account: addr(0x6f), allowed: true },
-    nonce: 33n,
-    digest: 'cfd79d25d8a119f2832fde37f710456f3946c16dadda4af653b2710999f8e441',
-  },
-  {
-    actionType: 'REDACTED',
-    payload: {
-      vault_id: 42,
-      operator: addr(0x70),
-      allowed: true,
-      expires_at_ms: 1_700_000_000_000,
-    },
-    nonce: 34n,
-    digest: '4de965c3bc25f15ddafa0b778179909f50cd0930bf4f58a652dde93bce524c80',
-  },
   // ---- the 12 formerly-deferred actions (now typed) ----
   {
     actionType: 'update_isolated_margin',
@@ -388,9 +371,6 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     );
     expect(encodeType('convert_to_multi_sig_user')).toBe(
       'MetaFluxTransaction:ConvertToMultiSigUser(string metafluxChain,address[] signers,uint32 threshold,uint64 nonce)',
-    );
-    expect(encodeType('REDACTED')).toBe(
-      'MetaFluxTransaction:REDACTED(string metafluxChain,uint64 vaultId,address operator,bool allowed,uint64 expiresAtMs,uint64 nonce)',
     );
   });
 

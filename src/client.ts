@@ -38,10 +38,8 @@ import {
   buildNativeModifyAction,
   buildNativeOrderAction,
   buildNativePriorityBidAction,
-  buildNativeREDACTEDAction,
   buildNativeScheduleCancelAction,
   buildNativeSetDisplayNameAction,
-  buildNativeSetMetaliquidityWhitelistAction,
   buildNativeSetPositionModeAction,
   buildNativeSetReferrerAction,
   buildNativeSpotCancelAction,
@@ -126,14 +124,11 @@ import type {
   OrderAck,
   Position,
   PriorityBid,
-  REDACTED,
   RfqAccept,
   RfqRequest,
   ScheduleCancel,
   SendAsset,
   SetDisplayName,
-  REDACTED,
-  SetMetaliquidityWhitelist,
   SetReferrer,
   SubAccountSpotTransfer,
   SubAccountTransfer,
@@ -1041,32 +1036,6 @@ export class Client {
     return this.postSenderAuthorized(buildNativeMbWithdrawAction(params), opts);
   }
 
-  // ── governance / operator ─────────────────────
-
-  /// Set a metaliquidity-provider whitelist membership (validator-authorized)
-  /// via `POST /exchange`.
-  async setMetaliquidityWhitelist(
-    params: SetMetaliquidityWhitelist,
-    opts: { nonce?: bigint; chainId?: number } = {},
-  ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(
-      buildNativeSetMetaliquidityWhitelistAction(params),
-      opts,
-    );
-  }
-
-  /// Register or revoke an external strategy operator for a vault
-  /// (vault-leader-authorized) via `POST /exchange`.
-  async registerMetaliquidityOperator(
-    params: REDACTED,
-    opts: { nonce?: bigint; chainId?: number } = {},
-  ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(
-      buildNativeREDACTEDAction(params),
-      opts,
-    );
-  }
-
   // ── RFQ / FBA microstructure (W1 typed path) ──────────────────────────────
   //
   // These sign the node's frozen `RfqRequest` / `RfqAccept` / `FbaSubmit`
@@ -1351,7 +1320,7 @@ export class Client {
     return this.postTyped(signed);
   }
 
-  // ── typed transfers + metaliquidity-set (new under the typed scheme) ───────
+  // ── typed transfers (new under the typed scheme) ──────────────────────────
 
   /// Transfer an asset between dexes / accounts (`send_asset`, typed scheme).
   async sendAsset(
@@ -1386,19 +1355,6 @@ export class Client {
   ): Promise<NativeExchangeAck> {
     return this.submitTyped(
       'withdraw',
-      params as unknown as Record<string, unknown>,
-      opts,
-    );
-  }
-
-  /// Set a metaliquidity-set membership (`REDACTED`, typed scheme;
-  /// validator-authorized). Distinct from the legacy `setMetaliquidityWhitelist`.
-  async setMetaliquiditySet(
-    params: REDACTED,
-    opts: { nonce?: bigint; chainId?: number } = {},
-  ): Promise<NativeExchangeAck> {
-    return this.submitTyped(
-      'REDACTED',
       params as unknown as Record<string, unknown>,
       opts,
     );

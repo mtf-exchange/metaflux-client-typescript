@@ -189,7 +189,6 @@ inner orders / cancels each carry an `owner` the client checks against the signe
   supply side `earnDeposit` / `earnWithdraw`.
 - **Encrypted orders**: `submitEncryptedOrder`.
 - **MetaBridge**: `mbWithdraw` (cross-collateral withdrawal to another chain).
-- **Governance**: `setMetaliquidityWhitelist`, `registerMetaliquidityOperator`.
 
 Decimal magnitudes (`amount` / `delta` / `shares` / `value`) are passed as
 **strings**; ids / sizes / prices are plain integers.

@@ -114,8 +114,6 @@ export {
   buildNativeVaultWithdrawAction,
   buildNativeVaultDistributeAction,
   buildNativeMbWithdrawAction,
-  buildNativeSetMetaliquidityWhitelistAction,
-  buildNativeREDACTEDAction,
   // cross-chain (forward-compat) builder. RFQ / FBA / encrypted-order are now
   // signed via the W1 typed path (`Client.rfqRequest` / `rfqAccept` / `fbaSubmit`
   // / `encryptedOrderSubmit` → `submitTyped`), not opaque action builders.
@@ -331,9 +329,6 @@ export type {
   // MetaBridge.
   MbChain,
   MbWithdraw,
-  // Governance / operator.
-  SetMetaliquidityWhitelist,
-  REDACTED,
   // RFQ / FBA / cross-chain (forward-compat).
   CoreSide,
   RfqRequest,
@@ -345,5 +340,4 @@ export type {
   SendAsset,
   UsdClassTransfer,
   Withdraw,
-  REDACTED,
 } from './types/index.js';
