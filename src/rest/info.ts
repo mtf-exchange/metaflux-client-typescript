@@ -108,6 +108,18 @@ export class InfoApi {
     return this.post<Markets>({ type: 'markets' });
   }
 
+  /// `markets_meta` — STATIC per-market metadata: the long-cacheable subset of
+  /// `markets` (precision grids `sz_decimals`/`tick_size`/`step_size`, leverage
+  /// + `margin_tiers` ladder, `min_order`, trade-control flags, `mark_source`,
+  /// and the deprecated `asset_id` shim). Same `{perp, spot}` envelope as
+  /// `markets`, but the `perp[]` records OMIT the dynamic price/funding/OI
+  /// fields (`mark_px`/`oracle_px`/`open_interest`/`funding`/…) — those live on
+  /// `markets`. Merge the two by `coin` when a view needs both live prices AND
+  /// precision. Because it is static it can be fetched once and cached hard.
+  async marketsMeta(): Promise<Markets> {
+    return this.post<Markets>({ type: 'markets_meta' });
+  }
+
   /// `vault_state` — per-vault snapshot keyed by vault `address` (0x hex).
   async vaultState(vaultAddress: string): Promise<VaultState> {
     return this.post<VaultState>({ type: 'vault_state', vault: vaultAddress });
