@@ -164,10 +164,12 @@ const VECTORS: Vector[] = [
     digest: '47647d208358a681eb657867da2ce00dfeb010a7f2023ecb69e195642da24c8a',
   },
   {
+    // lock_months omitted => defaults to 0 (flexible), matching the server's
+    // `#[serde(default)]`; the typed digest still signs `lockMonths` (= 0).
     actionType: 'token_delegate',
     payload: { validator: addr(0xd4), amount: '1000', is_undelegate: false },
     nonce: 11n,
-    digest: '5327737fefc7ee3b38b59743fb4ba311d9142a7c672ec59ca92c5a871173008b',
+    digest: 'cc3d9e5ed170fc39028ebe587af079e42968a1c5e324da20bc584ddc28711a98',
   },
   {
     actionType: 'agent_set_abstraction',
@@ -224,7 +226,7 @@ const VECTORS: Vector[] = [
     nonce: 25n,
     digest: '5244365c226ab1b7ec786129f134d104a2923a57b9cc2588d6b215aef5b55018',
   },
-  // ---- the 11 newly-typed actions (core_evm_transfer + account/sub-account
+  // ---- the 10 newly-typed actions (core_evm_transfer + account/sub-account
   //      /staking/abstraction/priority/encrypted set) ----
   {
     actionType: 'core_evm_transfer',
@@ -264,12 +266,6 @@ const VECTORS: Vector[] = [
     digest: '66466daf4a1f531f167ea4d131ee4c41c5e16d75e3a85bd0cc739633b763b4cf',
   },
   {
-    actionType: 'user_dex_abstraction',
-    payload: { enabled: true },
-    nonce: 59n,
-    digest: '5fad4db7c576767400c930e5ed312847e17741526db66f6f918ff027a6e7b2d6',
-  },
-  {
     actionType: 'user_set_abstraction',
     payload: { kind: 3, value: '9.9' },
     nonce: 60n,
@@ -303,9 +299,9 @@ const VECTORS: Vector[] = [
 ];
 
 describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
-  it('reproduces all 41 contract KAT digests byte-for-byte (chain 114514)', async () => {
+  it('reproduces all 38 contract KAT digests byte-for-byte (chain 114514)', async () => {
     const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
-    expect(VECTORS.length).toBe(41);
+    expect(VECTORS.length).toBe(38);
     for (const v of VECTORS) {
       const built = buildTyped(v.actionType, v.payload, v.nonce, CHAIN_ID);
       const digest = await typedActionDigest(built);
@@ -506,9 +502,9 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(toHex(base)).not.toBe(toHex(otherChain));
   });
 
-  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 49 reachable actions', async () => {
+  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 46 reachable actions', async () => {
     const { isTypedAction, TYPED_ACTION_TYPES } = await import('../src/native/typed.js');
-    expect(TYPED_ACTION_TYPES.length).toBe(49);
+    expect(TYPED_ACTION_TYPES.length).toBe(46);
     expect(isTypedAction('approve_agent')).toBe(true);
     expect(isTypedAction('submit_order')).toBe(false);
     // The 5 W1 RFQ / FBA / encrypted-alias / pm-alias actions.
@@ -527,21 +523,20 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(isTypedAction('agent_set_abstraction')).toBe(true);
     expect(isTypedAction('spot_margin_open')).toBe(true);
     expect(isTypedAction('earn_withdraw')).toBe(true);
-    // The 11 newly-typed actions (core_evm_transfer + account/sub-account set).
+    // The 10 newly-typed actions (core_evm_transfer + account/sub-account set).
     expect(isTypedAction('core_evm_transfer')).toBe(true);
     expect(isTypedAction('create_sub_account')).toBe(true);
     expect(isTypedAction('sub_account_transfer')).toBe(true);
     expect(isTypedAction('sub_account_spot_transfer')).toBe(true);
     expect(isTypedAction('c_deposit')).toBe(true);
     expect(isTypedAction('c_withdraw')).toBe(true);
-    expect(isTypedAction('user_dex_abstraction')).toBe(true);
     expect(isTypedAction('user_set_abstraction')).toBe(true);
     expect(isTypedAction('priority_bid')).toBe(true);
     expect(isTypedAction('cancel_all_orders')).toBe(true);
     expect(isTypedAction('submit_encrypted_order')).toBe(true);
   });
 
-  it('encodeType strings for the 11 newly-typed actions match the contract', async () => {
+  it('encodeType strings for the 10 newly-typed actions match the contract', async () => {
     const { encodeType } = await import('../src/native/typed.js');
     expect(encodeType('core_evm_transfer')).toBe(
       'MetaFluxTransaction:CoreEvmTransfer(string metafluxChain,string amount,bool toEvm,address destination,uint32 asset,uint64 nonce)',
@@ -560,9 +555,6 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     );
     expect(encodeType('c_withdraw')).toBe(
       'MetaFluxTransaction:CWithdraw(string metafluxChain,string amount,uint64 nonce)',
-    );
-    expect(encodeType('user_dex_abstraction')).toBe(
-      'MetaFluxTransaction:UserDexAbstraction(string metafluxChain,bool enabled,uint64 nonce)',
     );
     expect(encodeType('user_set_abstraction')).toBe(
       'MetaFluxTransaction:UserSetAbstraction(string metafluxChain,uint8 kind,string value,uint64 nonce)',
@@ -651,7 +643,7 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
       'MetaFluxTransaction:TopUpIsolatedOnlyMargin(string metafluxChain,uint32 asset,string amount,uint64 nonce)',
     );
     expect(encodeType('token_delegate')).toBe(
-      'MetaFluxTransaction:TokenDelegate(string metafluxChain,address validator,string amount,bool isUndelegate,uint64 nonce)',
+      'MetaFluxTransaction:TokenDelegate(string metafluxChain,address validator,string amount,bool isUndelegate,uint8 lockMonths,uint64 nonce)',
     );
     expect(encodeType('agent_set_abstraction')).toBe(
       'MetaFluxTransaction:AgentSetAbstraction(string metafluxChain,address user,uint8 kind,string value,uint64 nonce)',

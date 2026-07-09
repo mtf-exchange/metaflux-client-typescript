@@ -141,6 +141,13 @@ interface FieldSpec {
   readonly ty: FieldSolidityType;
   /// snake_case key this field is read from in the action payload + POST `params`.
   readonly wireKey: string;
+  /// Default value for an OPTIONAL `uintN` field when the wire key is absent
+  /// (`undefined` / `null`). Mirrors the server's `#[serde(default)]` on that
+  /// param — the value is still signed + written to the POST `params`, matching
+  /// the node reconstructing the SAME digest from the defaulted param. Only
+  /// consulted for the `uint8` / `uint16` / `uint32` / `uint64` types; a field
+  /// without a default keeps its required-present validation.
+  readonly defaultUint?: bigint;
 }
 
 /// A full typed-action spec.
@@ -160,8 +167,13 @@ interface TypedSpec {
   readonly emitNoParams?: boolean;
 }
 
-function f(name: string, ty: FieldSolidityType, wireKey: string): FieldSpec {
-  return { name, ty, wireKey };
+function f(
+  name: string,
+  ty: FieldSolidityType,
+  wireKey: string,
+  defaultUint?: bigint,
+): FieldSpec {
+  return { name, ty, wireKey, defaultUint };
 }
 
 // The reachable typed actions. Field order is CONSENSUS-FROZEN — it is both
@@ -323,6 +335,10 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('validator', 'address', 'validator'),
       f('amount', 'string-decimal', 'amount'),
       f('isUndelegate', 'bool', 'is_undelegate'),
+      // Lock tier in months (`0` flexible / `1` / `6` / `24`). The server ALWAYS
+      // includes `lockMonths` in the type-hash + encoded struct (default 0);
+      // signed so a relay cannot alter the delegation's lock tier / reward weight.
+      f('lockMonths', 'uint8', 'lock_months', 0n),
     ],
   },
   // ---- agent settings (1) ----
@@ -466,11 +482,6 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
     pascal: 'CWithdraw',
     wireType: 'c_withdraw',
     fields: [f('amount', 'string-decimal', 'amount')],
-  },
-  user_dex_abstraction: {
-    pascal: 'UserDexAbstraction',
-    wireType: 'user_dex_abstraction',
-    fields: [f('enabled', 'bool', 'enabled')],
   },
   user_set_abstraction: {
     pascal: 'UserSetAbstraction',
@@ -819,7 +830,11 @@ function planField(fld: FieldSpec, payload: Record<string, unknown>): FieldPlan 
     case 'uint16':
     case 'uint32':
     case 'uint64': {
-      const v = asBigInt(raw, fld.wireKey);
+      // An OPTIONAL uint (defaultUint set) reads its default when the wire key
+      // is absent, matching the server's `#[serde(default)]`; a required uint
+      // still throws on a missing value.
+      const src = raw === undefined || raw === null ? fld.defaultUint : raw;
+      const v = src === undefined ? asBigInt(raw, fld.wireKey) : asBigInt(src, fld.wireKey);
       const word = encUintWord(v, uintBits(fld.ty), fld.wireKey);
       return mkPlan(fld, v.toString(), numberFor(v, fld.wireKey), async () => word);
     }

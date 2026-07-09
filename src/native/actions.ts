@@ -20,7 +20,6 @@ import {
   validateU16,
   validateU32,
   validateU64,
-  validateU128,
   toU64,
 } from './digest.js';
 import type {
@@ -35,7 +34,6 @@ import type {
   ClaimRewards,
   ConvertToMultiSigUser,
   CreateVault,
-  CrossChainSend,
   LinkStakingUser,
   MbWithdraw,
   Modify,
@@ -63,7 +61,6 @@ import type {
   TwapOrder,
   UpdateIsolatedMargin,
   UpdateLeverage,
-  UserDexAbstraction,
   UserPortfolioMargin,
   UserSetAbstraction,
   VaultDistribute,
@@ -524,16 +521,6 @@ export function buildNativeConvertToMultiSigUserAction(
   );
 }
 
-/// `user_dex_abstraction` — toggle the account's DEX-abstraction opt-in flag.
-export function buildNativeUserDexAbstractionAction(
-  params: UserDexAbstraction,
-): string {
-  return wrapParams(
-    'user_dex_abstraction',
-    `{${jsonStr('enabled')}:${params.enabled ? 'true' : 'false'}}`,
-  );
-}
-
 /// `user_set_abstraction` — set a self-scoped abstraction config value.
 export function buildNativeUserSetAbstractionAction(
   params: UserSetAbstraction,
@@ -834,44 +821,8 @@ export function buildNativeEarnWithdrawAction(
   return `{${jsonStr('type')}:${jsonStr('earn_withdraw')},${jsonStr('params')}:${paramsJson}}`;
 }
 
-// ============================================================================
-// cross-chain (forward-compat).
-//
-// The node recognizes the `cross_chain_send` tag but currently lowers it to
-// `UnsupportedAction` on the public `/exchange` path (the real handler runs on
-// the EVM core-writer path). The SDK emits the byte-correct wire shape the core
-// param struct expects, so it becomes live the moment the node bridges it.
-//
-// NOTE: the RFQ / FBA / encrypted-order builders that used to live here emitted
-// the pre-W1 OPAQUE sender-authorized shape (per-action `rfq` / `accept` /
-// `submit` / `encrypted` wrapper keys, u128/i128 numerics) which the typed-only
-// `/exchange` REJECTS. They were migrated to the W1 typed path — `rfq_request`
-// / `rfq_accept` / `fba_submit` / `encrypted_order_submit` are now signed via
-// `../native/typed` (the `Client.rfqRequest` / `rfqAccept` / `fbaSubmit` /
-// `encryptedOrderSubmit` convenience methods route through `submitTyped`).
-// ============================================================================
-
-/// Serialize a byte buffer as a JSON array of unsigned byte-numbers, optionally
-/// pinning an exact length.
-function byteArrayJson(bytes: Uint8Array, field: string, len?: number): string {
-  if (!(bytes instanceof Uint8Array)) {
-    throw new RangeError(`${field} must be a Uint8Array`);
-  }
-  if (len !== undefined && bytes.length !== len) {
-    throw new RangeError(`${field} must be exactly ${len} bytes`);
-  }
-  return `[${Array.from(bytes).join(',')}]`;
-}
-
-/// `cross_chain_send` — initiate a chain-agnostic cross-chain transfer. Wrapper
-/// key is **`msg`**. `recipient` is a 32-byte array; `amount` (`u128`) is a bare
-/// JSON number (NOT hex).
-export function buildNativeCrossChainSendAction(params: CrossChainSend): string {
-  validateU32(params.dst_chain_id, 'dst_chain_id');
-  const recipient = byteArrayJson(params.recipient, 'recipient', 32);
-  validateU32(params.token, 'token');
-  validateU128(params.amount, 'amount');
-  validateU64(params.nonce, 'nonce');
-  const msgJson = `{${jsonStr('dst_chain_id')}:${params.dst_chain_id},${jsonStr('recipient')}:${recipient},${jsonStr('token')}:${params.token},${jsonStr('amount')}:${params.amount},${jsonStr('nonce')}:${params.nonce}}`;
-  return `{${jsonStr('type')}:${jsonStr('cross_chain_send')},${jsonStr('msg')}:${msgJson}}`;
-}
+// NOTE: `cross_chain_send` was removed — it was never a public `/exchange`
+// action (the node only accepts it on the EVM core-writer path). The RFQ / FBA /
+// encrypted-order builders that once lived here were migrated to the W1 typed
+// path (`rfq_request` / `rfq_accept` / `fba_submit` / `encrypted_order_submit`,
+// signed via `../native/typed`).

@@ -77,12 +77,6 @@ export interface ConvertToMultiSigUser {
   threshold: number;
 }
 
-/// `user_dex_abstraction` — toggle the account's DEX-abstraction opt-in flag.
-export interface UserDexAbstraction {
-  /// `true` = opt in, `false` = opt out.
-  enabled: boolean;
-}
-
 /// `user_set_abstraction` — set a self-scoped abstraction config value.
 export interface UserSetAbstraction {
   /// Sub-type tag (`u8`, 0..=255); interpretation is config-defined.

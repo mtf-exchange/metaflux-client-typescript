@@ -30,7 +30,6 @@ import {
   buildNativeClaimRewardsAction,
   buildNativeConvertToMultiSigUserAction,
   buildNativeCreateVaultAction,
-  buildNativeCrossChainSendAction,
   buildNativeEarnDepositAction,
   buildNativeEarnWithdrawAction,
   buildNativeLinkStakingUserAction,
@@ -55,7 +54,6 @@ import {
   buildNativeTwapOrderAction,
   buildNativeUpdateIsolatedMarginAction,
   buildNativeUpdateLeverageAction,
-  buildNativeUserDexAbstractionAction,
   buildNativeUserPortfolioMarginAction,
   buildNativeUserSetAbstractionAction,
   buildNativeVaultDistributeAction,
@@ -100,7 +98,6 @@ import type {
   CoreEvmTransfer,
   CreateSubAccount,
   CreateVault,
-  CrossChainSend,
   CWithdraw,
   EncryptedOrderSubmit,
   FbaSubmit,
@@ -142,7 +139,6 @@ import type {
   TwapOrder,
   UpdateIsolatedMargin,
   UpdateLeverage,
-  UserDexAbstraction,
   UserPortfolioMargin,
   UserSetAbstraction,
   VaultDistribute,
@@ -879,17 +875,6 @@ export class Client {
     );
   }
 
-  /// Toggle the account's DEX-abstraction opt-in flag via `POST /exchange`.
-  async userDexAbstraction(
-    params: UserDexAbstraction,
-    opts: { nonce?: bigint; chainId?: number } = {},
-  ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(
-      buildNativeUserDexAbstractionAction(params),
-      opts,
-    );
-  }
-
   /// Set a self-scoped abstraction config value via `POST /exchange`.
   async userSetAbstraction(
     params: UserSetAbstraction,
@@ -1083,17 +1068,6 @@ export class Client {
       params as unknown as Record<string, unknown>,
       opts,
     );
-  }
-
-  /// Initiate a chain-agnostic cross-chain transfer (`cross_chain_send`) via
-  /// `POST /exchange`. Wrapper key is `msg`; `recipient` is a 32-byte array and
-  /// `amount` is a bare number (NOT hex). Forward-compat: the node lowers this
-  /// tag to `UnsupportedAction` until it bridges the handler.
-  async crossChainSend(
-    params: CrossChainSend,
-    opts: { nonce?: bigint; chainId?: number } = {},
-  ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeCrossChainSendAction(params), opts);
   }
 
   /// Sign a pre-built sender-authorized action JSON and POST it to `/exchange`.
@@ -1522,8 +1496,8 @@ export class Client {
   // These were previously un-mapped on the typed-only `/exchange` (so a typed
   // request was rejected); they now sign under the typed `/exchange`. The methods
   // already present on the legacy/native path (`cancelAllOrders`,
-  // `userDexAbstraction`, `userSetAbstraction`, `priorityBid`,
-  // `submitEncryptedOrder`) gain a `Typed` suffix so both schemes stay reachable.
+  // `userSetAbstraction`, `priorityBid`, `submitEncryptedOrder`) gain a `Typed`
+  // suffix so both schemes stay reachable.
 
   /// Move a Core spot token to MetaFluxEVM (`core_evm_transfer`, typed scheme).
   /// Core → EVM only: debits the sender's Core balance for `asset` (omit / `0` =
@@ -1605,18 +1579,6 @@ export class Client {
   ): Promise<NativeExchangeAck> {
     return this.submitTyped(
       'c_withdraw',
-      params as unknown as Record<string, unknown>,
-      opts,
-    );
-  }
-
-  /// Toggle the user DEX-abstraction flag (`user_dex_abstraction`, typed scheme).
-  async userDexAbstractionTyped(
-    params: UserDexAbstraction,
-    opts: { nonce?: bigint; chainId?: number } = {},
-  ): Promise<NativeExchangeAck> {
-    return this.submitTyped(
-      'user_dex_abstraction',
       params as unknown as Record<string, unknown>,
       opts,
     );

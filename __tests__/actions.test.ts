@@ -200,39 +200,6 @@ describe('forward-compat write-action builders (cross-chain / vault_distribute)'
     );
   });
 
-  it('cross_chain_send: wrapper key `msg`, 32-byte recipient array, numeric amount', async () => {
-    const { buildNativeCrossChainSendAction } = await import(
-      '../src/native/actions.js'
-    );
-    const recipient = '[' + new Array(32).fill(7).join(',') + ']';
-    expect(
-      buildNativeCrossChainSendAction({
-        dst_chain_id: 8453,
-        recipient: new Uint8Array(32).fill(7),
-        token: 1,
-        amount: 1000000n,
-        nonce: 7,
-      }),
-    ).toBe(
-      `{"type":"cross_chain_send","msg":{"dst_chain_id":8453,"recipient":${recipient},"token":1,"amount":1000000,"nonce":7}}`,
-    );
-  });
-
-  it('cross_chain_send: rejects a non-32-byte recipient', async () => {
-    const { buildNativeCrossChainSendAction } = await import(
-      '../src/native/actions.js'
-    );
-    expect(() =>
-      buildNativeCrossChainSendAction({
-        dst_chain_id: 1,
-        recipient: new Uint8Array(20),
-        token: 1,
-        amount: 1n,
-        nonce: 1,
-      }),
-    ).toThrow();
-  });
-
 });
 
 describe.skipIf(!wasmBuilt)('real native write-action sign → recover', () => {

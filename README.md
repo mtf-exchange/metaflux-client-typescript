@@ -180,8 +180,8 @@ inner orders / cancels each carry an `owner` the client checks against the signe
 - **Leverage & margin**: `updateLeverage`, `updateIsolatedMargin`,
   `topUpIsolatedOnlyMargin`, `userPortfolioMargin` (portfolio-margin enroll).
 - **Account & agents**: `setDisplayName`, `setReferrer`, `approveAgent`,
-  `approveBuilderFee`, `convertToMultiSigUser`, `userDexAbstraction`,
-  `userSetAbstraction`, `agentSetAbstraction`, `priorityBid`.
+  `approveBuilderFee`, `convertToMultiSigUser`, `userSetAbstraction`,
+  `agentSetAbstraction`, `priorityBid`.
 - **Staking**: `tokenDelegate`, `claimRewards`, `linkStakingUser`.
 - **Vaults**: `createVault`, `vaultTransfer`, `vaultModify`, `vaultWithdraw`.
 - **Spot margin & Earn** (devnet preview): `spotMarginDeposit` /

@@ -100,7 +100,6 @@ export {
   buildNativeApproveAgentAction,
   buildNativeApproveBuilderFeeAction,
   buildNativeConvertToMultiSigUserAction,
-  buildNativeUserDexAbstractionAction,
   buildNativeUserSetAbstractionAction,
   buildNativeAgentSetAbstractionAction,
   buildNativePriorityBidAction,
@@ -114,10 +113,9 @@ export {
   buildNativeVaultWithdrawAction,
   buildNativeVaultDistributeAction,
   buildNativeMbWithdrawAction,
-  // cross-chain (forward-compat) builder. RFQ / FBA / encrypted-order are now
-  // signed via the W1 typed path (`Client.rfqRequest` / `rfqAccept` / `fbaSubmit`
-  // / `encryptedOrderSubmit` → `submitTyped`), not opaque action builders.
-  buildNativeCrossChainSendAction,
+  // RFQ / FBA / encrypted-order are signed via the W1 typed path
+  // (`Client.rfqRequest` / `rfqAccept` / `fbaSubmit` / `encryptedOrderSubmit` →
+  // `submitTyped`), not opaque action builders.
   // Spot CLOB + spot margin (leveraged spot) + Earn (lending pool).
   buildNativeSpotOrderAction,
   buildNativeSpotCancelAction,
@@ -298,7 +296,6 @@ export type {
   ApproveAgent,
   ApproveBuilderFee,
   ConvertToMultiSigUser,
-  UserDexAbstraction,
   UserSetAbstraction,
   AgentSetAbstraction,
   PriorityBid,
@@ -329,12 +326,11 @@ export type {
   // MetaBridge.
   MbChain,
   MbWithdraw,
-  // RFQ / FBA / cross-chain (forward-compat).
+  // RFQ / FBA.
   CoreSide,
   RfqRequest,
   RfqAccept,
   FbaSubmit,
-  CrossChainSend,
   // EIP-712 typed-action payloads (structured wallet-signing path).
   MetafluxChainTag,
   SendAsset,

@@ -11,6 +11,11 @@ export interface TokenDelegate {
   amount: string;
   /// `true` = unstake / queue undelegation; `false` = delegate.
   is_undelegate: boolean;
+  /// Lock tier in months — one of `0` (flexible), `1`, `6`, `24`. Optional;
+  /// defaults to `0` (flexible), matching the server's `#[serde(default)]`. The
+  /// typed digest ALWAYS signs `lockMonths` (default 0) so a relay cannot alter
+  /// the delegation's lock tier / reward weight. Ignored on undelegate.
+  lock_months?: number;
 }
 
 /// `claim_rewards` — claim accrued staking rewards.

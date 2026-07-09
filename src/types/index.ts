@@ -59,7 +59,6 @@ export type {
   ApproveAgent,
   ApproveBuilderFee,
   ConvertToMultiSigUser,
-  UserDexAbstraction,
   UserSetAbstraction,
   AgentSetAbstraction,
   PriorityBid,
@@ -84,7 +83,6 @@ export type {
 export type { SubmitEncryptedOrder, EncryptedOrderSubmit } from './encrypted.js';
 export type { CoreSide, RfqRequest, RfqAccept } from './rfq.js';
 export type { FbaSubmit } from './fba.js';
-export type { CrossChainSend } from './cross-chain.js';
 export type {
   // EIP-712 typed-action payloads (the structured wallet-signing path).
   MetafluxChainTag,
