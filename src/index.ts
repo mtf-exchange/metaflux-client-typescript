@@ -59,9 +59,22 @@ export {
   signTypedAction,
   recoverTypedSigner,
   typedRequestBody,
+  foldExpiryTypeString,
   type TypedDataV4,
   type TypedSignedAction,
 } from './native/typed.js';
+export {
+  // Multi-sig inner-signature signing (roster member prehash). User-bound is the
+  // default scheme (in force after the scheduled network upgrade); `legacy` is
+  // the pre-upgrade opt-in.
+  MULTI_SIG_INNER_TYPE,
+  MULTI_SIG_INNER_LEGACY_TYPE,
+  multiSigInnerDigest,
+  multiSigInnerDigestLegacy,
+  signMultiSigInner,
+  recoverMultiSigInner,
+  type MultiSigInnerScheme,
+} from './native/multisig.js';
 export {
   // EIP-712 typed signing for the trading set (orders / cancels / TWAP /
   // batches). Exported so power users can build / sign / inspect trading actions

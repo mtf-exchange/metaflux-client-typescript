@@ -84,6 +84,13 @@ export function metafluxChainTag(chainId: number): MetafluxChainTag {
 /// `bytes` / `bytes32` back the encrypted-order ciphertext / commitment: a
 /// `Uint8Array` POSTed as a JSON byte array. `bytes` hashes `keccak256(raw)`;
 /// `bytes32` is the raw 32 bytes carried verbatim into one word.
+///
+/// `bytes-hex` / `bytes[]-hex` back the multi-sig wrapper's `inner_action_blob`
+/// / `signatures`: the wire form is a `0x`-hex STRING (resp. an array of them),
+/// the signed word is `keccak256(decoded bytes)` (resp. `keccak256(concat of
+/// per-element keccak256)`), and the v4 message renders the hex string(s). This
+/// differs from `bytes` (which POSTs a JSON byte array) — the multi-sig wrapper
+/// carries hex strings on the wire.
 type FieldSolidityType =
   | 'string'
   | 'string-decimal'
@@ -102,7 +109,9 @@ type FieldSolidityType =
   | 'opt-uint64'
   | 'const-false-bool'
   | 'bytes'
-  | 'bytes32';
+  | 'bytes32'
+  | 'bytes-hex'
+  | 'bytes[]-hex';
 
 /// MetaBridge destination-chain string names → the `uint8` code the typed
 /// `mb_withdraw.chain` field signs. The POST `params.chain` carries the STRING
@@ -252,6 +261,23 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
     fields: [
       f('signers', 'address[]', 'signers'),
       f('threshold', 'uint32', 'threshold'),
+    ],
+  },
+  // The multi-sig acting WRAPPER. Carries the acting account (`user`), the exact
+  // canonical inner-action bytes (`inner_action_blob`, 0x-hex on the wire), the
+  // collected roster signatures (`signatures`, an array of 0x-hex 65-byte sigs),
+  // and the wrapper `nonce`. The wrapper may be POSTed by ANY account — its
+  // authority is the recovered inner-signer set (see `./multisig.ts`), not the
+  // signer of this outer envelope. `nonce` MUST equal the inner nonce the roster
+  // signed (advanced against `user`'s window), so callers pin it explicitly
+  // rather than allocating a fresh one. NOT owner-supporting.
+  multi_sig: {
+    pascal: 'MultiSig',
+    wireType: 'multi_sig',
+    fields: [
+      f('user', 'address', 'user'),
+      f('innerActionBlob', 'bytes-hex', 'inner_action_blob'),
+      f('signatures', 'bytes[]-hex', 'signatures'),
     ],
   },
   update_leverage: {
@@ -638,6 +664,8 @@ function solidityTypeName(ty: FieldSolidityType): string {
   if (ty === 'const-false-bool') return 'bool';
   if (ty === 'opt-uint32') return 'uint32';
   if (ty === 'opt-uint64') return 'uint64';
+  if (ty === 'bytes-hex') return 'bytes';
+  if (ty === 'bytes[]-hex') return 'bytes[]';
   return ty;
 }
 
@@ -888,7 +916,49 @@ function planField(fld: FieldSpec, payload: Record<string, unknown>): FieldPlan 
       const jsonValue = `[${Array.from(bytes).join(',')}]`;
       return mkPlan(fld, jsonValue, `0x${toHex(bytes)}`, async () => word);
     }
+    case 'bytes-hex': {
+      // A dynamic `bytes` value carried as a `0x`-hex STRING on the wire (the
+      // multi-sig wrapper's `inner_action_blob`). The signed word is
+      // `keccak256(decoded bytes)`; the v4 message + POST value are the hex string.
+      const hex = normalizeHex(raw, fld.wireKey);
+      const bytes = hexToBytes(hex.slice(2));
+      return mkPlan(fld, jsonStr(hex), hex, () => keccak256(bytes));
+    }
+    case 'bytes[]-hex': {
+      // A `bytes[]` value carried as an ARRAY of `0x`-hex STRINGs on the wire
+      // (the multi-sig wrapper's `signatures`). The signed word is
+      // `keccak256(concat of per-element keccak256(decoded))`; the v4 message +
+      // POST value are the hex-string array. Element + array order is significant.
+      if (!Array.isArray(raw)) {
+        throw new RangeError(`${fld.wireKey} must be an array of 0x-hex strings`);
+      }
+      const hexes = raw.map((v, i) => normalizeHex(v, `${fld.wireKey}[${i}]`));
+      const jsonValue = `[${hexes.map((h) => jsonStr(h)).join(',')}]`;
+      return mkPlan(fld, jsonValue, [...hexes], async () => {
+        const elemHashes = await Promise.all(
+          hexes.map((h) => keccak256(hexToBytes(h.slice(2)))),
+        );
+        return keccak256(concatBytes(elemHashes));
+      });
+    }
   }
+}
+
+/// Normalize a `0x`-hex string wire value: require the `0x` prefix and an
+/// even-length hex body. Returns the canonical lowercase-agnostic `0x…` form (the
+/// exact string signed + POSTed). Rejects non-string / malformed input.
+function normalizeHex(raw: unknown, field: string): string {
+  if (typeof raw !== 'string') {
+    throw new RangeError(`${field} must be a 0x-prefixed hex string`);
+  }
+  if (!raw.startsWith('0x')) {
+    throw new RangeError(`${field} must be 0x-prefixed`);
+  }
+  const body = raw.slice(2);
+  if (body.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(body)) {
+    throw new RangeError(`${field} must be even-length hex`);
+  }
+  return raw;
 }
 
 /// Whether an optional wire value is present (non-`null`, non-`undefined`).
@@ -950,6 +1020,11 @@ interface BuiltTyped {
   /// `metafluxChain`, and the wire `params` carries the `owner` key (the node
   /// reads it back to reconstruct the same `*_WITH_OWNER` digest).
   readonly owner?: string;
+  /// OPTIONAL top-level action-expiry (unix-ms). `0n` = never expires and the
+  /// digest is BYTE-IDENTICAL to the pre-existing (no-expiry) form. When
+  /// non-zero, `,uint64 expiresAfter` is folded into the encodeType string and
+  /// one trailing `uint256(expiresAfter)` word is appended after the nonce word.
+  readonly expiresAfter: bigint;
 }
 
 /// Build a typed action from a snake_case payload. `payload` carries ONLY the
@@ -961,9 +1036,12 @@ export function buildTyped(
   nonce: bigint,
   chainId: number = MTF_CHAIN_ID,
   owner?: string,
+  expiresAfter: bigint = 0n,
 ): BuiltTyped {
   if (nonce < 0n) throw new RangeError('nonce must be non-negative');
   if (nonce >= 1n << 64n) throw new RangeError('nonce overflows u64');
+  if (expiresAfter < 0n) throw new RangeError('expiresAfter must be non-negative');
+  if (expiresAfter >= 1n << 64n) throw new RangeError('expiresAfter overflows u64');
   const spec = requireSpec(actionType);
   const chainTag = metafluxChainTag(chainId);
   // The agent-resolved `owner` binds only for owner-supporting actions (operator
@@ -997,7 +1075,20 @@ export function buildTyped(
     plans,
     actionJson,
     owner: ownerBound ? owner : undefined,
+    expiresAfter,
   };
+}
+
+/// Fold the OPTIONAL top-level `expiresAfter` into an encodeType string: splice
+/// `,uint64 expiresAfter` in just before the closing paren. Mirrors the chain's
+/// `folded_type_hash` — one uniform transform for EVERY typed action. Returns the
+/// base string unchanged when `expiresAfter === 0n` (byte-identical digest).
+export function foldExpiryTypeString(base: string, expiresAfter: bigint): string {
+  if (expiresAfter === 0n) return base;
+  if (!base.endsWith(')')) {
+    throw new RangeError('encodeType string must end in ")"');
+  }
+  return `${base.slice(0, -1)},uint64 expiresAfter)`;
 }
 
 /// Compute the EIP-712 domain separator (4-field: name, version, chainId,
@@ -1021,7 +1112,12 @@ async function domainSeparator(chainId: number): Promise<Uint8Array> {
 /// metafluxChain word, then each action field's word, then the nonce word.
 async function hashStruct(built: BuiltTyped): Promise<Uint8Array> {
   const typeHash = await keccak256(
-    enc.encode(encodeType(built.actionType, built.owner !== undefined)),
+    enc.encode(
+      foldExpiryTypeString(
+        encodeType(built.actionType, built.owner !== undefined),
+        built.expiresAfter,
+      ),
+    ),
   );
   const chainWord = await keccak256(enc.encode(built.chainTag));
   // Agent-resolved owner: bound right after metafluxChain (owner-supporting
@@ -1030,7 +1126,18 @@ async function hashStruct(built: BuiltTyped): Promise<Uint8Array> {
     built.owner !== undefined ? [encAddrWord(built.owner, 'owner')] : [];
   const fieldWords = await Promise.all(built.plans.map((p) => p.word()));
   const nonceWord = be32(built.nonce);
-  const words = [typeHash, chainWord, ...ownerWords, ...fieldWords, nonceWord];
+  // OPTIONAL expiry: one trailing `uint256(expiresAfter)` word AFTER the nonce
+  // word, ONLY when non-zero (matching the chain's `hash_struct_with_expiry`).
+  const expiryWords =
+    built.expiresAfter !== 0n ? [be32(built.expiresAfter)] : [];
+  const words = [
+    typeHash,
+    chainWord,
+    ...ownerWords,
+    ...fieldWords,
+    nonceWord,
+    ...expiryWords,
+  ];
   return keccak256(concatBytes(words));
 }
 
@@ -1080,12 +1187,20 @@ export function typedDataV4(built: BuiltTyped): TypedDataV4 {
     fields.push({ name: fld.name, type: solidityTypeName(fld.ty) });
   }
   fields.push({ name: 'nonce', type: 'uint64' });
+  // OPTIONAL expiry: the wallet renders + signs it as the trailing `uint64`
+  // field, ONLY when non-zero (matching the folded encodeType + struct word).
+  if (built.expiresAfter !== 0n) {
+    fields.push({ name: 'expiresAfter', type: 'uint64' });
+  }
 
   const message: Record<string, MessageValue> = { metafluxChain: built.chainTag };
   if (built.owner !== undefined) message['owner'] = built.owner;
   for (const p of built.plans) message[p.name] = p.messageValue;
   // nonce rides the v4 message as a decimal string (uint64 may exceed 2^53).
   message['nonce'] = built.nonce.toString();
+  if (built.expiresAfter !== 0n) {
+    message['expiresAfter'] = built.expiresAfter.toString();
+  }
 
   return {
     domain: {
@@ -1116,6 +1231,10 @@ export interface TypedSignedAction {
   readonly nonce: bigint;
   /// 65-byte `r||s||v` signature, `0x`-hex.
   readonly signature: string;
+  /// OPTIONAL top-level action-expiry (unix-ms) folded into the signed digest.
+  /// `0n` / absent = never expires and the wire body OMITS `expires_after`
+  /// (byte-identical to the pre-existing envelope).
+  readonly expiresAfter?: bigint;
 }
 
 /// Sign a typed action with a 32-byte private key (the local / keypair path,
@@ -1128,12 +1247,18 @@ export async function signTypedAction(
   nonce: bigint,
   chainId: number = MTF_CHAIN_ID,
   owner?: string,
+  expiresAfter: bigint = 0n,
 ): Promise<TypedSignedAction> {
   if (privateKey.length !== 32) throw new RangeError('privateKey must be exactly 32 bytes');
-  const built = buildTyped(actionType, payload, nonce, chainId, owner);
+  const built = buildTyped(actionType, payload, nonce, chainId, owner, expiresAfter);
   const digest = await typedActionDigest(built);
   const sig = await signSecp256k1(privateKey, digest);
-  return { actionJson: built.actionJson, nonce, signature: `0x${toHex(sig)}` };
+  return {
+    actionJson: built.actionJson,
+    nonce,
+    signature: `0x${toHex(sig)}`,
+    expiresAfter,
+  };
 }
 
 /// Recover the 20-byte signer address of a signed typed action — handy for a
@@ -1145,7 +1270,14 @@ export async function recoverTypedSigner(
   chainId: number = MTF_CHAIN_ID,
   owner?: string,
 ): Promise<string> {
-  const built = buildTyped(actionType, payload, signed.nonce, chainId, owner);
+  const built = buildTyped(
+    actionType,
+    payload,
+    signed.nonce,
+    chainId,
+    owner,
+    signed.expiresAfter ?? 0n,
+  );
   const digest = await typedActionDigest(built);
   const sigHex = signed.signature.startsWith('0x')
     ? signed.signature.slice(2)
@@ -1159,9 +1291,16 @@ export async function recoverTypedSigner(
 /// `{"action":<actionJson>,"nonce":<u64>,"signature":"0x.."}`.
 /// The `action` bytes are embedded verbatim (the signed bytes == the sent bytes).
 export function typedRequestBody(signed: TypedSignedAction): string {
+  // The OPTIONAL top-level `expires_after` is appended ONLY when non-zero — a
+  // `0n`/absent expiry OMITS the field, keeping the wire bytes byte-identical to
+  // the pre-existing envelope (and the node reads the same no-expiry digest).
+  const expiry =
+    signed.expiresAfter !== undefined && signed.expiresAfter !== 0n
+      ? `,${jsonStr('expires_after')}:${signed.expiresAfter}`
+      : '';
   return (
     `{${jsonStr('action')}:${signed.actionJson},` +
     `${jsonStr('nonce')}:${signed.nonce},` +
-    `${jsonStr('signature')}:${jsonStr(signed.signature)}}`
+    `${jsonStr('signature')}:${jsonStr(signed.signature)}${expiry}}`
   );
 }

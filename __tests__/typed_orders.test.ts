@@ -660,3 +660,73 @@ describe.skipIf(!wasmBuilt)(
     });
   },
 );
+
+// ============================================================================
+// Optional action-expiry (`expiresAfter`) on the trading set. The fold shares
+// the chain-pinned `foldExpiryTypeString` + trailing-word rule with the account
+// set (chain-pinned in typed.test.ts); these guard the trading-path plumbing:
+// expiry=0 stays byte-identical, non-zero perturbs the digest + folds the type.
+// ============================================================================
+describe.skipIf(!wasmBuilt)('trading action expiresAfter fold', () => {
+  const EXP_SET = 1_735_693_200_000n;
+
+  it('submit_order: expiry 0 is byte-identical to the plain digest', async () => {
+    const { buildTypedOrder, typedOrderDigest } = await import(
+      '../src/native/typed_orders.js'
+    );
+    const payload = { order: sampleOrder() };
+    const plain = await typedOrderDigest(
+      await buildTypedOrder('submit_order', payload, '', 40n, CHAIN_ID),
+    );
+    const zero = await typedOrderDigest(
+      await buildTypedOrder('submit_order', payload, '', 40n, CHAIN_ID, undefined, 0n),
+    );
+    expect(toHex(zero)).toBe(toHex(plain));
+  });
+
+  it('submit_order: non-zero expiry perturbs the digest', async () => {
+    const { buildTypedOrder, typedOrderDigest } = await import(
+      '../src/native/typed_orders.js'
+    );
+    const payload = { order: sampleOrder() };
+    const plain = await typedOrderDigest(
+      await buildTypedOrder('submit_order', payload, '', 40n, CHAIN_ID),
+    );
+    const set = await typedOrderDigest(
+      await buildTypedOrder('submit_order', payload, '', 40n, CHAIN_ID, undefined, EXP_SET),
+    );
+    expect(toHex(set)).not.toBe(toHex(plain));
+  });
+
+  it('folded encodeType splices ,uint64 expiresAfter before the paren', async () => {
+    const { encodeOrderType } = await import('../src/native/typed_orders.js');
+    const { foldExpiryTypeString } = await import('../src/native/typed.js');
+    const base = encodeOrderType('cancel_order');
+    expect(foldExpiryTypeString(base, 0n)).toBe(base);
+    expect(foldExpiryTypeString(base, EXP_SET)).toBe(
+      'MetaFluxTransaction:CancelOrder(string metafluxChain,uint32 market,uint64 oid,uint64 nonce,uint64 expiresAfter)',
+    );
+  });
+
+  it('typedOrderRequestBody omits expires_after at 0, carries it when set', async () => {
+    const { signTypedOrder, typedOrderRequestBody } = await import(
+      '../src/native/typed_orders.js'
+    );
+    const privKey = new Uint8Array(32).fill(0x42);
+    const payload = { order: sampleOrder() };
+    const json = '{"type":"submit_order","params":{}}';
+    const zero = await signTypedOrder(privKey, 'submit_order', payload, json, 40n, CHAIN_ID);
+    expect(typedOrderRequestBody(zero).includes('expires_after')).toBe(false);
+    const set = await signTypedOrder(
+      privKey,
+      'submit_order',
+      payload,
+      json,
+      40n,
+      CHAIN_ID,
+      undefined,
+      EXP_SET,
+    );
+    expect(typedOrderRequestBody(set).includes(`"expires_after":${EXP_SET}`)).toBe(true);
+  });
+});

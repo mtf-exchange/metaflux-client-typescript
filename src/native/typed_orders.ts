@@ -44,7 +44,11 @@ import {
   type U64Input,
   MTF_CHAIN_ID,
 } from './digest.js';
-import { metafluxChainTag, type TypedSignedAction } from './typed.js';
+import {
+  metafluxChainTag,
+  foldExpiryTypeString,
+  type TypedSignedAction,
+} from './typed.js';
 import {
   deriveAddressFromPubkey,
   keccak256,
@@ -579,6 +583,10 @@ export interface BuiltTypedOrder {
   /// actions. `undefined` for an owner-less digest and for `batch_order` (whose
   /// owner rides in `BatchOrder.owner`, not this field).
   readonly owner?: string;
+  /// OPTIONAL top-level action-expiry (unix-ms). `0n` = never expires, digest
+  /// BYTE-IDENTICAL to the pre-existing form. Non-zero folds `,uint64 expiresAfter`
+  /// into the encodeType and appends one trailing word after the nonce word.
+  readonly expiresAfter: bigint;
 }
 
 /// Build a typed trading action from its wire payload + the canonical action
@@ -592,12 +600,15 @@ export async function buildTypedOrder(
   nonce: bigint,
   chainId: number = MTF_CHAIN_ID,
   owner?: string,
+  expiresAfter: bigint = 0n,
 ): Promise<BuiltTypedOrder> {
   if (!isTypedOrderAction(actionType)) {
     throw new RangeError(`'${actionType}' is not a trading typed action`);
   }
   if (nonce < 0n) throw new RangeError('nonce must be non-negative');
   if (nonce >= 1n << 64n) throw new RangeError('nonce overflows u64');
+  if (expiresAfter < 0n) throw new RangeError('expiresAfter must be non-negative');
+  if (expiresAfter >= 1n << 64n) throw new RangeError('expiresAfter overflows u64');
   const chainTag = metafluxChainTag(chainId);
   const words = await encodeOrderData(actionType, payload, chainTag, nonce, owner);
   // The digest-level `owner` binds only for the seven owner-supporting actions;
@@ -616,15 +627,28 @@ export async function buildTypedOrder(
     words,
     withOwner,
     owner: ownerBound ? owner : undefined,
+    expiresAfter,
   };
 }
 
 /// `hashStruct(s) = keccak256(typeHash || encodeData)` for a built trading action.
+///
+/// `built.words` already ends in the nonce word; the OPTIONAL top-level
+/// `expiresAfter` folds `,uint64 expiresAfter` into the encodeType string and
+/// appends one trailing `uint256(expiresAfter)` word AFTER the nonce, ONLY when
+/// non-zero (byte-identical to today at `0n`).
 async function hashStructOrder(built: BuiltTypedOrder): Promise<Uint8Array> {
   const typeHash = await keccak256(
-    enc.encode(encodeOrderType(built.actionType, built.withOwner)),
+    enc.encode(
+      foldExpiryTypeString(
+        encodeOrderType(built.actionType, built.withOwner),
+        built.expiresAfter,
+      ),
+    ),
   );
-  return keccak256(concatWords([typeHash, ...built.words]));
+  const expiryWords =
+    built.expiresAfter !== 0n ? [be32(built.expiresAfter)] : [];
+  return keccak256(concatWords([typeHash, ...built.words, ...expiryWords]));
 }
 
 /// Full EIP-712 digest for a typed trading action:
@@ -652,12 +676,21 @@ export async function signTypedOrder(
   nonce: bigint,
   chainId: number = MTF_CHAIN_ID,
   owner?: string,
+  expiresAfter: bigint = 0n,
 ): Promise<TypedSignedAction> {
   if (privateKey.length !== 32) throw new RangeError('privateKey must be exactly 32 bytes');
-  const built = await buildTypedOrder(actionType, payload, actionJson, nonce, chainId, owner);
+  const built = await buildTypedOrder(
+    actionType,
+    payload,
+    actionJson,
+    nonce,
+    chainId,
+    owner,
+    expiresAfter,
+  );
   const digest = await typedOrderDigest(built);
   const sig = await signSecp256k1(privateKey, digest);
-  return { actionJson, nonce, signature: `0x${toHex(sig)}` };
+  return { actionJson, nonce, signature: `0x${toHex(sig)}`, expiresAfter };
 }
 
 /// Recover the 20-byte signer of a signed typed trading action — handy for a
@@ -676,6 +709,7 @@ export async function recoverTypedOrderSigner(
     signed.nonce,
     chainId,
     owner,
+    signed.expiresAfter ?? 0n,
   );
   const digest = await typedOrderDigest(built);
   const sigHex = signed.signature.startsWith('0x')
@@ -691,9 +725,15 @@ export async function recoverTypedOrderSigner(
 /// Identical envelope to `./typed.ts::typedRequestBody`; restated here so the
 /// trading-set path is self-contained.
 export function typedOrderRequestBody(signed: TypedSignedAction): string {
+  // OPTIONAL `expires_after` appended ONLY when non-zero (byte-identical wire at
+  // `0n`/absent). Mirrors `./typed.ts::typedRequestBody`.
+  const expiry =
+    signed.expiresAfter !== undefined && signed.expiresAfter !== 0n
+      ? `,${jsonStr('expires_after')}:${signed.expiresAfter}`
+      : '';
   return (
     `{${jsonStr('action')}:${signed.actionJson},` +
     `${jsonStr('nonce')}:${signed.nonce},` +
-    `${jsonStr('signature')}:${jsonStr(signed.signature)}}`
+    `${jsonStr('signature')}:${jsonStr(signed.signature)}${expiry}}`
   );
 }

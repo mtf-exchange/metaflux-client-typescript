@@ -160,6 +160,14 @@ export interface ClientOpts {
   /// EVM chain ID used for the EIP-712 domain. Defaults to a
   /// devnet-style placeholder (`31337`); production deployments override.
   chainId?: number;
+  /// OPTIONAL default action-expiry (unix-ms) folded into every typed action
+  /// this client signs. `0n` / absent = never expires (byte-identical to the
+  /// pre-existing digest + wire body). When non-zero, the expiry is signed +
+  /// tamper-evident and the node drops the action once its clock passes it.
+  /// AVAILABILITY: a non-zero value is only accepted from the scheduled network
+  /// upgrade onward — leave it unset until then. Per-call overrides are possible
+  /// via the typed-order paths.
+  expiresAfterMs?: bigint;
 }
 
 /// Per-call options for the trading actions. `nonce` / `chainId` bind the
@@ -265,6 +273,9 @@ export class Client {
   private readonly baseUrl: string;
   private readonly privateKey: Uint8Array | undefined;
   private readonly chainId: number;
+  /// Default action-expiry (unix-ms) folded into every typed action signed by
+  /// this client. `0n` = never expires (byte-identical to the no-expiry form).
+  private readonly expiresAfterMs: bigint;
   /// Cached gateway-issued JWT (`/auth`). The session is established
   /// lazily on the first authenticated call.
   private jwt: string | undefined;
@@ -278,9 +289,15 @@ export class Client {
     if (opts.privateKey !== undefined && opts.privateKey.length !== 32) {
       throw new RangeError('Client privateKey must be exactly 32 bytes');
     }
+    if (opts.expiresAfterMs !== undefined) {
+      if (opts.expiresAfterMs < 0n || opts.expiresAfterMs >= 1n << 64n) {
+        throw new RangeError('Client expiresAfterMs must be a u64');
+      }
+    }
     this.baseUrl = opts.baseUrl;
     this.privateKey = opts.privateKey;
     this.chainId = opts.chainId ?? DEFAULT_CHAIN_ID;
+    this.expiresAfterMs = opts.expiresAfterMs ?? 0n;
     this.info = new InfoApi(this.baseUrl);
   }
 
@@ -875,6 +892,53 @@ export class Client {
     );
   }
 
+  /// Submit a multi-sig acting WRAPPER via `POST /exchange`.
+  ///
+  /// The roster members first each sign the inner action off-band (see
+  /// [`signMultiSigInner`] in `./native/multisig.js`) over the SAME canonical
+  /// `inner_action_blob` bytes and the SAME `innerNonce`; collect
+  /// `threshold`-many distinct signatures. This method packages them into the
+  /// `{"type":"multi_sig",...}` wrapper and signs the OUTER envelope with this
+  /// client's key (the wrapper may be submitted by ANY account — its authority is
+  /// the recovered inner-signer set, not this outer signer).
+  ///
+  /// The envelope `nonce` is PINNED to `innerNonce` (NOT a fresh clock value): it
+  /// must equal the nonce the roster signed, and it advances against the acting
+  /// `user`'s nonce window.
+  ///
+  /// @param user             the acting multisig account (0x-hex address)
+  /// @param innerActionBlobHex the exact canonical inner action bytes as 0x-hex
+  /// @param signatures       the collected roster signatures (0x-hex 65-byte each)
+  /// @param innerNonce       the nonce the roster signed (== envelope nonce)
+  async multiSig(
+    user: string,
+    innerActionBlobHex: string,
+    signatures: readonly string[],
+    innerNonce: bigint,
+    opts: { chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    if (this.privateKey === undefined) {
+      throw new Error(
+        'multiSig requires a privateKey in ClientOpts (this Client is read-only)',
+      );
+    }
+    // Pin the envelope nonce to the inner nonce the roster signed — do NOT
+    // allocate a fresh one. The wrapper's `expires_after` stays absent (the inner
+    // action's own semantics govern; the outer envelope is a pass-through).
+    const signed = await signTypedAction(
+      this.privateKey,
+      'multi_sig',
+      {
+        user,
+        inner_action_blob: innerActionBlobHex,
+        signatures: [...signatures],
+      },
+      innerNonce,
+      opts.chainId,
+    );
+    return this.postTyped(signed);
+  }
+
   /// Set a self-scoped abstraction config value via `POST /exchange`.
   async userSetAbstraction(
     params: UserSetAbstraction,
@@ -1163,6 +1227,8 @@ export class Client {
       actionJson,
       nonce,
       opts.chainId,
+      undefined,
+      this.expiresAfterMs,
     );
     return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
       method: 'POST',
@@ -1208,6 +1274,8 @@ export class Client {
       actionJson,
       nonce,
       opts.chainId,
+      undefined,
+      this.expiresAfterMs,
     );
     const signer = await recoverTypedOrderSigner(signed, actionType, payload, opts.chainId);
     for (const owner of owners) {
@@ -1243,10 +1311,29 @@ export class Client {
     actionType: string,
     payload: Record<string, unknown>,
     opts: { nonce?: bigint; chainId?: number } = {},
-  ): { payload: TypedDataV4; actionJson: string; nonce: bigint } {
+  ): {
+    payload: TypedDataV4;
+    actionJson: string;
+    nonce: bigint;
+    expiresAfter: bigint;
+  } {
     const nonce = opts.nonce ?? nextNonce();
-    const built = buildTyped(actionType, payload, nonce, opts.chainId);
-    return { payload: typedDataV4(built), actionJson: built.actionJson, nonce };
+    const built = buildTyped(
+      actionType,
+      payload,
+      nonce,
+      opts.chainId,
+      undefined,
+      this.expiresAfterMs,
+    );
+    // Echo `expiresAfter` so the caller can pass it back to [`postTyped`] in the
+    // `TypedSignedAction` (the wire body carries `expires_after` only when set).
+    return {
+      payload: typedDataV4(built),
+      actionJson: built.actionJson,
+      nonce,
+      expiresAfter: this.expiresAfterMs,
+    };
   }
 
   /// POST an already-signed typed action (e.g. from a wallet's
@@ -1290,6 +1377,7 @@ export class Client {
       nonce,
       opts.chainId,
       opts.owner,
+      this.expiresAfterMs,
     );
     return this.postTyped(signed);
   }
