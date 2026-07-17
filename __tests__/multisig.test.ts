@@ -141,12 +141,21 @@ describe.skipIf(!wasmBuilt)('multi_sig outer typed wrapper', () => {
     );
     const parsed = JSON.parse(built.actionJson) as {
       type: string;
-      params: { user: string; inner_action_blob: string; signatures: string[] };
+      params: {
+        user: string;
+        inner_action_blob: string;
+        signatures: string[];
+        nonce: number;
+      };
     };
     expect(parsed.type).toBe('multi_sig');
     expect(parsed.params.user).toBe(USER);
     expect(parsed.params.inner_action_blob).toBe(blobHex);
     expect(parsed.params.signatures).toEqual(sigs);
+    // The wrapper nonce is REQUIRED inside params — the node's `NativeMultiSig`
+    // has no `#[serde(default)]` for it, so a missing `params.nonce` is a 400 at
+    // ingress. Must equal the envelope nonce.
+    expect(parsed.params.nonce).toBe(Number(NONCE));
     // Wrapper defaults to no expiry (byte-identical outer envelope).
     expect(built.expiresAfter).toBe(0n);
   });

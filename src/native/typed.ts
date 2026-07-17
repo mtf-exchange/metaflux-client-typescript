@@ -174,6 +174,14 @@ interface TypedSpec {
   /// field is a `const-false-bool` that signs `enroll=false` but is never on the
   /// wire), matching the node's bare `{"type":"pm_unenroll"}` envelope.
   readonly emitNoParams?: boolean;
+  /// When `true`, the wrapper `nonce` is ALSO emitted inside the POST `params`
+  /// object (as a bare u64), not only at the envelope top level. Backs
+  /// `multi_sig`, whose node struct `NativeMultiSig` reads a REQUIRED
+  /// `params.nonce` serde field (no `#[serde(default)]`) — omitting it makes the
+  /// node reject the POST at ingress (`missing field \`nonce\``). The value is
+  /// identical to the top-level envelope nonce and the last signed word, so the
+  /// EIP-712 digest is unaffected.
+  readonly emitNonceInParams?: boolean;
 }
 
 function f(
@@ -279,6 +287,9 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('innerActionBlob', 'bytes-hex', 'inner_action_blob'),
       f('signatures', 'bytes[]-hex', 'signatures'),
     ],
+    // `NativeMultiSig` deserializes a REQUIRED `params.nonce` (user_actions.rs);
+    // emit the wrapper nonce inside params or the node rejects the POST at ingress.
+    emitNonceInParams: true,
   },
   update_leverage: {
     pascal: 'UpdateLeverage',
@@ -1060,7 +1071,13 @@ export function buildTyped(
     .map((p) => `${jsonStr(p.wireKey)}:${p.jsonValue}`);
   const paramEntries = ownerBound
     ? [`${jsonStr('owner')}:${jsonStr(owner)}`, ...fieldParams]
-    : fieldParams;
+    : [...fieldParams];
+  // `multi_sig` also carries the wrapper nonce inside `params` (a required serde
+  // field on the node's `NativeMultiSig`); same value as the envelope nonce and
+  // the last signed word, so the digest is unaffected. Emitted as a bare u64.
+  if (spec.emitNonceInParams === true) {
+    paramEntries.push(`${jsonStr('nonce')}:${nonce}`);
+  }
   // A paramless alias (`pm_unenroll`) emits the bare `{"type":<wireType>}`
   // envelope when no field contributes a wire param, matching the node.
   const actionJson =
