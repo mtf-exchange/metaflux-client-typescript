@@ -113,6 +113,49 @@ describe('InfoApi request shapes', () => {
     expect(res.spot.pairs).toEqual([]);
   });
 
+  it('marketsMeta decodes an optional perp `token` block + spot object evm_contract', async () => {
+    const api = new InfoApi(BASE);
+    nextType = 'markets_meta';
+    nextData = {
+      perp: [
+        {
+          coin: 'BTC',
+          asset_id: 0,
+          kind: 'perp',
+          sz_decimals: 5,
+          // The optional underlying-token block (omitted when unregistered).
+          token: {
+            id: 101,
+            wei_decimals: 8,
+            token_id:
+              '0xf23ea17597e324c04f842e6d8bfffe75636f0af88e7c7ab93ea755d9056396bc',
+            system_address: '0x80abd3bd8c42d2a279e4fa00f20bb30637734371',
+            evm_contract: {
+              address: '0x2222222222222222222222222222222222222222',
+              evm_extra_wei_decimals: 0,
+            },
+            is_canonical: true,
+            circulating_supply: '0',
+          },
+        },
+        // A perp with NO registered underlying token omits `token` entirely.
+        { coin: 'ETH', asset_id: 1, kind: 'perp', sz_decimals: 4 },
+      ],
+      spot: { pairs: [], tokens: [] },
+    };
+    const res = await api.marketsMeta();
+    expect(JSON.parse(captured!.body)).toEqual({ type: 'markets_meta' });
+    const btc = res.perp[0]!;
+    expect(btc.token?.id).toBe(101);
+    // Issuance on a perp token block is `circulating_supply` (NOT total_supply).
+    expect(btc.token?.circulating_supply).toBe('0');
+    expect(btc.token?.evm_contract?.address).toBe(
+      '0x2222222222222222222222222222222222222222',
+    );
+    // A perp with no underlying token has `token` undefined.
+    expect(res.perp[1]!.token).toBeUndefined();
+  });
+
   it('vaultState is keyed by `vault` 0x address (NOT a numeric vault_id)', async () => {
     const api = new InfoApi(BASE);
     nextData = { vault: VAULT, name: 'vault:7' };
@@ -156,6 +199,39 @@ describe('InfoApi request shapes', () => {
     const res = await api.l2Book('BTC');
     expect(JSON.parse(captured!.body)).toEqual({ type: 'l2_book', coin: 'BTC' });
     expect(res.coin).toBe('BTC');
+  });
+
+  it('l2Book accepts a spot pair name + omits aggregation params when absent', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { coin: 'BTC/USDC', bids: [], asks: [] };
+    const res = await api.l2Book('BTC/USDC');
+    // No params object → the body carries only type + coin.
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'l2_book',
+      coin: 'BTC/USDC',
+    });
+    expect(res.coin).toBe('BTC/USDC');
+  });
+
+  it('l2Book serializes aggregation params to snake_case, only when defined', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { coin: 'BTC', bids: [], asks: [] };
+    await api.l2Book('BTC', { nSigFigs: 5, mantissa: 2, nLevels: 20 });
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'l2_book',
+      coin: 'BTC',
+      n_sig_figs: 5,
+      mantissa: 2,
+      n_levels: 20,
+    });
+    // A partial params object sends only the defined fields (no unpaired
+    // mantissa — the gateway would reject it).
+    await api.l2Book('BTC', { nSigFigs: 3 });
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'l2_book',
+      coin: 'BTC',
+      n_sig_figs: 3,
+    });
   });
 
   it('recentTrades is keyed by coin; limit rides ONLY when provided', async () => {
@@ -378,48 +454,70 @@ describe('InfoApi request shapes', () => {
     });
   });
 
-  it('spotMeta POSTs {"type":"spot_meta"} and unwraps pairs + tokens', async () => {
+  it('spotMeta re-routes to markets_meta kind=spot and unwraps its `spot`', async () => {
     const api = new InfoApi(BASE);
+    // The standalone `spot_meta` /info type was removed server-side; the
+    // wrapper now fetches `markets_meta` (kind=spot) whose data RETAINS the
+    // `{spot: {...}}` wrapper key, and unwraps it.
     nextData = {
-      pairs: [
-        {
-          id: 110,
-          name: 'BTC/USDC',
-          base: 101,
-          quote: 100,
-          taker_fee_bps: '5',
-          min_notional: '1',
-          active: true,
-          mark_px: '50000',
-          mid_px: '50000',
-          prev_day_px: null,
-          day_ntl_vlm: '0',
-          circulating_supply: '0',
-        },
-      ],
-      tokens: [
-        {
-          id: 100,
-          name: 'USDC',
-          sz_decimals: 2,
-          wei_decimals: 6,
-          evm_contract: null,
-          is_canonical: true,
-          system_address: '0x80abd3bd8c42d2a279e4fa00f20bb30637734371',
-          token_id: '0xf23ea17597e324c04f842e6d8bfffe75636f0af88e7c7ab93ea755d9056396bc',
-        },
-      ],
+      spot: {
+        pairs: [
+          {
+            id: 110,
+            name: 'BTC/USDC',
+            base: 101,
+            quote: 100,
+            taker_fee_bps: '5',
+            min_notional: '1',
+            active: true,
+            mark_px: '50000',
+            mid_px: '50000',
+            prev_day_px: null,
+            day_ntl_vlm: '0',
+            circulating_supply: '0',
+          },
+        ],
+        tokens: [
+          {
+            id: 101,
+            name: 'BTC',
+            sz_decimals: 5,
+            wei_decimals: 8,
+            // evm_contract is an OBJECT now, not a bare 0x string.
+            evm_contract: {
+              address: '0x2222222222222222222222222222222222222222',
+              evm_extra_wei_decimals: 0,
+            },
+            is_canonical: true,
+            system_address: '0x80abd3bd8c42d2a279e4fa00f20bb30637734371',
+            token_id:
+              '0xf23ea17597e324c04f842e6d8bfffe75636f0af88e7c7ab93ea755d9056396bc',
+            total_supply: '21000000',
+          },
+        ],
+      },
     };
     const res = await api.spotMeta();
-    expect(JSON.parse(captured!.body)).toEqual({ type: 'spot_meta' });
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'markets_meta',
+      kind: 'spot',
+    });
     // `name` is the derived `{base}/{quote}` display name; `id` is the
     // numeric pair id spot prints carry as `coin` on the WS feeds.
     expect(res.pairs[0]?.id).toBe(110);
     expect(res.pairs[0]?.name).toBe('BTC/USDC');
     // taker_fee_bps is a decimal STRING on this surface.
     expect(res.pairs[0]?.taker_fee_bps).toBe('5');
-    expect(res.tokens[0]?.wei_decimals).toBe(6);
+    expect(res.tokens[0]?.wei_decimals).toBe(8);
     expect(res.tokens[0]?.is_canonical).toBe(true);
+    // evm_contract is the {address, evm_extra_wei_decimals} object.
+    expect(res.tokens[0]?.evm_contract?.address).toBe(
+      '0x2222222222222222222222222222222222222222',
+    );
+    expect(res.tokens[0]?.evm_contract?.evm_extra_wei_decimals).toBe(0);
+    // spot token rows carry total_supply (perp `token` blocks carry
+    // circulating_supply instead — distinct key).
+    expect(res.tokens[0]?.total_supply).toBe('21000000');
   });
 
   it('spotClearinghouseState is keyed by 0x address (NOT `user`)', async () => {

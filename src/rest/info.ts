@@ -37,6 +37,7 @@ import type {
   FundingHistory,
   GossipRootIps,
   L2Book,
+  L2BookParams,
   LeadingVaults,
   Liquidatable,
   MarketInfo,
@@ -116,6 +117,13 @@ export class InfoApi {
   /// fields (`mark_px`/`oracle_px`/`open_interest`/`funding`/…) — those live on
   /// `markets`. Merge the two by `coin` when a view needs both live prices AND
   /// precision. Because it is static it can be fetched once and cached hard.
+  ///
+  /// A perp record may carry an optional underlying `token` block (`{id,
+  /// wei_decimals, token_id, system_address, evm_contract, is_canonical,
+  /// circulating_supply}`) when the perp has a registered underlying token; the
+  /// spot `tokens[]` rows carry `total_supply` and an object `evm_contract`.
+  /// This is also the source of the spot universe returned by `spotMeta()`
+  /// (the standalone `spot_meta` /info type was removed server-side).
   async marketsMeta(): Promise<Markets> {
     return this.post<Markets>({ type: 'markets_meta' });
   }
@@ -137,14 +145,30 @@ export class InfoApi {
 
   // ── book / trade / account-history reads ────────────────────────────────
 
-  /// `open_orders` — account-scoped resting orders, keyed by `address` (0x).
+  /// `open_orders` — account-scoped resting orders across every perp AND spot
+  /// book, keyed by `address` (0x). Spot resting orders now appear too, labeled
+  /// with the pair NAME as `coin` (e.g. `"BTC/USDC"`).
   async openOrders(address: string): Promise<OpenOrders> {
     return this.post<OpenOrders>({ type: 'open_orders', address });
   }
 
   /// `l2_book` — market-scoped aggregated bid/ask levels, keyed by `coin`.
-  async l2Book(coin: string): Promise<L2Book> {
-    return this.post<L2Book>({ type: 'l2_book', coin });
+  ///
+  /// `coin` is a perp symbol (`"BTC"`) or a spot pair — its NAME (`"BTC/USDC"`)
+  /// or numeric pair id; spot pairs now return real depth. The optional
+  /// `params` group the book HL-style (`n_sig_figs` 2..=5; `mantissa` 1|2|5,
+  /// valid ONLY with `n_sig_figs === 5`; `n_levels` ≥ 1) — each is sent ONLY
+  /// when defined (the gateway validates strictly and rejects an unpaired
+  /// `mantissa`).
+  async l2Book(coin: string, params?: L2BookParams): Promise<L2Book> {
+    const body: { type: string; [k: string]: unknown } = {
+      type: 'l2_book',
+      coin,
+    };
+    if (params?.nSigFigs !== undefined) body.n_sig_figs = params.nSigFigs;
+    if (params?.mantissa !== undefined) body.mantissa = params.mantissa;
+    if (params?.nLevels !== undefined) body.n_levels = params.nLevels;
+    return this.post<L2Book>(body);
   }
 
   /// `recent_trades` — market-scoped trade tape, keyed by `coin`. Optional
@@ -267,14 +291,24 @@ export class InfoApi {
 
   // ── node snapshot reads ─────────────────────────────────────────────────
 
-  /// `spot_meta` — spot pair universe + token registry. No parameters.
+  /// `spot_meta` — spot pair universe + token registry.
+  ///
+  /// The standalone `spot_meta` /info type was REMOVED server-side (a bare
+  /// request now 400s with `unknown info type`). This convenience wrapper
+  /// fetches `markets_meta` (`kind: "spot"`) and unwraps its retained `spot`
+  /// sub-object, which is the identical `{pairs, tokens}` shape — same data, a
+  /// different endpoint. Prefer `marketsMeta()` when you also need the perp
+  /// universe in the same round-trip.
   ///
   /// Each pair's `name` is derived as `{base}/{quote}` from the token
   /// registry; the numeric `id` is the compact `coin` label spot prints carry
-  /// on the WS `trades` / `candles` / `fills` channels. The same object is
-  /// embedded in `markets` as `spot`.
+  /// on the WS `trades` / `candles` / `fills` channels.
   async spotMeta(): Promise<SpotMeta> {
-    return this.post<SpotMeta>({ type: 'spot_meta' });
+    const d = await this.post<{ spot: SpotMeta }>({
+      type: 'markets_meta',
+      kind: 'spot',
+    });
+    return d.spot;
   }
 
   /// `spot_clearinghouse_state` — per-account spot token balances by `address`.

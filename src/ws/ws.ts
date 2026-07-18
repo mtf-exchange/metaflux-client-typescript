@@ -21,7 +21,7 @@
 // SDK dependency-free for both runtimes.
 
 import type { Funding } from '../types/info/core.js';
-import type { TradeSide } from '../types/info/reads.js';
+import type { L2BookParams, TradeSide } from '../types/info/reads.js';
 import {
   buildNativeCancelAction,
   buildNativeOrderAction,
@@ -102,12 +102,23 @@ export const WS_CHANNELS: readonly WsChannel[] = [
 /// Global channels (`all_mids`, `explorer_block`, `explorer_txs`) take none.
 export interface WsSubscription {
   type: WsChannel;
-  /// Market symbol (`"BTC"`); a decimal asset-id string is also accepted.
+  /// Market symbol (`"BTC"`); a decimal asset-id string is also accepted. For
+  /// `l2_book`, a spot pair NAME (`"BTC/USDC"`) or pair id is also accepted and
+  /// now renders real depth.
   coin?: string;
   /// User `0x`-hex address (per-account channels).
   user?: string;
   /// Bar interval token (`candles` only).
   interval?: string;
+  /// `l2_book` only — HL-style depth grouping: significant figures 2..=5. The
+  /// object is serialized verbatim into the subscribe frame, so these MUST stay
+  /// snake_case (the gateway's native `/ws` parser reads only snake_case).
+  n_sig_figs?: number;
+  /// `l2_book` only — sub-figure mantissa bucket `1`|`2`|`5`; valid only with
+  /// `n_sig_figs === 5`. The ack echoes it ONLY when ≠ 1.
+  mantissa?: number;
+  /// `l2_book` only — max levels per side (≥ 1); the load-reduction lever.
+  n_levels?: number;
 }
 
 /// `all_mids` payload — every market's tick-snapped whole-USDC mark, keyed by
@@ -335,9 +346,15 @@ export interface WsSigner {
 /// Subscription set equality key — `(channel, coin, user, interval)` is the
 /// server's routing key, so two subscriptions are identical iff all match
 /// (e.g. `candles` `1m` vs `5m`, or `fills` for two different users, are
-/// distinct subscriptions).
+/// distinct subscriptions). The `l2_book` aggregation params are appended so a
+/// param change is a distinct local key; the server, however, holds ONE
+/// `l2_book` view per coin (params are NOT part of ITS routing key), so
+/// `subscribe`/`unsubscribe` also dedupe `l2_book` by coin — see there.
 function subKey(s: WsSubscription): string {
-  return `${s.type}:${s.coin ?? ''}:${s.user ?? ''}:${s.interval ?? ''}`;
+  return (
+    `${s.type}:${s.coin ?? ''}:${s.user ?? ''}:${s.interval ?? ''}` +
+    `:${s.n_sig_figs ?? ''}:${s.mantissa ?? ''}:${s.n_levels ?? ''}`
+  );
 }
 
 /// MTF-native WebSocket client.
@@ -424,7 +441,17 @@ export class WsClient {
   /// Subscribe to a channel. The subscription is recorded and replayed on
   /// reconnect. Idempotent — a duplicate `(channel, coin)` is a no-op (matching
   /// the server, which silently ignores duplicate subscribes).
+  ///
+  /// `l2_book` is special: the server holds exactly ONE view per coin and
+  /// REPLACES it (with the new aggregation params) on a re-subscribe. So we
+  /// first drop any active `l2_book` entry for the same coin — otherwise a
+  /// stale-params entry would be replayed on reconnect and clobber the view.
   async subscribe(sub: WsSubscription): Promise<void> {
+    if (sub.type === 'l2_book') {
+      for (const [k, s] of this.active) {
+        if (s.type === 'l2_book' && s.coin === sub.coin) this.active.delete(k);
+      }
+    }
     const key = subKey(sub);
     if (!this.active.has(key)) {
       this.active.set(key, sub);
@@ -432,9 +459,17 @@ export class WsClient {
     this.send({ method: 'subscribe', subscription: sub });
   }
 
-  /// Unsubscribe from a channel.
+  /// Unsubscribe from a channel. For `l2_book` the server's unsubscribe is
+  /// keyed by coin alone (params-blind), so any active `l2_book` entry for the
+  /// coin is dropped regardless of its aggregation params.
   async unsubscribe(sub: WsSubscription): Promise<void> {
-    this.active.delete(subKey(sub));
+    if (sub.type === 'l2_book') {
+      for (const [k, s] of this.active) {
+        if (s.type === 'l2_book' && s.coin === sub.coin) this.active.delete(k);
+      }
+    } else {
+      this.active.delete(subKey(sub));
+    }
     this.send({ method: 'unsubscribe', subscription: sub });
   }
 
@@ -443,9 +478,19 @@ export class WsClient {
   // `coin` is the market SYMBOL string (e.g. `"BTC"`) — the canonical key on
   // the consolidated surface. A decimal asset-id string is also accepted.
 
-  /// Subscribe to L2 book updates for a market.
-  async subscribeL2Book(coin: string): Promise<void> {
-    return this.subscribe({ type: 'l2_book', coin });
+  /// Subscribe to L2 book updates for a market. `coin` is a perp symbol
+  /// (`"BTC"`) or a spot pair NAME (`"BTC/USDC"`) / pair id; spot pairs now
+  /// carry real depth. Optional `params` request HL-style depth grouping — the
+  /// camelCase fields are mapped to the wire-verbatim snake_case
+  /// `n_sig_figs`/`mantissa`/`n_levels`, each included ONLY when defined. The
+  /// server holds one book view per coin and REPLACES it on a re-subscribe with
+  /// new params. The ack echoes the params (`mantissa` only when ≠ 1).
+  async subscribeL2Book(coin: string, params?: L2BookParams): Promise<void> {
+    const sub: WsSubscription = { type: 'l2_book', coin };
+    if (params?.nSigFigs !== undefined) sub.n_sig_figs = params.nSigFigs;
+    if (params?.mantissa !== undefined) sub.mantissa = params.mantissa;
+    if (params?.nLevels !== undefined) sub.n_levels = params.nLevels;
+    return this.subscribe(sub);
   }
 
   /// Subscribe to public trades for a market. The on-subscribe snapshot is a

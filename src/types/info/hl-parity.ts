@@ -4,7 +4,7 @@
 // names are the exact snake_case keys the node emits inside `{type, data}.data`.
 // Money magnitudes that can exceed 2^53 are typed `string`.
 
-import type { MarketInfo } from './core.js';
+import type { MarketInfo, TokenEvmContract } from './core.js';
 
 /// One spot pair inside `SpotMeta` (also `markets.spot.pairs`).
 export interface SpotPair {
@@ -46,14 +46,18 @@ export interface SpotToken {
   sz_decimals: number;
   /// Native (ERC-20-style) token decimals (e.g. USDC = 6, BTC = 8).
   wei_decimals: number;
-  /// `0x` EVM contract bound to the token, or `null` when it has no binding.
-  evm_contract: string | null;
+  /// EVM contract bound to the token as an OBJECT `{address,
+  /// evm_extra_wei_decimals}`, or `null` when it has no binding.
+  evm_contract: TokenEvmContract | null;
   /// Whether the token is a canonical (genesis-seeded) listing.
   is_canonical: boolean;
   /// Token system address (0x).
   system_address: string;
   /// Deterministic token id hash (`0x` + 32 bytes).
   token_id: string;
+  /// Total supply of the token, decimal string. (A perp market's underlying
+  /// `token` block instead carries `circulating_supply` — distinct key.)
+  total_supply: string;
 }
 
 /// `spot_meta` — spot pair universe + token registry. The same object is

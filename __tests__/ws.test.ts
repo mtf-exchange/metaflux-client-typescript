@@ -223,6 +223,81 @@ describe('WsClient wire protocol', () => {
     ws.close();
   });
 
+  it('subscribeL2Book serializes aggregation params as snake_case', async () => {
+    const ws = new WsClient('wss://x/ws', { autoReconnect: false });
+    const p = ws.connect();
+    const sock = MockSocket.instances[0]!;
+    sock.open();
+    await p;
+
+    await ws.subscribeL2Book('BTC', { nSigFigs: 5, mantissa: 2, nLevels: 20 });
+    expect(sock.sent).toContain(
+      '{"method":"subscribe","subscription":{"type":"l2_book","coin":"BTC","n_sig_figs":5,"mantissa":2,"n_levels":20}}',
+    );
+    // A spot pair name subscribes for spot depth; partial params send only the
+    // defined field.
+    await ws.subscribeL2Book('BTC/USDC', { nSigFigs: 3 });
+    expect(sock.sent).toContain(
+      '{"method":"subscribe","subscription":{"type":"l2_book","coin":"BTC/USDC","n_sig_figs":3}}',
+    );
+    ws.close();
+  });
+
+  it('re-subscribing l2_book for a coin REPLACES the prior view in the replay set', async () => {
+    const ws = new WsClient('wss://x/ws', {
+      autoReconnect: true,
+      initialBackoffMs: 1,
+      maxBackoffMs: 1,
+    });
+    const p = ws.connect();
+    const first = MockSocket.instances[0]!;
+    first.open();
+    await p;
+
+    // Two l2_book subs for the SAME coin with different params: the server
+    // holds one view per coin and replaces it, so only the latest may survive
+    // in the reconnect-replay set (a stale entry would clobber the new params).
+    await ws.subscribeL2Book('BTC', { nSigFigs: 2 });
+    await ws.subscribeL2Book('BTC', { nSigFigs: 5, nLevels: 20 });
+
+    // Drop → reconnect → the fresh socket replays active subs.
+    first.close();
+    await new Promise((r) => setTimeout(r, 10));
+    const second = MockSocket.instances[MockSocket.instances.length - 1]!;
+    second.open();
+
+    const l2Replays = second.sent.filter((s) => s.includes('"l2_book"'));
+    expect(l2Replays).toHaveLength(1);
+    expect(l2Replays[0]).toBe(
+      '{"method":"subscribe","subscription":{"type":"l2_book","coin":"BTC","n_sig_figs":5,"n_levels":20}}',
+    );
+    ws.close();
+  });
+
+  it('unsubscribe drops the l2_book view for a coin regardless of params', async () => {
+    const ws = new WsClient('wss://x/ws', {
+      autoReconnect: true,
+      initialBackoffMs: 1,
+      maxBackoffMs: 1,
+    });
+    const p = ws.connect();
+    const first = MockSocket.instances[0]!;
+    first.open();
+    await p;
+
+    await ws.subscribeL2Book('BTC', { nSigFigs: 5, nLevels: 20 });
+    // Params-blind unsubscribe (server keys unsubscribe by coin alone).
+    await ws.unsubscribe({ type: 'l2_book', coin: 'BTC' });
+
+    first.close();
+    await new Promise((r) => setTimeout(r, 10));
+    const second = MockSocket.instances[MockSocket.instances.length - 1]!;
+    second.open();
+    // Nothing to replay — the view was removed.
+    expect(second.sent.filter((s) => s.includes('"l2_book"'))).toHaveLength(0);
+    ws.close();
+  });
+
   it('postInfo correlates the response by id and unwraps payload', async () => {
     const ws = new WsClient('wss://x/ws', { autoReconnect: false });
     const p = ws.connect();

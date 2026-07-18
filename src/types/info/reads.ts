@@ -16,10 +16,15 @@ export type TradeSide = 'B' | 'A';
 /// `px` / `size` are CANONICAL decimal strings (positive price for **both**
 /// sides, tick-snapped whole-USDC; size in whole units) — no client-side
 /// rescaling is needed. `side` is lowercase `"bid"`/`"ask"`.
+///
+/// Spot resting orders now appear here alongside perp orders — a spot row's
+/// `coin` is the pair NAME (e.g. `"BTC/USDC"`), with `px` / `size` in that
+/// pair's planes.
 export interface OpenOrder {
   /// Server order id.
   oid: number;
-  /// Market symbol the order rests on (e.g. `"BTC"`).
+  /// Market symbol the order rests on — a perp symbol (`"BTC"`) or a spot pair
+  /// name (`"BTC/USDC"`).
   coin: string;
   /// Order side, lowercase `"bid"` / `"ask"`.
   side: 'bid' | 'ask';
@@ -33,12 +38,28 @@ export interface OpenOrder {
   inserted_at_ms: number;
 }
 
-/// `open_orders` — account-scoped resting orders across every perp book.
+/// `open_orders` — account-scoped resting orders across every perp AND spot
+/// book. Spot rows carry the pair NAME as `coin` (e.g. `"BTC/USDC"`).
 export interface OpenOrders {
   /// Resolved account address (0x).
   address: string;
   /// Resting orders.
   orders: OpenOrder[];
+}
+
+/// Optional HL-style depth-aggregation params for an `l2_book` query (REST +
+/// WS). All optional; omit for the ungrouped (finest) book. The gateway groups
+/// deterministically AWAY from the spread and sums sizes, then caps to
+/// `nLevels` levels per side.
+export interface L2BookParams {
+  /// Significant figures to round each price to for grouping — 2..=5. Coarser
+  /// (fewer figs) = fewer, wider levels.
+  nSigFigs?: number;
+  /// Sub-figure mantissa bucket — `1` | `2` | `5`. Only valid together with
+  /// `nSigFigs === 5`; the gateway rejects it otherwise.
+  mantissa?: number;
+  /// Max levels returned per side (≥ 1). The load-reduction lever.
+  nLevels?: number;
 }
 
 /// One aggregated L2 book level.
@@ -52,8 +73,12 @@ export interface L2Level {
 }
 
 /// `l2_book` — market-scoped aggregated bid/ask levels, keyed by `coin`.
+///
+/// `coin` may be a perp symbol (`"BTC"`) or a spot pair — its NAME
+/// (`"BTC/USDC"`) or numeric pair id — and spot pairs now render real depth.
+/// The optional `L2BookParams` group the book HL-style away from the spread.
 export interface L2Book {
-  /// Echoed market symbol.
+  /// Echoed market symbol / pair.
   coin: string;
   /// Bid side (best-first, descending price).
   bids: L2Level[];

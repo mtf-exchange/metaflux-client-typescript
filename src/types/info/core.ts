@@ -170,6 +170,40 @@ export interface MarginTier {
   maint_margin_ratio: string;
 }
 
+/// An EVM contract binding on a registered token. Emitted as an OBJECT on the
+/// spot token registry and on a perp market's underlying-`token` block — NOT a
+/// bare `0x` string. `null`/omitted when the token has no EVM binding.
+export interface TokenEvmContract {
+  /// `0x` EVM contract address bound to the token.
+  address: string;
+  /// Extra wei-decimals offset applied on the EVM side relative to the token's
+  /// native `wei_decimals` (signed; `0` = no offset).
+  evm_extra_wei_decimals: number;
+}
+
+/// The registered underlying token of a perp market, surfaced inline on a
+/// `MarketInfo` (`markets_meta` / `market_info` perp rows) as the `token`
+/// block. OMITTED (absent, never `null`) when the perp has no registered
+/// underlying token. Note the issuance field is `circulating_supply` here,
+/// whereas a spot token registry row (`SpotToken`) carries `total_supply` —
+/// the two key names are NOT interchangeable.
+export interface PerpUnderlyingToken {
+  /// Underlying token asset id.
+  id: number;
+  /// Native (ERC-20-style) token decimals.
+  wei_decimals: number;
+  /// Deterministic token id hash (`0x` + 32 bytes).
+  token_id: string;
+  /// Token system address (`0x`).
+  system_address: string;
+  /// EVM contract binding, or `null` when the token has no binding.
+  evm_contract: TokenEvmContract | null;
+  /// Whether the token is a canonical (genesis-seeded) listing.
+  is_canonical: boolean;
+  /// Circulating supply of the underlying, decimal string.
+  circulating_supply: string;
+}
+
 /// `market_info` / `markets.perp[]` element — rich per-market metadata.
 ///
 /// `mark_px` / `oracle_px` are whole-USDC decimal strings (tick-snapped;
@@ -233,6 +267,9 @@ export interface MarketInfo {
   halted: boolean;
   /// Whether the market is strict-isolated-only.
   strict_isolated: boolean;
+  /// The registered underlying token block, when the perp has one. OMITTED
+  /// (absent) when there is no registered underlying token — never `null`.
+  token?: PerpUnderlyingToken;
 }
 
 /// `vault_state` — per-vault snapshot keyed by vault `address`.
