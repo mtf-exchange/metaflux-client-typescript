@@ -38,6 +38,10 @@ export type {
   CancelByCloid,
   ScheduleCancel,
   CancelAllOrders,
+  // Scale-ladder actions.
+  ScaleDist,
+  ScaleOrder,
+  CancelScale,
 } from './trading.js';
 export type {
   NativeSpotOrder,

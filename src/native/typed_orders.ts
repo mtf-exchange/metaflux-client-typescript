@@ -61,12 +61,14 @@ import type {
   BatchModify,
   BatchOrder,
   CancelByCloid,
+  CancelScale,
   Modify,
   NativeBuilder,
   NativeCancel,
   NativeOrder,
   NativeSpotCancel,
   NativeSpotOrder,
+  ScaleOrder,
   ScheduleCancel,
   TwapCancel,
   TwapOrder,
@@ -108,6 +110,10 @@ const ENCODE_TYPES: Readonly<Record<string, string>> = Object.freeze({
     'MetaFluxTransaction:BatchOrder(string metafluxChain,bytes32 orders,string grouping,uint64 nonce)',
   batch_cancel:
     'MetaFluxTransaction:BatchCancel(string metafluxChain,bytes32 cancels,uint64 nonce)',
+  scale_order:
+    'MetaFluxTransaction:ScaleOrder(string metafluxChain,uint32 market,string side,uint32 n,uint64 pxLow,uint64 pxHigh,uint64 totalSize,string dist,bytes32 weights,string tif,bool reduceOnly,string stpMode,string positionSide,string cloid,uint64 nonce)',
+  cancel_scale:
+    'MetaFluxTransaction:CancelScale(string metafluxChain,uint32 market,string cloid,uint64 nonce)',
 });
 
 /// Owner-carrying encodeType strings — the agent-resolved params-level `owner`
@@ -138,6 +144,10 @@ const ENCODE_TYPES_WITH_OWNER: Readonly<Record<string, string>> = Object.freeze(
     'MetaFluxTransaction:BatchOrder(string metafluxChain,address owner,bytes32 orders,string grouping,uint64 nonce)',
   batch_cancel:
     'MetaFluxTransaction:BatchCancel(string metafluxChain,address owner,bytes32 cancels,uint64 nonce)',
+  scale_order:
+    'MetaFluxTransaction:ScaleOrder(string metafluxChain,address owner,uint32 market,string side,uint32 n,uint64 pxLow,uint64 pxHigh,uint64 totalSize,string dist,bytes32 weights,string tif,bool reduceOnly,string stpMode,string positionSide,string cloid,uint64 nonce)',
+  cancel_scale:
+    'MetaFluxTransaction:CancelScale(string metafluxChain,address owner,uint32 market,string cloid,uint64 nonce)',
 });
 
 /// The trading actions that take a DIGEST-LEVEL agent-resolved `owner` (passed to
@@ -152,6 +162,18 @@ const OWNER_SUPPORTING_ACTIONS: ReadonlySet<string> = new Set([
   'batch_modify',
   'twap_cancel',
   'batch_cancel',
+]);
+
+/// Trading actions that carry the agent-resolved `owner` INSIDE their own params
+/// struct (`params.owner`), NOT as a digest-level argument — so they are NOT in
+/// [`OWNER_SUPPORTING_ACTIONS`]. `batch_order` (`BatchOrder.owner`) plus the
+/// scale-ladder pair (`ScaleOrder.owner` / `CancelScale.owner`). The
+/// owner-carrying digest is selected on `params.owner !== undefined`; an
+/// owner-less action keeps the original owner-less layout (byte-identical).
+const PARAMS_OWNER_ACTIONS: ReadonlySet<string> = new Set([
+  'batch_order',
+  'scale_order',
+  'cancel_scale',
 ]);
 
 /// The set of snake_case `action.type` tags the trading-set typed scheme covers.
@@ -265,6 +287,12 @@ const VALID_GROUPING: ReadonlySet<string> = new Set([
   'na',
   'normalTpsl',
   'positionTpsl',
+]);
+const VALID_SCALE_DIST: ReadonlySet<string> = new Set([
+  'flat',
+  'lin_asc',
+  'lin_desc',
+  'custom',
 ]);
 
 function checkEnum(set: ReadonlySet<string>, v: string, field: string): string {
@@ -391,6 +419,28 @@ async function hashItems(items: Uint8Array[][]): Promise<Uint8Array> {
   const flat: Uint8Array[] = [];
   for (const words of items) flat.push(...words);
   return keccak256(concatWords(flat));
+}
+
+/// The `bytes32 weights` word of a `scale_order` typed digest — mirrors the
+/// server `hash_scale_weights`. Only `dist === "custom"` binds a weight vector:
+/// `keccak256(concat(uint256(wᵢ)))`, each weight a big-endian zero-left-padded
+/// 32-byte word, item order significant. Every other distribution derives its
+/// weights from `dist` + `n`, so there is nothing to sign — it binds the 32-byte
+/// ZERO word (the zero hash). The result is a `bytes32` encoded RAW (the fixed
+/// value itself, NOT re-hashed like a dynamic `bytes`).
+async function hashScaleWeights(
+  dist: string,
+  weights: readonly number[],
+): Promise<Uint8Array> {
+  if (dist !== 'custom') return new Uint8Array(32);
+  const buf = new Uint8Array(weights.length * 32);
+  weights.forEach((w, i) => {
+    if (!Number.isInteger(w) || w < 0 || w > 0xffffffff) {
+      throw new RangeError(`weights[${i}] must be a u32`);
+    }
+    buf.set(be32(BigInt(w)), i * 32);
+  });
+  return keccak256(buf);
 }
 
 // ============================================================================
@@ -526,6 +576,51 @@ async function encodeOrderData(
       const items = p.cancels.map(cancelWords);
       return [chainWord, ...ownerWords, await hashItems(items), nonceWord];
     }
+    case 'scale_order': {
+      const p = payload.params as ScaleOrder;
+      validateCloid(p.cloid);
+      // Owner-carrying variant: the params-level `owner` word is inserted at
+      // position 2 (after metafluxChain), gated on presence — exactly like
+      // `batch_order`. `weights` is pre-hashed to a `bytes32` (see
+      // `hashScaleWeights`); the FULL array still rides the wire JSON.
+      const scaleOwnerWords: Uint8Array[] =
+        p.owner !== undefined ? [encAddr(p.owner, 'owner')] : [];
+      const positionSide =
+        p.position_side === undefined
+          ? ''
+          : checkEnum(VALID_POSITION_SIDE, p.position_side, 'position_side');
+      return [
+        chainWord,
+        ...scaleOwnerWords,
+        encUint(asBigInt(p.market, 'market'), 32, 'market'),
+        await encString(checkEnum(VALID_SIDE, p.side, 'side')),
+        encUint(asBigInt(p.n, 'n'), 32, 'n'),
+        encUint(asBigInt(p.px_low, 'px_low'), 64, 'px_low'),
+        encUint(asBigInt(p.px_high, 'px_high'), 64, 'px_high'),
+        encUint(asBigInt(p.total_size, 'total_size'), 64, 'total_size'),
+        await encString(checkEnum(VALID_SCALE_DIST, p.dist, 'dist')),
+        await hashScaleWeights(p.dist, p.weights ?? []),
+        await encString(checkEnum(VALID_TIF, p.tif, 'tif')),
+        encBool(p.reduce_only ?? false),
+        await encString(checkEnum(VALID_STP, p.stp_mode, 'stp_mode')),
+        await encString(positionSide),
+        await encString(p.cloid),
+        nonceWord,
+      ];
+    }
+    case 'cancel_scale': {
+      const p = payload.params as CancelScale;
+      validateCloid(p.cloid);
+      const scaleOwnerWords: Uint8Array[] =
+        p.owner !== undefined ? [encAddr(p.owner, 'owner')] : [];
+      return [
+        chainWord,
+        ...scaleOwnerWords,
+        encUint(asBigInt(p.market, 'market'), 32, 'market'),
+        await encString(p.cloid),
+        nonceWord,
+      ];
+    }
     default:
       throw new RangeError(`'${actionType}' is not a trading typed action`);
   }
@@ -556,7 +651,9 @@ export interface TypedOrderPayload {
     | TwapOrder
     | TwapCancel
     | BatchOrder
-    | BatchCancel;
+    | BatchCancel
+    | ScaleOrder
+    | CancelScale;
 }
 
 // ============================================================================
@@ -616,8 +713,8 @@ export async function buildTypedOrder(
   const ownerBound = owner !== undefined && OWNER_SUPPORTING_ACTIONS.has(actionType);
   const withOwner =
     ownerBound ||
-    (actionType === 'batch_order' &&
-      (payload.params as BatchOrder | undefined)?.owner !== undefined);
+    (PARAMS_OWNER_ACTIONS.has(actionType) &&
+      (payload.params as { owner?: string } | undefined)?.owner !== undefined);
   return {
     actionType,
     chainId,

@@ -27,6 +27,7 @@ import {
   buildNativeCancelAction,
   buildNativeCancelAllOrdersAction,
   buildNativeCancelByCloidAction,
+  buildNativeCancelScaleAction,
   buildNativeClaimRewardsAction,
   buildNativeConvertToMultiSigUserAction,
   buildNativeCreateVaultAction,
@@ -37,6 +38,7 @@ import {
   buildNativeModifyAction,
   buildNativeOrderAction,
   buildNativePriorityBidAction,
+  buildNativeScaleOrderAction,
   buildNativeScheduleCancelAction,
   buildNativeSetDisplayNameAction,
   buildNativeSetPositionModeAction,
@@ -92,6 +94,7 @@ import type {
   BatchOrder,
   CancelAllOrders,
   CancelByCloid,
+  CancelScale,
   CDeposit,
   ClaimRewards,
   ConvertToMultiSigUser,
@@ -123,6 +126,7 @@ import type {
   PriorityBid,
   RfqAccept,
   RfqRequest,
+  ScaleOrder,
   ScheduleCancel,
   SendAsset,
   SetDisplayName,
@@ -723,6 +727,41 @@ export class Client {
       );
     }
     return this.postBatchOwnerChecked(actionJson, owners, opts);
+  }
+
+  /// Place a SCALE ladder (`scale_order`, action 213) via `POST /exchange`. One
+  /// signed COMPACT ladder the node expands into `n` resting limit rungs that
+  /// all share `params.cloid`; use [`cancelScale`] to sweep the group.
+  /// SENDER-AUTHORIZED (the digest binds the optional agent-resolved
+  /// `params.owner` when present — the signer is then the approved agent, so no
+  /// owner cross-check). Availability is fork-gated: the node rejects the action
+  /// until the `scale_order` feature is armed.
+  async placeScale(
+    params: ScaleOrder,
+    opts: TradeOpts = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postTradeAction(
+      'scale_order',
+      { params },
+      buildNativeScaleOrderAction(params),
+      opts,
+    );
+  }
+
+  /// Cancel a SCALE ladder group (`cancel_scale`, action 214) via
+  /// `POST /exchange` — sweeps every resting rung on `params.market` owned by
+  /// the sender that carries `params.cloid`. SENDER-AUTHORIZED (binds the
+  /// optional agent-resolved `params.owner` when present).
+  async cancelScale(
+    params: CancelScale,
+    opts: TradeOpts = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postTradeAction(
+      'cancel_scale',
+      { params },
+      buildNativeCancelScaleAction(params),
+      opts,
+    );
   }
 
   /// Schedule a cancel-all of the sender's open orders at a future block.

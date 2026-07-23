@@ -153,8 +153,15 @@ export interface NativeTrigger {
   /// Trigger price in the 1e8 fixed-point plane (`u64` on the wire). Pass a
   /// `bigint`/string above 2^53, or use `pxToWire(humanPrice)` to convert.
   trigger_px: U64Input;
-  /// `true` fires a market order on the cross; `false` a limit at the order's
-  /// `limit_px`.
+  /// `true` fires a market order on the cross; `false` rests a limit at the
+  /// order's `limit_px` (the TP/SL LIMIT variant).
+  ///
+  /// N3 caveat (post-arm behavior change): once the node arms the `tpsl_limit`
+  /// feature, `is_market` is CONTROL, not advisory, and its serde default is
+  /// `false`. A leg that OMITS `is_market` then defaults to the LIMIT variant,
+  /// and a LIMIT leg with `limit_px: 0` is rejected (`InvalidParams`) instead of
+  /// parking as a market stop. So a market stop MUST send `is_market: true`
+  /// explicitly. This SDK sets `is_market` on every trigger it builds.
   is_market: boolean;
   /// `"tp"` (take-profit) or `"sl"` (stop-loss).
   tpsl: NativeTpSl;
@@ -200,9 +207,13 @@ export type NativeSide = 'bid' | 'ask';
 /// `NativePositionSide`. Selects which leg a hedge-account order targets.
 export type NativePositionSide = 'long' | 'short';
 
-/// MTF-native order kind — mirrors the server `NativeOrderKind`. Only
-/// `limit` / `market` are mapped server-side; `stop_loss` / `take_profit`
-/// are rejected (triggers not wired).
+/// MTF-native order kind — mirrors the server `NativeOrderKind`. `limit` and
+/// `market` are the plain kinds. `stop_loss` / `take_profit` mark a protective
+/// leg and MUST carry a `trigger` block (see `NativeTrigger`). Trigger legs are
+/// now WIRED: a protective leg parks in the trigger registry and fires on a mark
+/// cross — `is_market: true` fires a reduce-only market IOC; `is_market: false`
+/// rests a reduce-only GTC limit at the order's `limit_px` (the TP/SL LIMIT
+/// variant). Use `buildTpSlLimitOrder` for the LIMIT variant.
 export type NativeOrderKind = 'limit' | 'market' | 'stop_loss' | 'take_profit';
 
 /// MTF-native time-in-force — mirrors the server `NativeTif`. `aon` is
@@ -294,6 +305,81 @@ export interface ScheduleCancel {
 export interface CancelAllOrders {
   /// Asset filter (`u32`). Omit to cancel across all assets.
   asset?: number;
+}
+
+// ---- scale-ladder actions (node-native SCALE order) ----
+
+/// Rung size distribution for a [`ScaleOrder`] — mirrors the server
+/// `NativeScaleDist` (snake_case). `flat` = equal weight on every rung;
+/// `lin_asc` = weight rises with rung index; `lin_desc` = weight falls with rung
+/// index; `custom` = an explicit per-rung `weights` array (length must equal
+/// `n`). The node derives the non-custom weights from `dist` + `n`, so a
+/// non-custom order carries NO weights array.
+export type ScaleDist = 'flat' | 'lin_asc' | 'lin_desc' | 'custom';
+
+/// `scale_order` action payload (action id 213) — one signed COMPACT ladder of
+/// `n` resting limit legs on one perp market. The node expands it
+/// DETERMINISTICALLY into `n` ordinary resting orders that all share one `cloid`
+/// (the ladder handle); the signature binds the compact params, NOT the rung
+/// array. Byte-for-byte mirror of the server `NativeScaleOrder`.
+///
+/// Field ORDER is load-bearing for the canonical action bytes (see
+/// `buildNativeScaleOrderAction`); the EIP-712 typed digest binds the same field
+/// set (with the `weights` array pre-hashed to a `bytes32`).
+export interface ScaleOrder {
+  /// Optional agent-resolved owner (`0x`-hex 20-byte). Present = an approved
+  /// agent signs FOR `owner` (bound into the `_WITH_OWNER` typed digest, at
+  /// position 2). Omit = the signing wallet trades for itself.
+  owner?: string;
+  /// Target market id (`u32`).
+  market: number;
+  /// Ladder side — `"bid"` / `"ask"`. Rung 0 sits at `px_low` for both sides.
+  side: NativeSide;
+  /// Rung count (`u32`), `2 ..= 100`.
+  n: number;
+  /// Low end of the ladder, 1e8 fixed-point plane (`u64` on the wire). Pass a
+  /// `bigint`/string above 2^53, or use `pxToWire(humanPrice)`.
+  px_low: U64Input;
+  /// High end of the ladder, 1e8 plane (`u64`). Must exceed `px_low`.
+  px_high: U64Input;
+  /// Total base size across all rungs, raw-lot plane (`u64`). Use
+  /// `szToWire(human, sz_decimals)`.
+  total_size: U64Input;
+  /// Size distribution across the rungs.
+  dist: ScaleDist;
+  /// Per-rung weights — REQUIRED and only valid when `dist === "custom"`
+  /// (length must equal `n`, each `>= 1`). Omit (or empty) for every other
+  /// distribution; a non-custom order carrying weights is rejected server-side.
+  weights?: number[];
+  /// Time-in-force. `"alo"` (post-only) or `"gtc"`; `"ioc"` / `"aon"` are
+  /// rejected (a ladder must rest).
+  tif: NativeTif;
+  /// Reduce-only flag, uniform across every rung. Defaults to `false`.
+  reduce_only?: boolean;
+  /// Self-trade-prevention mode, uniform across every rung.
+  stp_mode: NativeStpMode;
+  /// HEDGE MODE: target leg (`"long"` / `"short"`), uniform across every rung.
+  /// OMIT on a one-way account.
+  position_side?: NativePositionSide;
+  /// The ladder handle — `0x`-hex 32-char (16-byte) client order id, REQUIRED.
+  /// Every rung carries it; `cancelScale` sweeps the group by it. Use a fresh
+  /// `0x5c`-tagged handle per ladder (the group-cancel joins any resting order
+  /// that reuses the cloid).
+  cloid: string;
+}
+
+/// `cancel_scale` action payload (action id 214) — cancel every resting order on
+/// `market` owned by the sender that carries `cloid` (cancel-all-by-cloid, the
+/// scale-ladder group cancel). Byte-for-byte mirror of the server
+/// `NativeCancelScale`.
+export interface CancelScale {
+  /// Optional agent-resolved owner (`0x`-hex 20-byte). Same semantics as
+  /// [`ScaleOrder.owner`].
+  owner?: string;
+  /// Target market id (`u32`).
+  market: number;
+  /// The ladder handle to sweep — `0x`-hex 32-char (16-byte), REQUIRED.
+  cloid: string;
 }
 
 /// Signed native action envelope posted to `POST /exchange`.

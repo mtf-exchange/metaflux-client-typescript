@@ -21,6 +21,7 @@ import {
   validateU32,
   validateU64,
   toU64,
+  type U64Input,
 } from './digest.js';
 import type {
   AgentSetAbstraction,
@@ -31,6 +32,7 @@ import type {
   BatchOrder,
   CancelAllOrders,
   CancelByCloid,
+  CancelScale,
   ClaimRewards,
   ConvertToMultiSigUser,
   CreateVault,
@@ -42,15 +44,20 @@ import type {
   NativeEarnDeposit,
   NativeEarnWithdraw,
   NativeOrder,
+  NativePositionSide,
   NativeSetPositionMode,
+  NativeSide,
   NativeSpotCancel,
   NativeSpotMarginClose,
   NativeSpotMarginDeposit,
   NativeSpotMarginOpen,
   NativeSpotMarginWithdraw,
   NativeSpotOrder,
+  NativeStpMode,
+  NativeTpSl,
   NativeTrigger,
   PriorityBid,
+  ScaleOrder,
   ScheduleCancel,
   SetDisplayName,
   SetReferrer,
@@ -390,6 +397,163 @@ export function buildNativeCancelAllOrdersAction(
   return wrapParams('cancel_all_orders', `{${parts.join(',')}}`);
 }
 
+// ---- scale ladder (node-native SCALE order) ----
+
+/// `scale_order` (action 213) — one signed COMPACT ladder of `n` resting limit
+/// legs the node expands DETERMINISTICALLY into `n` rungs sharing one `cloid`.
+/// Field order mirrors the server `NativeScaleOrder` exactly (`owner` first when
+/// present, then market … cloid). `weights` is emitted ONLY for `dist:"custom"`
+/// (length MUST equal `n`); a non-custom order omits it (the node derives the
+/// weights and rejects a non-custom order that carries any). The returned string
+/// is BOTH signed and POSTed — do not re-serialize.
+export function buildNativeScaleOrderAction(params: ScaleOrder): string {
+  validateMarket(params.market);
+  validateU32(params.n, 'n');
+  if (params.n < 2 || params.n > 100) {
+    throw new RangeError('scale_order requires 2 <= n <= 100');
+  }
+  const pxLow = toU64(params.px_low, 'px_low');
+  const pxHigh = toU64(params.px_high, 'px_high');
+  if (pxLow <= 0n || pxHigh <= pxLow) {
+    throw new RangeError('scale_order requires 0 < px_low < px_high');
+  }
+  if (toU64(params.total_size, 'total_size') <= 0n) {
+    throw new RangeError('scale_order requires total_size > 0');
+  }
+  if (params.dist !== 'flat' && params.dist !== 'lin_asc' &&
+      params.dist !== 'lin_desc' && params.dist !== 'custom') {
+    throw new RangeError('dist must be flat | lin_asc | lin_desc | custom');
+  }
+  if (params.tif !== 'alo' && params.tif !== 'gtc') {
+    throw new RangeError('scale_order tif must be alo | gtc (ioc/aon rest nothing)');
+  }
+  validateCloid(params.cloid);
+  const parts: string[] = [];
+  if (params.owner !== undefined) {
+    validateAddress(params.owner, 'owner');
+    parts.push(`${jsonStr('owner')}:${jsonStr(params.owner)}`);
+  }
+  parts.push(`${jsonStr('market')}:${params.market}`);
+  parts.push(`${jsonStr('side')}:${jsonStr(params.side)}`);
+  parts.push(`${jsonStr('n')}:${params.n}`);
+  parts.push(`${jsonStr('px_low')}:${pxLow}`);
+  parts.push(`${jsonStr('px_high')}:${pxHigh}`);
+  parts.push(`${jsonStr('total_size')}:${toU64(params.total_size, 'total_size')}`);
+  parts.push(`${jsonStr('dist')}:${jsonStr(params.dist)}`);
+  // `weights` rides the wire ONLY for a custom ladder (length === n); the node
+  // rejects a non-custom order that carries a non-empty array (fail-closed), so
+  // we omit it entirely for every other distribution.
+  if (params.dist === 'custom') {
+    if (!Array.isArray(params.weights) || params.weights.length !== params.n) {
+      throw new RangeError('custom dist requires weights.length === n');
+    }
+    const arr = params.weights
+      .map((w, i) => {
+        validateU32(w, `weights[${i}]`);
+        if (w < 1) throw new RangeError(`weights[${i}] must be >= 1`);
+        return String(w);
+      })
+      .join(',');
+    parts.push(`${jsonStr('weights')}:[${arr}]`);
+  } else if (params.weights !== undefined && params.weights.length > 0) {
+    throw new RangeError('non-custom dist must not carry a weights array');
+  }
+  parts.push(`${jsonStr('tif')}:${jsonStr(params.tif)}`);
+  parts.push(`${jsonStr('reduce_only')}:${params.reduce_only ? 'true' : 'false'}`);
+  parts.push(`${jsonStr('stp_mode')}:${jsonStr(params.stp_mode)}`);
+  if (params.position_side !== undefined) {
+    parts.push(`${jsonStr('position_side')}:${jsonStr(params.position_side)}`);
+  }
+  parts.push(`${jsonStr('cloid')}:${jsonStr(params.cloid)}`);
+  return wrapParams('scale_order', `{${parts.join(',')}}`);
+}
+
+/// `cancel_scale` (action 214) — cancel every resting rung on `market` owned by
+/// the sender that carries `cloid` (the scale-ladder group cancel). Field order
+/// mirrors the server `NativeCancelScale` (`owner` first when present, then
+/// market, cloid). The returned string is BOTH signed and POSTed.
+export function buildNativeCancelScaleAction(params: CancelScale): string {
+  validateMarket(params.market);
+  validateCloid(params.cloid);
+  const parts: string[] = [];
+  if (params.owner !== undefined) {
+    validateAddress(params.owner, 'owner');
+    parts.push(`${jsonStr('owner')}:${jsonStr(params.owner)}`);
+  }
+  parts.push(`${jsonStr('market')}:${params.market}`);
+  parts.push(`${jsonStr('cloid')}:${jsonStr(params.cloid)}`);
+  return wrapParams('cancel_scale', `{${parts.join(',')}}`);
+}
+
+// ---- TP/SL LIMIT trigger ----
+
+/// Ergonomic constructor for a TP/SL LIMIT protective order — the LIMIT variant
+/// of a trigger leg (`is_market: false`). On the mark cross the node rests a
+/// reduce-only GTC limit at `limit_px` (NOT a market IOC). Returns a
+/// [`NativeOrder`] ready for [`buildNativeOrderAction`] (or a `batch_order` leg).
+///
+/// Hard rules the node enforces on a LIMIT trigger, checked here so a bad order
+/// fails BEFORE signing:
+/// - `is_market` = `false` (set for you).
+/// - `limit_px` > 0 (a LIMIT trigger MUST carry a resting price; `0` is
+///   rejected `InvalidParams` once `tpsl_limit` is armed — see the N3 caveat on
+///   `NativeTrigger.is_market`).
+/// - `tif` = `"gtc"` (set for you; `alo` refires-rejects, `ioc` never rests).
+///
+/// `trigger_px` is the mark-cross price; `limit_px` is the fired resting price;
+/// they are independent. The leg is reduce-only (a protective close).
+export function buildTpSlLimitOrder(params: {
+  /// `0x`-hex 20-byte owner (the signing wallet).
+  owner: string;
+  /// Target market id (`u32`).
+  market: number;
+  /// Side of the protective (closing) leg — `"bid"` / `"ask"`.
+  side: NativeSide;
+  /// Leg size, raw-lot plane (`u64`). Use `szToWire(human, sz_decimals)`.
+  size: U64Input;
+  /// Fired RESTING limit price, 1e8 plane (`u64`), MUST be > 0. Use
+  /// `pxToWire(humanPrice)`.
+  limit_px: U64Input;
+  /// Mark-cross trigger price, 1e8 plane (`u64`). Use `pxToWire(humanPrice)`.
+  trigger_px: U64Input;
+  /// `"tp"` (take-profit) or `"sl"` (stop-loss).
+  tpsl: NativeTpSl;
+  /// Self-trade-prevention mode. Defaults to `"cancel_oldest"`.
+  stp_mode?: NativeStpMode;
+  /// Optional `0x`-hex 32-char (16-byte) client order id.
+  cloid?: string;
+  /// HEDGE MODE: target leg. OMIT on a one-way account.
+  position_side?: NativePositionSide;
+}): NativeOrder {
+  if (toU64(params.limit_px, 'limit_px') <= 0n) {
+    throw new RangeError(
+      'TP/SL LIMIT requires limit_px > 0 (a limit trigger must carry a resting price)',
+    );
+  }
+  if (params.tpsl !== 'tp' && params.tpsl !== 'sl') {
+    throw new RangeError('tpsl must be "tp" or "sl"');
+  }
+  const order: NativeOrder = {
+    owner: params.owner,
+    market: params.market,
+    side: params.side,
+    kind: params.tpsl === 'sl' ? 'stop_loss' : 'take_profit',
+    size: params.size,
+    limit_px: params.limit_px,
+    tif: 'gtc',
+    stp_mode: params.stp_mode ?? 'cancel_oldest',
+    reduce_only: true,
+    trigger: {
+      trigger_px: params.trigger_px,
+      is_market: false,
+      tpsl: params.tpsl,
+    },
+  };
+  if (params.cloid !== undefined) order.cloid = params.cloid;
+  if (params.position_side !== undefined) order.position_side = params.position_side;
+  return order;
+}
+
 // ---- TWAP ----
 
 /// `twap_order` — submit a sliced (TWAP) order.
@@ -721,7 +885,14 @@ export function buildNativeMbWithdrawAction(params: MbWithdraw): string {
 }
 
 // ============================================================================
-// Spot margin (leveraged spot) + Earn (lending pool) — devnet preview.
+// Spot margin (leveraged spot) + Earn (lending pool) — LIVE on testnet 114514.
+// Spot margin is now CROSS-margined against the ONE unified USDC pool: the old
+// per-pair isolated bucket and its `spot_margin_deposit` / `spot_margin_withdraw`
+// funding actions are retired server-side (collateral rides the shared cross
+// pool, so there is no isolated bucket to fund). Those two builders are kept for
+// back-compat but are dead on the live node; the `spot_margin_open` /
+// `spot_margin_close` leverage actions stay.
+//
 // All SENDER-AUTHORIZED (no owner field; the recovered signer is the actor).
 // Decimal magnitudes (amount / borrow / shares) are emitted as JSON STRINGS;
 // size / limit_px are bare integers on the raw-lot / 1e8 planes. Field order =
@@ -729,6 +900,10 @@ export function buildNativeMbWithdrawAction(params: MbWithdraw): string {
 // ============================================================================
 
 /// Build the canonical native `spot_margin_deposit` action JSON string.
+///
+/// RETIRED: superseded by unified cross-margin — the live node no longer keeps a
+/// per-pair isolated bucket to fund (collateral rides the shared USDC cross
+/// pool). Kept for back-compat only; the live node rejects it.
 ///
 /// `{"type":"spot_margin_deposit","params":{"pair":<u32>,"amount":"<decimal>"}}`.
 /// Posts quote collateral into the `(account, pair)` margin account (margin must
@@ -743,6 +918,10 @@ export function buildNativeSpotMarginDepositAction(
 }
 
 /// Build the canonical native `spot_margin_withdraw` action JSON string.
+///
+/// RETIRED: superseded by unified cross-margin (see `spot_margin_deposit`). Kept
+/// for back-compat only; the live node rejects it — free collateral now lives in
+/// the shared USDC cross pool.
 ///
 /// `{"type":"spot_margin_withdraw","params":{"pair":<u32>,"amount":"<decimal>"}}`.
 /// Withdraws free collateral (initial-margin-gated while a position is open).

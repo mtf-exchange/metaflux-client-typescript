@@ -335,14 +335,18 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing — trading set', () =
     );
   });
 
-  it('isTypedOrderAction / TYPED_ORDER_ACTION_TYPES cover exactly the 12 trading actions', async () => {
+  it('isTypedOrderAction / TYPED_ORDER_ACTION_TYPES cover exactly the 14 trading actions', async () => {
     const { isTypedOrderAction, TYPED_ORDER_ACTION_TYPES } = await import(
       '../src/native/typed_orders.js'
     );
-    expect(TYPED_ORDER_ACTION_TYPES.length).toBe(12);
+    // 12 original trading actions + the scale-ladder pair (scale_order /
+    // cancel_scale).
+    expect(TYPED_ORDER_ACTION_TYPES.length).toBe(14);
     expect(isTypedOrderAction('submit_order')).toBe(true);
     expect(isTypedOrderAction('cancel_order')).toBe(true);
     expect(isTypedOrderAction('batch_cancel')).toBe(true);
+    expect(isTypedOrderAction('scale_order')).toBe(true);
+    expect(isTypedOrderAction('cancel_scale')).toBe(true);
     // Account-set + unmapped actions are NOT trading typed actions.
     expect(isTypedOrderAction('approve_agent')).toBe(false);
     expect(isTypedOrderAction('cancel_all_orders')).toBe(false);

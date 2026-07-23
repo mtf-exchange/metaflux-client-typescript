@@ -99,6 +99,9 @@ export {
   buildNativeBatchModifyAction,
   buildNativeBatchOrderAction,
   buildNativeBatchCancelAction,
+  buildNativeScaleOrderAction,
+  buildNativeCancelScaleAction,
+  buildTpSlLimitOrder,
   buildNativeScheduleCancelAction,
   buildNativeCancelAllOrdersAction,
   buildNativeSetPositionModeAction,
@@ -302,6 +305,10 @@ export type {
   CancelByCloid,
   ScheduleCancel,
   CancelAllOrders,
+  // Scale-ladder actions.
+  ScaleDist,
+  ScaleOrder,
+  CancelScale,
   // Account / margin / agent actions.
   UpdateLeverage,
   UpdateIsolatedMargin,
