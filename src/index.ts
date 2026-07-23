@@ -101,6 +101,8 @@ export {
   buildNativeBatchCancelAction,
   buildNativeScaleOrderAction,
   buildNativeCancelScaleAction,
+  buildNativeChaseOrderAction,
+  buildNativeCancelChaseAction,
   buildTpSlLimitOrder,
   buildNativeScheduleCancelAction,
   buildNativeCancelAllOrdersAction,
@@ -309,6 +311,9 @@ export type {
   ScaleDist,
   ScaleOrder,
   CancelScale,
+  // Chase-order actions.
+  ChaseOrder,
+  CancelChase,
   // Account / margin / agent actions.
   UpdateLeverage,
   UpdateIsolatedMargin,

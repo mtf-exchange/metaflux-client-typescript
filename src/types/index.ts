@@ -42,6 +42,9 @@ export type {
   ScaleDist,
   ScaleOrder,
   CancelScale,
+  // Chase-order actions.
+  ChaseOrder,
+  CancelChase,
 } from './trading.js';
 export type {
   NativeSpotOrder,

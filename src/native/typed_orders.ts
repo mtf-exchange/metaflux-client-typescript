@@ -61,7 +61,9 @@ import type {
   BatchModify,
   BatchOrder,
   CancelByCloid,
+  CancelChase,
   CancelScale,
+  ChaseOrder,
   Modify,
   NativeBuilder,
   NativeCancel,
@@ -114,6 +116,10 @@ const ENCODE_TYPES: Readonly<Record<string, string>> = Object.freeze({
     'MetaFluxTransaction:ScaleOrder(string metafluxChain,uint32 market,string side,uint32 n,uint64 pxLow,uint64 pxHigh,uint64 totalSize,string dist,bytes32 weights,string tif,bool reduceOnly,string stpMode,string positionSide,string cloid,uint64 nonce)',
   cancel_scale:
     'MetaFluxTransaction:CancelScale(string metafluxChain,uint32 market,string cloid,uint64 nonce)',
+  chase_order:
+    'MetaFluxTransaction:ChaseOrder(string metafluxChain,uint32 market,string side,uint64 size,string cloid,string stpMode,string positionSide,uint32 intervalBlocks,uint64 ttlMs,uint32 maxReprices,uint64 nonce)',
+  cancel_chase:
+    'MetaFluxTransaction:CancelChase(string metafluxChain,uint32 market,uint64 chaseOid,uint64 nonce)',
 });
 
 /// Owner-carrying encodeType strings — the agent-resolved params-level `owner`
@@ -148,6 +154,10 @@ const ENCODE_TYPES_WITH_OWNER: Readonly<Record<string, string>> = Object.freeze(
     'MetaFluxTransaction:ScaleOrder(string metafluxChain,address owner,uint32 market,string side,uint32 n,uint64 pxLow,uint64 pxHigh,uint64 totalSize,string dist,bytes32 weights,string tif,bool reduceOnly,string stpMode,string positionSide,string cloid,uint64 nonce)',
   cancel_scale:
     'MetaFluxTransaction:CancelScale(string metafluxChain,address owner,uint32 market,string cloid,uint64 nonce)',
+  chase_order:
+    'MetaFluxTransaction:ChaseOrder(string metafluxChain,address owner,uint32 market,string side,uint64 size,string cloid,string stpMode,string positionSide,uint32 intervalBlocks,uint64 ttlMs,uint32 maxReprices,uint64 nonce)',
+  cancel_chase:
+    'MetaFluxTransaction:CancelChase(string metafluxChain,address owner,uint32 market,uint64 chaseOid,uint64 nonce)',
 });
 
 /// The trading actions that take a DIGEST-LEVEL agent-resolved `owner` (passed to
@@ -166,14 +176,17 @@ const OWNER_SUPPORTING_ACTIONS: ReadonlySet<string> = new Set([
 
 /// Trading actions that carry the agent-resolved `owner` INSIDE their own params
 /// struct (`params.owner`), NOT as a digest-level argument — so they are NOT in
-/// [`OWNER_SUPPORTING_ACTIONS`]. `batch_order` (`BatchOrder.owner`) plus the
-/// scale-ladder pair (`ScaleOrder.owner` / `CancelScale.owner`). The
-/// owner-carrying digest is selected on `params.owner !== undefined`; an
-/// owner-less action keeps the original owner-less layout (byte-identical).
+/// [`OWNER_SUPPORTING_ACTIONS`]. `batch_order` (`BatchOrder.owner`), the
+/// scale-ladder pair (`ScaleOrder.owner` / `CancelScale.owner`), and the
+/// chase pair (`ChaseOrder.owner` / `CancelChase.owner`). The owner-carrying
+/// digest is selected on `params.owner !== undefined`; an owner-less action keeps
+/// the original owner-less layout (byte-identical).
 const PARAMS_OWNER_ACTIONS: ReadonlySet<string> = new Set([
   'batch_order',
   'scale_order',
   'cancel_scale',
+  'chase_order',
+  'cancel_chase',
 ]);
 
 /// The set of snake_case `action.type` tags the trading-set typed scheme covers.
@@ -621,6 +634,46 @@ async function encodeOrderData(
         nonceWord,
       ];
     }
+    case 'chase_order': {
+      const p = payload.params as ChaseOrder;
+      // Owner-carrying variant: the params-level `owner` word is inserted at
+      // position 2 (after metafluxChain), gated on presence — exactly like scale.
+      const chaseOwnerWords: Uint8Array[] =
+        p.owner !== undefined ? [encAddr(p.owner, 'owner')] : [];
+      // cloid: verbatim 0x-hex STRING, "" when absent (hash the string, not the
+      // 16 raw bytes) — mirrors the server `enc_string_decimal(cloid)`.
+      const cloid = p.cloid === undefined ? '' : (validateCloid(p.cloid), p.cloid);
+      const positionSide =
+        p.position_side === undefined
+          ? ''
+          : checkEnum(VALID_POSITION_SIDE, p.position_side, 'position_side');
+      return [
+        chainWord,
+        ...chaseOwnerWords,
+        encUint(asBigInt(p.market, 'market'), 32, 'market'),
+        await encString(checkEnum(VALID_SIDE, p.side, 'side')),
+        encUint(asBigInt(p.size, 'size'), 64, 'size'),
+        await encString(cloid),
+        await encString(checkEnum(VALID_STP, p.stp_mode, 'stp_mode')),
+        await encString(positionSide),
+        encUint(asBigInt(p.interval_blocks, 'interval_blocks'), 32, 'interval_blocks'),
+        encUint(asBigInt(p.ttl_ms, 'ttl_ms'), 64, 'ttl_ms'),
+        encUint(asBigInt(p.max_reprices, 'max_reprices'), 32, 'max_reprices'),
+        nonceWord,
+      ];
+    }
+    case 'cancel_chase': {
+      const p = payload.params as CancelChase;
+      const chaseOwnerWords: Uint8Array[] =
+        p.owner !== undefined ? [encAddr(p.owner, 'owner')] : [];
+      return [
+        chainWord,
+        ...chaseOwnerWords,
+        encUint(asBigInt(p.market, 'market'), 32, 'market'),
+        encUint(asBigInt(p.chase_oid, 'chase_oid'), 64, 'chase_oid'),
+        nonceWord,
+      ];
+    }
     default:
       throw new RangeError(`'${actionType}' is not a trading typed action`);
   }
@@ -653,7 +706,9 @@ export interface TypedOrderPayload {
     | BatchOrder
     | BatchCancel
     | ScaleOrder
-    | CancelScale;
+    | CancelScale
+    | ChaseOrder
+    | CancelChase;
 }
 
 // ============================================================================

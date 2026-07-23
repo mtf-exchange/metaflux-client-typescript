@@ -27,7 +27,9 @@ import {
   buildNativeCancelAction,
   buildNativeCancelAllOrdersAction,
   buildNativeCancelByCloidAction,
+  buildNativeCancelChaseAction,
   buildNativeCancelScaleAction,
+  buildNativeChaseOrderAction,
   buildNativeClaimRewardsAction,
   buildNativeConvertToMultiSigUserAction,
   buildNativeCreateVaultAction,
@@ -94,7 +96,9 @@ import type {
   BatchOrder,
   CancelAllOrders,
   CancelByCloid,
+  CancelChase,
   CancelScale,
+  ChaseOrder,
   CDeposit,
   ClaimRewards,
   ConvertToMultiSigUser,
@@ -760,6 +764,44 @@ export class Client {
       'cancel_scale',
       { params },
       buildNativeCancelScaleAction(params),
+      opts,
+    );
+  }
+
+  /// Place a CHASE order (`chase_order`, action 211) via `POST /exchange`. One
+  /// signed compact intent: the node places one resting Leg and re-prices it
+  /// toward the touch every `params.interval_blocks` committed heights, until the
+  /// fill completes, `params.ttl_ms` elapses, or `params.max_reprices` is reached.
+  /// Every Reprice re-stamps `params.cloid`. There is no chase-specific read/WS
+  /// channel: track the Leg on `open_orders` / `order_updates` by `cloid`, and
+  /// keep the `chase_oid` from the ack (`statuses[0].chase.chase_oid`) for
+  /// [`cancelChase`]. SENDER-AUTHORIZED (the digest binds the optional
+  /// agent-resolved `params.owner` when present).
+  async placeChase(
+    params: ChaseOrder,
+    opts: TradeOpts = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postTradeAction(
+      'chase_order',
+      { params },
+      buildNativeChaseOrderAction(params),
+      opts,
+    );
+  }
+
+  /// Cancel a running CHASE (`cancel_chase`, action 212) via `POST /exchange` —
+  /// cancels its resting Leg and retires its registry entry. `params.chase_oid`
+  /// is the handle from the placement ack (the registry key), NOT the Leg's oid.
+  /// SENDER-AUTHORIZED (binds the optional agent-resolved `params.owner` when
+  /// present).
+  async cancelChase(
+    params: CancelChase,
+    opts: TradeOpts = {},
+  ): Promise<NativeExchangeAck> {
+    return this.postTradeAction(
+      'cancel_chase',
+      { params },
+      buildNativeCancelChaseAction(params),
       opts,
     );
   }

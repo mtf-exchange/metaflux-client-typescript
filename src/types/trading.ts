@@ -382,6 +382,68 @@ export interface CancelScale {
   cloid: string;
 }
 
+// ---- chase-order actions (node-native CHASE re-pricer) ----
+
+/// `chase_order` action payload (action id 211) — one signed compact CHASE
+/// intent. The node places one resting Leg and re-prices it to track the touch:
+/// every `interval_blocks` committed heights it cancels the old Leg and places a
+/// new Leg just inside the best quote. The Chase runs until the fill completes,
+/// the `ttl_ms` lifetime elapses, or `max_reprices` re-places are reached. Every
+/// Reprice re-stamps the same `cloid`. Byte-for-byte mirror of the server
+/// `NativeChaseOrder`. Perp markets only in v1.
+///
+/// Field ORDER is load-bearing for the canonical action bytes (see
+/// `buildNativeChaseOrderAction`); the EIP-712 typed digest binds the same field
+/// set. There is NO chase-specific read/WS channel — each Leg is an ordinary
+/// resting order, so track a Chase on `open_orders` / `order_updates` by `cloid`
+/// (each Reprice emits a new leg oid under the same cloid) and keep the
+/// `chase_oid` from the placement ack for [`CancelChase`].
+export interface ChaseOrder {
+  /// Optional agent-resolved owner (`0x`-hex 20-byte). Present = an approved
+  /// agent signs FOR `owner` (bound into the `_WITH_OWNER` typed digest, at
+  /// position 2). Omit = the signing wallet trades for itself.
+  owner?: string;
+  /// Target perp market id (`u32`).
+  market: number;
+  /// Chase side — `"bid"` (buy chase) / `"ask"` (sell chase).
+  side: NativeSide;
+  /// Leg size, raw-lot plane (`u64` on the wire), on the lot grid and `> 0`. Use
+  /// `szToWire(human, sz_decimals)`. A partial fill shrinks it and the next
+  /// Reprice re-places the remainder.
+  size: U64Input;
+  /// Optional client handle — `0x`-hex 32-char (16-byte). Re-stamped on every
+  /// Reprice Leg (so a Chase is correlated by `cloid`, not by the leg oid).
+  /// Omitted from the signed bytes entirely when absent.
+  cloid?: string;
+  /// Self-trade-prevention mode, re-applied on every Leg.
+  stp_mode: NativeStpMode;
+  /// HEDGE MODE: target leg (`"long"` / `"short"`). OMIT on a one-way account
+  /// (the default), REQUIRED on a hedge account.
+  position_side?: NativePositionSide;
+  /// Debounce K — committed heights between Reprices (`u32`), `2 ..= 28_800`.
+  interval_blocks: number;
+  /// Chase lifetime in consensus milliseconds (`u64` on the wire),
+  /// `60_000 ..= 604_800_000` (1 min .. 7 d). Pass a `bigint`/string above 2^53.
+  ttl_ms: U64Input;
+  /// Max executed Reprices (`u32`), `1 ..= 100_000`.
+  max_reprices: number;
+}
+
+/// `cancel_chase` action payload (action id 212) — cancel a running CHASE: cancel
+/// its resting Leg and retire its registry entry. Owner-gated. Byte-for-byte
+/// mirror of the server `NativeCancelChase`.
+export interface CancelChase {
+  /// Optional agent-resolved owner (`0x`-hex 20-byte). Same semantics as
+  /// [`ChaseOrder.owner`].
+  owner?: string;
+  /// Target market id (`u32`). Must match the chase's market.
+  market: number;
+  /// The Chase handle to cancel — the `chase_oid` returned by the placement ack
+  /// (the registry key), NOT the Leg's oid (`u64` on the wire). Pass a
+  /// `bigint`/string above 2^53.
+  chase_oid: U64Input;
+}
+
 /// Signed native action envelope posted to `POST /exchange`.
 ///
 /// `action` is the raw JSON STRING (not a parsed object) so the bytes sent
@@ -414,7 +476,12 @@ export type OrderStatus =
   | { error: string }
   /// Admitted, but no commit observed within the wait window — track via
   /// `/info` / WS. NOT a fabricated oid.
-  | { pending: { action_hash: string; nonce: number } };
+  | { pending: { action_hash: string; nonce: number } }
+  /// A `chase_order` ack. `chase_oid` is the stable cancel handle — pass it to
+  /// `cancelChase`. `leg_oid` is the CURRENT resting leg, re-stamped on every
+  /// reprice, so correlate reprices by `cloid`, NOT `leg_oid`. `leg_px` is an
+  /// 8-decimal fixed-point integer STRING.
+  | { chase: { chase_oid: number; leg_oid: number; leg_px: string; cloid?: string } };
 
 /// Server response to `POST /exchange`. Mirrors the node `ExchangeResponse`
 /// (per the KB spec metaflux-knowledges/api/rest/exchange.md).

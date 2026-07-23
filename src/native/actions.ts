@@ -32,7 +32,9 @@ import type {
   BatchOrder,
   CancelAllOrders,
   CancelByCloid,
+  CancelChase,
   CancelScale,
+  ChaseOrder,
   ClaimRewards,
   ConvertToMultiSigUser,
   CreateVault,
@@ -483,6 +485,78 @@ export function buildNativeCancelScaleAction(params: CancelScale): string {
   parts.push(`${jsonStr('market')}:${params.market}`);
   parts.push(`${jsonStr('cloid')}:${jsonStr(params.cloid)}`);
   return wrapParams('cancel_scale', `{${parts.join(',')}}`);
+}
+
+// ---- chase re-pricer (node-native CHASE order) ----
+
+/// `chase_order` (action 211) — one signed compact CHASE intent. The node places
+/// one resting Leg and re-prices it toward the touch every `interval_blocks`
+/// committed heights (cancel the old Leg, place a new Leg just inside the best
+/// quote). The Chase runs until the fill completes, `ttl_ms` elapses, or
+/// `max_reprices` is reached; every Reprice re-stamps `cloid`. Field order
+/// mirrors the server `NativeChaseOrder` exactly (`owner` first when present).
+/// Optional `owner` / `cloid` / `position_side` are omitted entirely when absent.
+/// The returned string is BOTH signed and POSTed — do not re-serialize.
+///
+/// Range checks mirror the node bounds so a bad Chase fails BEFORE signing:
+/// `size > 0`, `interval_blocks` in `2 ..= 28_800`, `ttl_ms` in
+/// `60_000 ..= 604_800_000`, `max_reprices` in `1 ..= 100_000`.
+export function buildNativeChaseOrderAction(params: ChaseOrder): string {
+  validateMarket(params.market);
+  const sizeWire = toU64(params.size, 'size');
+  if (sizeWire <= 0n) {
+    throw new RangeError('chase_order requires size > 0');
+  }
+  validateU32(params.interval_blocks, 'interval_blocks');
+  if (params.interval_blocks < 2 || params.interval_blocks > 28_800) {
+    throw new RangeError('chase_order interval_blocks must be in 2..=28800');
+  }
+  const ttlWire = toU64(params.ttl_ms, 'ttl_ms');
+  if (ttlWire < 60_000n || ttlWire > 604_800_000n) {
+    throw new RangeError('chase_order ttl_ms must be in 60000..=604800000');
+  }
+  validateU32(params.max_reprices, 'max_reprices');
+  if (params.max_reprices < 1 || params.max_reprices > 100_000) {
+    throw new RangeError('chase_order max_reprices must be in 1..=100000');
+  }
+  const parts: string[] = [];
+  if (params.owner !== undefined) {
+    validateAddress(params.owner, 'owner');
+    parts.push(`${jsonStr('owner')}:${jsonStr(params.owner)}`);
+  }
+  parts.push(`${jsonStr('market')}:${params.market}`);
+  parts.push(`${jsonStr('side')}:${jsonStr(params.side)}`);
+  parts.push(`${jsonStr('size')}:${sizeWire}`);
+  if (params.cloid !== undefined) {
+    validateCloid(params.cloid);
+    parts.push(`${jsonStr('cloid')}:${jsonStr(params.cloid)}`);
+  }
+  parts.push(`${jsonStr('stp_mode')}:${jsonStr(params.stp_mode)}`);
+  if (params.position_side !== undefined) {
+    parts.push(`${jsonStr('position_side')}:${jsonStr(params.position_side)}`);
+  }
+  parts.push(`${jsonStr('interval_blocks')}:${params.interval_blocks}`);
+  parts.push(`${jsonStr('ttl_ms')}:${ttlWire}`);
+  parts.push(`${jsonStr('max_reprices')}:${params.max_reprices}`);
+  return wrapParams('chase_order', `{${parts.join(',')}}`);
+}
+
+/// `cancel_chase` (action 212) — cancel a running CHASE: cancel its resting Leg
+/// and retire its registry entry. `chase_oid` is the stable handle from the
+/// placement ack (the registry key), NOT the Leg's oid; owner-gated. Field order
+/// mirrors the server `NativeCancelChase` (`owner` first when present, then
+/// market, chase_oid). The returned string is BOTH signed and POSTed.
+export function buildNativeCancelChaseAction(params: CancelChase): string {
+  validateMarket(params.market);
+  const chaseOid = toU64(params.chase_oid, 'chase_oid');
+  const parts: string[] = [];
+  if (params.owner !== undefined) {
+    validateAddress(params.owner, 'owner');
+    parts.push(`${jsonStr('owner')}:${jsonStr(params.owner)}`);
+  }
+  parts.push(`${jsonStr('market')}:${params.market}`);
+  parts.push(`${jsonStr('chase_oid')}:${chaseOid}`);
+  return wrapParams('cancel_chase', `{${parts.join(',')}}`);
 }
 
 // ---- TP/SL LIMIT trigger ----
