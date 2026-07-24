@@ -4,6 +4,48 @@ All notable changes to the TypeScript SDK are documented here.
 
 ## [Unreleased]
 
+### 0.14.0 — typed-only `/exchange`: dead-route removal + coverage fixes (BREAKING)
+
+The node accepts ONLY the typed EIP-712 `/exchange` scheme now; the opaque
+`MetaFluxAction(string action,uint64 nonce)` scheme and the CCXT / legacy
+`/ccxt/*` + `/v1/orders` routes are gone. This release removes every dead route
+and re-points the reads.
+
+**Removed (BREAKING):**
+
+- `Client.getMarkets()` / `Client.getPositions()` — hit the deleted `/ccxt/*`
+  routes (404). Use `client.info.markets()` and
+  `client.info.accountState(address)` instead.
+- `Client.signOrder()` / `Client.submitOrder()` — the old msgpack `/v1/orders`
+  envelope (dead). Use `client.submitOrderNative()`.
+- The opaque WS post lane. `WsClient.postAction(actionJson)` is replaced by the
+  typed `WsClient.postAction(actionType, payload, opts?)`; `submitOrder` /
+  `cancelOrder` now sign the typed digest.
+- The `TradeOpts.legacy` flag (the opaque-scheme opt-out).
+
+**Fixed (every write now builds a node-accepted typed digest):**
+
+- The ~28 dedicated `/exchange` methods that formerly signed the removed opaque
+  digest (`setPositionMode`, `updateLeverage`, `approveAgent`, `createVault`,
+  `vaultDistribute`, `claimRewards`, `mbWithdraw`, …) now sign the typed digest.
+  Each is byte-identical to the generic `submitTyped(<tag>, payload)` path.
+
+**Deprecated:**
+
+- `spotMarginDeposit` / `spotMarginWithdraw` (+ their `*Typed` twins) — the node
+  REJECTS them once the `spot_margin_cross` fork arms (live). Use
+  `spotMarginOpen` / `spotMarginClose`.
+
+**Added (P1 completeness):**
+
+- `Client.rfqQuote(params, opts)` — the maker RFQ leg (`rfq_quote`), with an
+  owner-carrying digest via `opts.owner`. RFQ can now complete end-to-end.
+- `Client.claimBuilderRewards()` / `Client.claimReferralRewards()`.
+- WS channels `open_orders` (per-account) and `markets` (global) — 21 total.
+- Node-authoritative digest KATs for `rfq_quote` (owner-less + with-owner),
+  `vault_distribute`, and the two claims, pinned to the node's own
+  `typed_action_kat_vectors` output.
+
 ### Chase orders
 
 The SDK now builds and signs chase orders. A chase order places one resting leg

@@ -502,15 +502,16 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(toHex(base)).not.toBe(toHex(otherChain));
   });
 
-  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 47 reachable actions', async () => {
+  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 48 reachable actions', async () => {
     const { isTypedAction, TYPED_ACTION_TYPES } = await import('../src/native/typed.js');
-    expect(TYPED_ACTION_TYPES.length).toBe(47);
+    expect(TYPED_ACTION_TYPES.length).toBe(48);
     // The multi-sig acting wrapper (user + inner blob + roster signatures).
     expect(isTypedAction('multi_sig')).toBe(true);
     expect(isTypedAction('approve_agent')).toBe(true);
     expect(isTypedAction('submit_order')).toBe(false);
-    // The 5 W1 RFQ / FBA / encrypted-alias / pm-alias actions.
+    // The W1 RFQ / FBA / encrypted-alias / pm-alias actions (rfq_quote added P1).
     expect(isTypedAction('rfq_request')).toBe(true);
+    expect(isTypedAction('rfq_quote')).toBe(true);
     expect(isTypedAction('rfq_accept')).toBe(true);
     expect(isTypedAction('fba_submit')).toBe(true);
     expect(isTypedAction('encrypted_order_submit')).toBe(true);

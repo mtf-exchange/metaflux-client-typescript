@@ -216,17 +216,15 @@ export type NativePositionSide = 'long' | 'short';
 /// variant). Use `buildTpSlLimitOrder` for the LIMIT variant.
 export type NativeOrderKind = 'limit' | 'market' | 'stop_loss' | 'take_profit';
 
-/// MTF-native time-in-force — mirrors the server `NativeTif`. `aon` is
-/// rejected server-side (no core equivalent).
-export type NativeTif = 'gtc' | 'ioc' | 'aon' | 'alo';
+/// MTF-native time-in-force — mirrors the server `NativeTif`. `aon` is omitted:
+/// the node rejects it (`UnsupportedTif`, no core equivalent), so it can never
+/// execute — matching the Rust SDK.
+export type NativeTif = 'gtc' | 'ioc' | 'alo';
 
 /// MTF-native self-trade-prevention — mirrors the server `NativeStpMode`.
-/// `reject` is rejected server-side (no core equivalent).
-export type NativeStpMode =
-  | 'cancel_oldest'
-  | 'cancel_newest'
-  | 'cancel_both'
-  | 'reject';
+/// `reject` is omitted: the node rejects it (`UnsupportedStp`, no core
+/// equivalent) — matching the Rust SDK.
+export type NativeStpMode = 'cancel_oldest' | 'cancel_newest' | 'cancel_both';
 
 /// MTF-native builder carve — mirrors the server `NativeBuilder`. Rides
 /// inside the signed action bytes.
@@ -351,8 +349,8 @@ export interface ScaleOrder {
   /// (length must equal `n`, each `>= 1`). Omit (or empty) for every other
   /// distribution; a non-custom order carrying weights is rejected server-side.
   weights?: number[];
-  /// Time-in-force. `"alo"` (post-only) or `"gtc"`; `"ioc"` / `"aon"` are
-  /// rejected (a ladder must rest).
+  /// Time-in-force. `"alo"` (post-only) or `"gtc"`; `"ioc"` rests nothing so a
+  /// ladder rejects it.
   tif: NativeTif;
   /// Reduce-only flag, uniform across every rung. Defaults to `false`.
   reduce_only?: boolean;

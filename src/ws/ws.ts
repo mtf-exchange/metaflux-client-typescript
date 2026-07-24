@@ -26,7 +26,13 @@ import {
   buildNativeCancelAction,
   buildNativeOrderAction,
 } from '../native/actions.js';
-import { nextNonce, recoverNativeSigner, signNativeAction } from '../native/digest.js';
+import { nextNonce } from '../native/digest.js';
+import { signTypedAction } from '../native/typed.js';
+import {
+  recoverTypedOrderSigner,
+  signTypedOrder,
+  type TypedOrderPayload,
+} from '../native/typed_orders.js';
 import type {
   NativeCancel,
   NativeExchangeAck,
@@ -34,7 +40,7 @@ import type {
 } from '../types/index.js';
 
 /// Channel names exactly as the gateway's native `/ws` surface accepts them
-/// (snake_case MTF-native) — the 19 channels the gateway serves natively.
+/// (snake_case MTF-native) — the 21 channels the gateway serves natively.
 /// `web_data2` was REMOVED: compose `account_state` + `spot_state` instead.
 export type WsChannel =
   // per-market (require `coin` — the market SYMBOL, e.g. "BTC")
@@ -44,6 +50,7 @@ export type WsChannel =
   | 'active_asset_ctx'
   // global (no params)
   | 'all_mids'
+  | 'markets'
   | 'explorer_block'
   | 'explorer_txs'
   // per-market + interval (`candles` needs `coin` + `interval`)
@@ -52,6 +59,7 @@ export type WsChannel =
   | 'fills'
   | 'user_events'
   | 'order_updates'
+  | 'open_orders'
   | 'notifications'
   | 'ledger_updates'
   | 'user_fundings'
@@ -63,19 +71,21 @@ export type WsChannel =
   | 'active_asset_data';
 
 /// All known channels — handy for callers that want to subscribe broadly. The
-/// exact 19 native gateway channels.
+/// exact 21 native gateway channels.
 export const WS_CHANNELS: readonly WsChannel[] = [
   'l2_book',
   'bbo',
   'trades',
   'active_asset_ctx',
   'all_mids',
+  'markets',
   'explorer_block',
   'explorer_txs',
   'candles',
   'fills',
   'user_events',
   'order_updates',
+  'open_orders',
   'notifications',
   'ledger_updates',
   'user_fundings',
@@ -94,12 +104,13 @@ export const WS_CHANNELS: readonly WsChannel[] = [
 ///                  market SYMBOL string (`"BTC"`); a decimal asset-id string
 ///                  is also accepted.
 ///   - `user`     — per-account channels (`fills`, `user_events`,
-///                  `order_updates`, `notifications`, `ledger_updates`,
-///                  `user_fundings`, `user_twap_slice_fills`,
+///                  `order_updates`, `open_orders`, `notifications`,
+///                  `ledger_updates`, `user_fundings`, `user_twap_slice_fills`,
 ///                  `user_twap_history`, `account_state`, `spot_state`,
 ///                  `active_asset_data`); the 0x address.
 ///   - `interval` — `candles` only (`1m`/`5m`/`15m`/`1h`/`4h`/`1d`)
-/// Global channels (`all_mids`, `explorer_block`, `explorer_txs`) take none.
+/// Global channels (`all_mids`, `markets`, `explorer_block`, `explorer_txs`)
+/// take none.
 export interface WsSubscription {
   type: WsChannel;
   /// Market symbol (`"BTC"`); a decimal asset-id string is also accepted. For
@@ -519,6 +530,11 @@ export class WsClient {
     return this.subscribe({ type: 'all_mids' });
   }
 
+  /// Subscribe to the global market-universe stream (`markets`). No params.
+  async subscribeMarkets(): Promise<void> {
+    return this.subscribe({ type: 'markets' });
+  }
+
   /// Subscribe to the global committed-block head tape.
   async subscribeExplorerBlock(): Promise<void> {
     return this.subscribe({ type: 'explorer_block' });
@@ -538,6 +554,12 @@ export class WsClient {
   /// Subscribe to per-user order lifecycle updates (0x address).
   async subscribeOrderUpdates(user: string): Promise<void> {
     return this.subscribe({ type: 'order_updates', user });
+  }
+
+  /// Subscribe to the per-user resting-order snapshot stream (`open_orders`,
+  /// 0x address). Carries the account's open perp AND spot orders.
+  async subscribeOpenOrders(user: string): Promise<void> {
+    return this.subscribe({ type: 'open_orders', user });
   }
 
   /// Subscribe to per-user account / margin events (0x address).
@@ -582,37 +604,44 @@ export class WsClient {
   //     {"channel":"post","data":{"id":N,"response":{"type":...,"payload":{...}}}}
   //
   // For an `action`, payload is the signed envelope `{signature, nonce, action}`
-  // — signed with the SAME EIP-712 digest the REST `/exchange` path uses (the
-  // node recovers the signer over the raw `action` bytes). Correlated by `id`;
-  // a `{type:"error"}` response surfaces as an error; each request has a timeout.
+  // — signed with the SAME typed EIP-712 digest the REST `/exchange` path uses.
+  // The node reconstructs the typed struct from the parsed `action` fields (NOT
+  // the raw bytes), so re-embedding the action as `JSON.parse(actionJson)` is
+  // safe. Correlated by `id`; a `{type:"error"}` response surfaces as an error;
+  // each request has a timeout. The opaque `MetaFluxAction(string action,uint64
+  // nonce)` scheme is GONE — the node is typed-only.
 
-  /// Issue a signed exchange action over the WS `post` channel, returning the
-  /// node's action response payload. Requires a `WsSigner` (passed to the
-  /// constructor, or via `Client.connectWs` with a keyed client).
-  async postAction(actionJson: string): Promise<unknown> {
+  /// Issue a signed typed account action over the WS `post` channel, returning
+  /// the node's action response payload. `actionType` is a typed-scheme tag (the
+  /// same set `Client.submitTyped` accepts, e.g. `set_position_mode`); `payload`
+  /// carries the action-specific snake_case fields. Requires a `WsSigner` (passed
+  /// to the constructor, or via `Client.connectWs` with a keyed client). Pass
+  /// `opts.owner` for an owner-supporting action to bind an agent-resolved owner.
+  async postAction(
+    actionType: string,
+    payload: Record<string, unknown>,
+    opts: { nonce?: bigint; owner?: string } = {},
+  ): Promise<unknown> {
     if (this.signer === undefined) {
       throw new Error(
         'postAction requires a WsSigner (this WsClient was opened read-only)',
       );
     }
-    const nonce = nextNonce();
-    const signed = await signNativeAction(
+    const nonce = opts.nonce ?? nextNonce();
+    const signed = await signTypedAction(
       this.signer.privateKey,
-      actionJson,
+      actionType,
+      payload,
       nonce,
       this.signer.chainId,
+      opts.owner,
     );
-    // The signed envelope mirrors the REST body shape, but the `action` rides as
-    // a parsed object inside the JSON `request.payload`. The server still
-    // verifies over the raw `action` bytes; since the bytes we signed are valid
-    // JSON, re-embedding them as `JSON.parse(actionJson)` is byte-equivalent to
-    // the canonical form the server re-serializes for the digest.
-    const payload = {
+    const body = {
       signature: signed.signature,
       nonce: Number(signed.nonce),
-      action: JSON.parse(actionJson) as unknown,
+      action: JSON.parse(signed.actionJson) as unknown,
     };
-    return this.postRequest('action', payload);
+    return this.postRequest('action', body);
   }
 
   /// Issue an `info` read over the WS `post` channel, returning the info response
@@ -621,50 +650,79 @@ export class WsClient {
     return this.postRequest('info', payload);
   }
 
-  /// Submit a limit / market / trigger order over the WS `post` channel.
-  /// Mirrors `Client.submitOrderNative`: `order.owner` MUST equal the signing
-  /// wallet (recovered locally and rejected on mismatch).
+  /// Submit a limit / market / trigger order over the WS `post` channel under
+  /// the typed scheme. Mirrors `Client.submitOrderNative`: `order.owner` MUST
+  /// equal the signing wallet (recovered locally and rejected on mismatch).
   async submitOrder(order: NativeOrder): Promise<NativeExchangeAck> {
     if (this.signer === undefined) {
       throw new Error('submitOrder requires a WsSigner (read-only WsClient)');
     }
     const actionJson = buildNativeOrderAction(order);
-    await this.assertOwner(actionJson, order.owner, 'order.owner');
-    return (await this.postAction(actionJson)) as NativeExchangeAck;
+    return (await this.postTypedTrade(
+      'submit_order',
+      { order },
+      actionJson,
+      { owner: order.owner, field: 'order.owner' },
+    )) as NativeExchangeAck;
   }
 
-  /// Cancel an order over the WS `post` channel. Mirrors
+  /// Cancel an order over the WS `post` channel under the typed scheme. Mirrors
   /// `Client.cancelOrderNative`: `cancel.owner` MUST equal the signing wallet.
+  /// The typed digest binds `oid`, so a cloid-only cancel throws (no typed form).
   async cancelOrder(cancel: NativeCancel): Promise<NativeExchangeAck> {
     if (this.signer === undefined) {
       throw new Error('cancelOrder requires a WsSigner (read-only WsClient)');
     }
     const actionJson = buildNativeCancelAction(cancel);
-    await this.assertOwner(actionJson, cancel.owner, 'cancel.owner');
-    return (await this.postAction(actionJson)) as NativeExchangeAck;
+    return (await this.postTypedTrade(
+      'cancel_order',
+      { cancel },
+      actionJson,
+      { owner: cancel.owner, field: 'cancel.owner' },
+    )) as NativeExchangeAck;
   }
 
-  /// Recover the signer over the action's own digest and reject unless it equals
-  /// `owner`. Saves a round-trip on an obvious key/owner mismatch (the server
-  /// enforces the same). Shares the nonce-agnostic recover path with the REST
-  /// client.
-  private async assertOwner(
+  /// Sign a trading action under the typed scheme and post it over the WS `post`
+  /// channel. Signs the SAME typed digest the REST `postTypedOrder` path uses
+  /// (`../native/typed_orders.ts`); the node re-derives the digest from the
+  /// parsed `action` fields. When `ownerCheck` is set, the recovered signer must
+  /// equal `ownerCheck.owner` — a local guard that fails a key/owner mismatch
+  /// before the round-trip (the node enforces the same). Mirrors the proven Rust
+  /// WS `post_typed_trade` payload shape `{signature, nonce, action}`.
+  private async postTypedTrade(
+    actionType: string,
+    payload: TypedOrderPayload,
     actionJson: string,
-    owner: string,
-    field: string,
-  ): Promise<void> {
-    // recoverNativeSigner is nonce-agnostic for the address it yields; use a
-    // throwaway nonce of 0 just to drive the digest+recover.
-    const signed = await signNativeAction(
+    ownerCheck?: { owner: string; field: string },
+  ): Promise<unknown> {
+    const nonce = nextNonce();
+    const signed = await signTypedOrder(
       this.signer!.privateKey,
+      actionType,
+      payload,
       actionJson,
-      0n,
+      nonce,
       this.signer!.chainId,
     );
-    const signer = await recoverNativeSigner(signed, this.signer!.chainId);
-    if (signer.toLowerCase() !== owner.toLowerCase()) {
-      throw new Error(`${field} ${owner} != recovered signer ${signer}`);
+    if (ownerCheck !== undefined) {
+      const signer = await recoverTypedOrderSigner(
+        signed,
+        actionType,
+        payload,
+        this.signer!.chainId,
+      );
+      if (signer.toLowerCase() !== ownerCheck.owner.toLowerCase()) {
+        throw new Error(
+          `${ownerCheck.field} ${ownerCheck.owner} != recovered signer ${signer}`,
+        );
+      }
     }
+    const body = {
+      signature: signed.signature,
+      nonce: Number(signed.nonce),
+      action: JSON.parse(signed.actionJson) as unknown,
+    };
+    return this.postRequest('action', body);
   }
 
   /// Core `post` machinery: assign a correlation id, ship the frame, and await

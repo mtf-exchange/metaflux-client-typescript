@@ -157,19 +157,21 @@ describe('WsClient wire protocol', () => {
     ws.close();
   });
 
-  it('exposes the exact 19 native gateway channel names (web_data2 GONE)', () => {
+  it('exposes the exact 21 native gateway channel names (web_data2 GONE)', () => {
     expect([...WS_CHANNELS]).toEqual([
       'l2_book',
       'bbo',
       'trades',
       'active_asset_ctx',
       'all_mids',
+      'markets',
       'explorer_block',
       'explorer_txs',
       'candles',
       'fills',
       'user_events',
       'order_updates',
+      'open_orders',
       'notifications',
       'ledger_updates',
       'user_fundings',
@@ -179,6 +181,9 @@ describe('WsClient wire protocol', () => {
       'spot_state',
       'active_asset_data',
     ]);
+    expect(WS_CHANNELS).toHaveLength(21);
+    expect(WS_CHANNELS).toContain('markets');
+    expect(WS_CHANNELS).toContain('open_orders');
     expect(WS_CHANNELS).not.toContain('web_data2');
   });
 
@@ -366,8 +371,9 @@ describe('WsClient wire protocol', () => {
     const p = ws.connect();
     MockSocket.instances[0]!.open();
     await p;
+    // postAction now takes (actionType, payload) and signs the typed digest.
     await expect(
-      ws.postAction('{"type":"set_position_mode","params":{"hedge":true}}'),
+      ws.postAction('set_position_mode', { hedge: true }),
     ).rejects.toThrow(/WsSigner/);
     ws.close();
   });

@@ -8,69 +8,30 @@
 // Naming note: exported as `Client` (NOT `MtfClient`) per session
 // direction. Consumers import as `import { Client } from '@metaflux-dex/client'`.
 
-import {
-  deriveAddressFromPubkey,
-  eip712TypedDataHash,
-  encodeLimitOrder,
-  keccak256,
-  recoverPubkey,
-  signSecp256k1,
-} from './wallet/wasm.js';
 import { httpRequest } from './rest/http.js';
 import {
-  buildNativeAgentSetAbstractionAction,
-  buildNativeApproveAgentAction,
-  buildNativeApproveBuilderFeeAction,
+  // Only the canonical action-JSON builders the TYPED order path still needs
+  // (order / cancel / spot / TWAP / batch / scale / chase). Every other action
+  // is signed via the typed registry (`submitTyped`), so its opaque builder is
+  // no longer imported here (still exported for power users from `./native`).
   buildNativeBatchCancelAction,
   buildNativeBatchModifyAction,
   buildNativeBatchOrderAction,
   buildNativeCancelAction,
-  buildNativeCancelAllOrdersAction,
   buildNativeCancelByCloidAction,
   buildNativeCancelChaseAction,
   buildNativeCancelScaleAction,
   buildNativeChaseOrderAction,
-  buildNativeClaimRewardsAction,
-  buildNativeConvertToMultiSigUserAction,
-  buildNativeCreateVaultAction,
-  buildNativeEarnDepositAction,
-  buildNativeEarnWithdrawAction,
-  buildNativeLinkStakingUserAction,
-  buildNativeMbWithdrawAction,
   buildNativeModifyAction,
   buildNativeOrderAction,
-  buildNativePriorityBidAction,
   buildNativeScaleOrderAction,
   buildNativeScheduleCancelAction,
-  buildNativeSetDisplayNameAction,
-  buildNativeSetPositionModeAction,
-  buildNativeSetReferrerAction,
   buildNativeSpotCancelAction,
-  buildNativeSpotMarginCloseAction,
-  buildNativeSpotMarginDepositAction,
-  buildNativeSpotMarginOpenAction,
-  buildNativeSpotMarginWithdrawAction,
   buildNativeSpotOrderAction,
-  buildNativeSubmitEncryptedOrderAction,
-  buildNativeTokenDelegateAction,
-  buildNativeTopUpIsolatedOnlyMarginAction,
   buildNativeTwapCancelAction,
   buildNativeTwapOrderAction,
-  buildNativeUpdateIsolatedMarginAction,
-  buildNativeUpdateLeverageAction,
-  buildNativeUserPortfolioMarginAction,
-  buildNativeUserSetAbstractionAction,
-  buildNativeVaultDistributeAction,
-  buildNativeVaultModifyAction,
-  buildNativeVaultTransferAction,
-  buildNativeVaultWithdrawAction,
 } from './native/actions.js';
-import {
-  nativeRequestBody,
-  nextNonce,
-  recoverNativeSigner,
-  signNativeAction,
-} from './native/digest.js';
+import { nextNonce } from './native/digest.js';
 import {
   buildTyped,
   signTypedAction,
@@ -109,7 +70,6 @@ import type {
   EncryptedOrderSubmit,
   FbaSubmit,
   LinkStakingUser,
-  Market,
   MbWithdraw,
   Modify,
   NativeCancel,
@@ -124,11 +84,9 @@ import type {
   NativeSpotMarginOpen,
   NativeSpotMarginWithdraw,
   NativeSpotOrder,
-  Order,
-  OrderAck,
-  Position,
   PriorityBid,
   RfqAccept,
+  RfqQuote,
   RfqRequest,
   ScaleOrder,
   ScheduleCancel,
@@ -139,7 +97,6 @@ import type {
   SubAccountTransfer,
   UsdClassTransfer,
   Withdraw,
-  SignedOrder,
   SubmitEncryptedOrder,
   TokenDelegate,
   TopUpIsolatedOnlyMargin,
@@ -157,16 +114,18 @@ import type {
 
 /// Options accepted by the `Client` constructor.
 export interface ClientOpts {
-  /// Gateway base URL — e.g. `https://api.metaflux.example`. The Client
-  /// appends CCXT-compat paths (`/ccxt/...`) and MTF-native paths
-  /// (`/v1/...`) under this root.
+  /// Gateway base URL — e.g. `https://api.metaflux.example`. The Client posts
+  /// MTF-native routes under this root: `/exchange` (signed writes), `/info`
+  /// (reads, via `client.info`), and `/ws` (the WebSocket feed).
   baseUrl: string;
-  /// Optional 32-byte ECDSA private key. Required for any signing
-  /// operation (`signOrder`); read-only data calls (`getMarkets`,
-  /// `getPositions`) work without it.
+  /// Optional 32-byte ECDSA private key. Required for any signing operation
+  /// (every `/exchange` write); read-only `/info` reads (via `client.info`)
+  /// work without it.
   privateKey?: Uint8Array;
-  /// EVM chain ID used for the EIP-712 domain. Defaults to a
-  /// devnet-style placeholder (`31337`); production deployments override.
+  /// LEGACY EVM chain id, retained for backward compatibility of the
+  /// constructor. It is NOT used by any signing path today — the typed
+  /// `/exchange` scheme signs against the MTF-native chain id (`MTF_CHAIN_ID`,
+  /// testnet 114514), overridable per call via `opts.chainId`.
   chainId?: number;
   /// OPTIONAL default action-expiry (unix-ms) folded into every typed action
   /// this client signs. `0n` / absent = never expires (byte-identical to the
@@ -179,92 +138,30 @@ export interface ClientOpts {
 }
 
 /// Per-call options for the trading actions. `nonce` / `chainId` bind the
-/// signed digest; `legacy` opts a single call back into the opaque
-/// `MetaFluxAction` signing scheme (the default is the EIP-712 typed scheme).
-/// The server accepts both during the migration window.
+/// signed digest. Every action signs the EIP-712 typed scheme — the node is
+/// typed-only (the old opaque `MetaFluxAction` scheme is gone).
 export interface TradeOpts {
   /// Per-account replay nonce. Defaults to a strictly-increasing unix-ms clock.
   nonce?: bigint;
   /// EIP-712 domain chain id. Defaults to `MTF_CHAIN_ID` (testnet 114514).
   chainId?: number;
-  /// Sign under the legacy opaque `MetaFluxAction` scheme instead of the typed
-  /// EIP-712 scheme. The typed scheme is the default for all trading actions.
-  legacy?: boolean;
 }
 
-/// Default chain ID for the EIP-712 domain. The devnet default `31337`
-/// matches the node's devnet configuration; production deployments
-/// override via `chainId`.
+/// Legacy default chain id for the (retired) `ClientOpts.chainId` field. No
+/// signing path reads it; the typed `/exchange` scheme signs against
+/// `MTF_CHAIN_ID`. Kept only so the constructor stays backward-compatible.
 const DEFAULT_CHAIN_ID = 31337;
 
-/// `keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")`
-/// pre-computed at module load. Static across the SDK lifetime so we
-/// don't re-keccak it for every signing call.
-let cachedDomainTypeHash: Uint8Array | undefined;
-async function domainTypeHash(): Promise<Uint8Array> {
-  if (cachedDomainTypeHash === undefined) {
-    cachedDomainTypeHash = await keccak256(
-      new TextEncoder().encode(
-        'EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)',
-      ),
-    );
-  }
-  return cachedDomainTypeHash;
-}
-
-/// Pre-computed type-hash for the limit-order action. The string mirrors
-/// what the node will register for the `Order` action — locked in by
-/// RFC-001 §D once the on-chain registry lands. The shape here matches
-/// what `encode_limit_order` produces.
-let cachedOrderTypeHash: Uint8Array | undefined;
-async function orderTypeHash(): Promise<Uint8Array> {
-  if (cachedOrderTypeHash === undefined) {
-    cachedOrderTypeHash = await keccak256(
-      new TextEncoder().encode(
-        'Order(uint32 asset,uint8 side,uint128 px,uint128 size,uint8 tif)',
-      ),
-    );
-  }
-  return cachedOrderTypeHash;
-}
-
-/// Compute the EIP-712 domain separator for a given chain id.
-///
-/// Mirrors `core_state::signing::EipDomain::separator` — the canonical
-/// 5-segment keccak input is
-/// `(domain_type_hash, name_hash, version_hash, chain_id_be32, verifying_contract_padded)`.
-async function computeDomainSeparator(chainId: number): Promise<Uint8Array> {
-  const dth = await domainTypeHash();
-  const nameHash = await keccak256(new TextEncoder().encode('MetaFlux'));
-  const versionHash = await keccak256(new TextEncoder().encode('1'));
-
-  // uint256 chainId big-endian, 32 bytes.
-  const chainIdBe = new Uint8Array(32);
-  // JS bitwise ops are signed 32-bit; use BigInt for the conversion.
-  const view = new DataView(chainIdBe.buffer);
-  view.setBigUint64(24, BigInt(chainId)); // low 8 bytes carry the value.
-
-  // Verifying contract == Address::ZERO, left-padded to 32 bytes -> all zeros.
-  const verifyingPadded = new Uint8Array(32);
-
-  // Concat + keccak. Allocating one Uint8Array beats 5 hasher.update calls
-  // because the WASM keccak primitive takes a single slice — the
-  // call-overhead of multiple FFI hops would outweigh the copy.
-  const concat = new Uint8Array(5 * 32);
-  concat.set(dth, 0);
-  concat.set(nameHash, 32);
-  concat.set(versionHash, 64);
-  concat.set(chainIdBe, 96);
-  concat.set(verifyingPadded, 128);
-  return keccak256(concat);
-}
+/// The `0x0` 20-byte address sentinel. `claim_rewards` uses it for "claim across
+/// every validator" (the node's `address(0)` claim-all sentinel).
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 /// Primary client surface. Construct once per session.
 ///
 /// Read-only example:
 /// ```ts
 /// const c = new Client({ baseUrl: 'http://localhost:8080' });
-/// const markets = await c.getMarkets();
+/// const markets = await c.info.markets();
 /// ```
 ///
 /// Signing example:
@@ -273,9 +170,11 @@ async function computeDomainSeparator(chainId: number): Promise<Uint8Array> {
 ///   baseUrl: 'http://localhost:8080',
 ///   privateKey: hexToBytes('...'),
 /// });
-/// const signed = await c.signOrder({ asset: 0, side: 0, sizeE8: 100_000_000n,
-///                                    priceE8: 50_000_00000000n, tif: 0 });
-/// const ack = await c.submitOrder(signed);
+/// const ack = await c.submitOrderNative({
+///   owner: '0x…', market: 1, side: 'bid', kind: 'limit',
+///   size: 1000, limit_px: 5_000_000_000_000, tif: 'gtc',
+///   stp_mode: 'cancel_newest', reduce_only: false,
+/// });
 /// ```
 export class Client {
   private readonly baseUrl: string;
@@ -315,102 +214,16 @@ export class Client {
     return this.privateKey !== undefined;
   }
 
-  /// Sign an order body. Returns the `(payload, signature, signer)`
-  /// triplet ready for `submitOrder`.
-  ///
-  /// All heavy lifting (msgpack encode, keccak, ECDSA) is in WASM.
-  /// The signing flow:
-  ///
-  /// 1. `payload = encode_limit_order(...)` — msgpack body matching the
-  ///    node's `OrderParams` decoder.
-  /// 2. `messageHash = keccak256(orderTypeHash || payload)` — the
-  ///    EIP-712 "struct hash" of the action.
-  /// 3. `domainSeparator = keccak256(EIP712Domain(...))` — cached.
-  /// 4. `digest = keccak256(0x1901 || domainSeparator || messageHash)`.
-  /// 5. `signature = sign_secp256k1(privateKey, digest)`.
-  /// 6. `signer = derive_address_from_pubkey(recover_pubkey(signature, digest))`.
-  ///
-  /// Step 6 derives the signer locally rather than trusting the gateway
-  /// to recover it; that way the SDK ships the address upfront and the
-  /// gateway can reject obviously-replayed envelopes before doing ECDSA.
-  async signOrder(order: Order): Promise<SignedOrder> {
-    if (this.privateKey === undefined) {
-      throw new Error(
-        'signOrder requires a privateKey in ClientOpts (this Client is read-only)',
-      );
-    }
-    const payload = await encodeLimitOrder(
-      order.asset,
-      order.side,
-      order.sizeE8,
-      order.priceE8,
-      order.tif,
-      order.stp ?? 0,
-      order.cloid,
-      order.reduceOnly ?? false,
-      order.builder,
-    );
-    const typeHash = await orderTypeHash();
-    // message_hash = keccak256(type_hash || payload).
-    const msgBuffer = new Uint8Array(typeHash.length + payload.length);
-    msgBuffer.set(typeHash, 0);
-    msgBuffer.set(payload, typeHash.length);
-    const messageHash = await keccak256(msgBuffer);
-
-    const domainSeparator = await computeDomainSeparator(this.chainId);
-    const digest = await eip712TypedDataHash(domainSeparator, messageHash);
-
-    const signature = await signSecp256k1(this.privateKey, digest);
-    const pubkey = await recoverPubkey(signature, digest);
-    const signer = await deriveAddressFromPubkey(pubkey);
-
-    return { payload, signature, signer };
-  }
-
-  /// Submit a pre-signed order to the gateway.
-  ///
-  /// DEPRECATED / LEGACY: this targets the old `{payload,signature,signer}` →
-  /// `/v1/orders` envelope with a msgpack body and an `Order(...)` typehash.
-  /// The server now accepts the MTF-native `{action,nonce,signature}` →
-  /// `/exchange` envelope instead — use `submitOrderNative`. Retained
-  /// only for any consumer still on the old gateway adapter.
-  ///
-  /// Wire shape: POSTs the `SignedOrder` as a msgpack-friendly JSON
-  /// envelope — `payload` and `signature` go as base64url strings (the
-  /// gateway's existing `LoginEnvelope` shape uses base64; we mirror
-  /// that), `signer` goes as a 0x-hex address. The gateway adapter
-  /// (TODO on the server side) decodes and forwards to the node via
-  /// gRPC; for now the SDK targets the CCXT createOrder response shape.
-  async submitOrder(signed: SignedOrder): Promise<OrderAck> {
-    return httpRequest<OrderAck>(this.baseUrl, '/v1/orders', {
-      method: 'POST',
-      json: {
-        payload: bytesToBase64Url(signed.payload),
-        signature: bytesToBase64Url(signed.signature),
-        signer: bytesToHex(signed.signer, '0x'),
-      },
-      bearer: this.jwt,
-    });
-  }
-
   /// Submit an order via the MTF-native signed-action front door
-  /// (`POST /exchange`).
-  ///
-  /// This is the path the server now accepts. It supersedes the legacy
-  /// `signOrder` + `submitOrder` flow (msgpack body + `Order(...)` typehash +
-  /// `{payload,signature,signer}` → `/v1/orders`), which targeted an
-  /// envelope the node no longer recognizes.
+  /// (`POST /exchange`), signed under the typed (EIP-712) scheme.
   ///
   /// Flow:
   /// 1. `buildNativeOrderAction` produces the canonical snake_case action JSON
   ///    string (`{"type":"submit_order","order":{...}}`), field order matching
   ///    the server `NativeOrder`.
-  /// 2. `signNativeAction` computes the native EIP-712 digest over the EXACT
-  ///    action bytes (`MetaFluxAction(string action,uint64 nonce)` struct hash,
-  ///    5-field domain) and signs it.
-  /// 3. The action string is POSTed VERBATIM inside `{action, nonce, signature}`
-  ///    — the server recovers the signer over the raw `action` bytes, so the
-  ///    signed bytes and the sent bytes are identical.
+  /// 2. The typed digest is computed over the EIP-712 `SubmitOrder` struct (the
+  ///    node reconstructs it from the parsed `action` fields) and signed.
+  /// 3. The action string is POSTed inside `{action, nonce, signature}`.
   ///
   /// `order.owner` MUST equal the signing wallet's address; we recover the
   /// signer locally and reject a mismatch before hitting the network (the
@@ -421,60 +234,29 @@ export class Client {
   /// value for back-to-back submissions in the same millisecond.
   ///
   /// `chainId` defaults to the MTF-native chain id (`MTF_CHAIN_ID` = testnet
-  /// 114514; mainnet is 8964), independent of the legacy `ClientOpts.chainId`
-  /// (which is the wrong domain for this path).
+  /// 114514; mainnet is 8964).
   async submitOrderNative(
     order: NativeOrder,
     opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
-    if (this.privateKey === undefined) {
-      throw new Error(
-        'submitOrderNative requires a privateKey in ClientOpts (this Client is read-only)',
-      );
-    }
     const actionJson = buildNativeOrderAction(order);
-    // Typed (EIP-712) is the default; `{ legacy: true }` keeps the opaque scheme.
-    if (!opts.legacy) {
-      return this.postTypedOrderOwnerChecked(
-        'submit_order',
-        { order },
-        actionJson,
-        [order.owner],
-        opts,
-      );
-    }
-    const nonce = opts.nonce ?? nextNonce();
-    const signed = await signNativeAction(
-      this.privateKey,
+    return this.postTypedOrderOwnerChecked(
+      'submit_order',
+      { order },
       actionJson,
-      nonce,
-      opts.chainId,
+      [order.owner],
+      opts,
     );
-
-    // Local guard: the recovered signer must equal the claimed owner. The
-    // server enforces this too (401 on mismatch), but failing here saves a
-    // round-trip and surfaces a key/owner mismatch with a clear message.
-    const signer = await recoverNativeSigner(signed, opts.chainId);
-    if (signer.toLowerCase() !== order.owner.toLowerCase()) {
-      throw new Error(
-        `order.owner ${order.owner} != recovered signer ${signer}`,
-      );
-    }
-
-    return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
-      method: 'POST',
-      rawJson: nativeRequestBody(signed),
-      bearer: this.jwt,
-    });
   }
 
   /// Cancel an order via the MTF-native signed-action front door
-  /// (`POST /exchange`).
+  /// (`POST /exchange`), signed under the typed (EIP-712) scheme.
   ///
   /// Same envelope + verification model as `submitOrderNative`: the
-  /// `cancel_order` action JSON is built canonically, signed over the EIP-712
-  /// native digest, and POSTed verbatim. The server cancels by `oid`, so
-  /// `cancel.oid` must be set (a `cloid`-only cancel is rejected at lowering).
+  /// `cancel_order` action JSON is built canonically, signed over the typed
+  /// digest, and POSTed. The server cancels by `oid`, so `cancel.oid` must be
+  /// set — the typed digest binds `oid`, so a cloid-only cancel has no typed
+  /// form and throws (the node is typed-only; there is no opaque fallback).
   ///
   /// `cancel.owner` MUST equal the signing wallet; we recover the signer
   /// locally and reject a mismatch before hitting the network.
@@ -482,43 +264,14 @@ export class Client {
     cancel: NativeCancel,
     opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
-    if (this.privateKey === undefined) {
-      throw new Error(
-        'cancelOrderNative requires a privateKey in ClientOpts (this Client is read-only)',
-      );
-    }
     const actionJson = buildNativeCancelAction(cancel);
-    // Typed (EIP-712) is the default. The typed digest binds `oid`; a cloid-only
-    // cancel has no typed form, so it falls back to the legacy opaque scheme.
-    if (!opts.legacy && cancel.oid !== undefined) {
-      return this.postTypedOrderOwnerChecked(
-        'cancel_order',
-        { cancel },
-        actionJson,
-        [cancel.owner],
-        opts,
-      );
-    }
-    const nonce = opts.nonce ?? nextNonce();
-    const signed = await signNativeAction(
-      this.privateKey,
+    return this.postTypedOrderOwnerChecked(
+      'cancel_order',
+      { cancel },
       actionJson,
-      nonce,
-      opts.chainId,
+      [cancel.owner],
+      opts,
     );
-
-    const signer = await recoverNativeSigner(signed, opts.chainId);
-    if (signer.toLowerCase() !== cancel.owner.toLowerCase()) {
-      throw new Error(
-        `cancel.owner ${cancel.owner} != recovered signer ${signer}`,
-      );
-    }
-
-    return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
-      method: 'POST',
-      rawJson: nativeRequestBody(signed),
-      bearer: this.jwt,
-    });
   }
 
   /// Toggle one-way / hedge position mode via `POST /exchange`.
@@ -535,8 +288,9 @@ export class Client {
     mode: NativeSetPositionMode,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(
-      buildNativeSetPositionModeAction(mode),
+    return this.submitTyped(
+      'set_position_mode',
+      mode as unknown as Record<string, unknown>,
       opts,
     );
   }
@@ -582,28 +336,32 @@ export class Client {
   // / `earn_state`. Preview: forced-liquidation settlement is not yet wired and
   // per-pair maintenance ratios are still being calibrated.
 
-  /// Post quote collateral into a spot-margin account via `POST /exchange`.
-  /// Margin must be enabled for the pair (else the node rejects).
+  /**
+   * Post quote collateral into a spot-margin account via `POST /exchange`.
+   *
+   * @deprecated The node REJECTS `spot_margin_deposit` once the
+   * `spot_margin_cross` fork arms (live). Use `spotMarginOpen` / `spotMarginClose`
+   * for the cross-margin flow. Retained only for pre-arm chains.
+   */
   async spotMarginDeposit(
     params: NativeSpotMarginDeposit,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(
-      buildNativeSpotMarginDepositAction(params),
-      opts,
-    );
+    return this.spotMarginDepositTyped(params, opts);
   }
 
-  /// Withdraw free collateral from a spot-margin account via `POST /exchange`.
-  /// Full while flat; initial-margin-gated while a position is open.
+  /**
+   * Withdraw free collateral from a spot-margin account via `POST /exchange`.
+   *
+   * @deprecated The node REJECTS `spot_margin_withdraw` once the
+   * `spot_margin_cross` fork arms (live). Use `spotMarginOpen` / `spotMarginClose`
+   * for the cross-margin flow. Retained only for pre-arm chains.
+   */
   async spotMarginWithdraw(
     params: NativeSpotMarginWithdraw,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(
-      buildNativeSpotMarginWithdrawAction(params),
-      opts,
-    );
+    return this.spotMarginWithdrawTyped(params, opts);
   }
 
   /// Open a leveraged spot position via `POST /exchange`: borrow quote from the
@@ -612,10 +370,7 @@ export class Client {
     params: NativeSpotMarginOpen,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(
-      buildNativeSpotMarginOpenAction(params),
-      opts,
-    );
+    return this.spotMarginOpenTyped(params, opts);
   }
 
   /// Close a leveraged spot position via `POST /exchange`: IOC-sell the held
@@ -624,8 +379,9 @@ export class Client {
     params: NativeSpotMarginClose,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(
-      buildNativeSpotMarginCloseAction(params),
+    return this.submitTyped(
+      'spot_margin_close',
+      params as unknown as Record<string, unknown>,
       opts,
     );
   }
@@ -636,7 +392,7 @@ export class Client {
     params: NativeEarnDeposit,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeEarnDepositAction(params), opts);
+    return this.earnDepositTyped(params, opts);
   }
 
   /// Redeem Earn pool shares back to quote via `POST /exchange`. The payout is
@@ -645,10 +401,7 @@ export class Client {
     params: NativeEarnWithdraw,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(
-      buildNativeEarnWithdrawAction(params),
-      opts,
-    );
+    return this.earnWithdrawTyped(params, opts);
   }
 
   // ── order management ──────────────────────────────
@@ -701,16 +454,13 @@ export class Client {
   ): Promise<NativeExchangeAck> {
     const actionJson = buildNativeBatchOrderAction(batch);
     const owners = batch.orders.map((o) => o.owner);
-    if (!opts.legacy) {
-      return this.postTypedOrderOwnerChecked(
-        'batch_order',
-        { params: batch },
-        actionJson,
-        owners,
-        opts,
-      );
-    }
-    return this.postBatchOwnerChecked(actionJson, owners, opts);
+    return this.postTypedOrderOwnerChecked(
+      'batch_order',
+      { params: batch },
+      actionJson,
+      owners,
+      opts,
+    );
   }
 
   /// Apply N cancels under one signature via `POST /exchange`. Each cancel's
@@ -721,16 +471,13 @@ export class Client {
   ): Promise<NativeExchangeAck> {
     const actionJson = buildNativeBatchCancelAction(batch);
     const owners = batch.cancels.map((c) => c.owner);
-    if (!opts.legacy) {
-      return this.postTypedOrderOwnerChecked(
-        'batch_cancel',
-        { params: batch },
-        actionJson,
-        owners,
-        opts,
-      );
-    }
-    return this.postBatchOwnerChecked(actionJson, owners, opts);
+    return this.postTypedOrderOwnerChecked(
+      'batch_cancel',
+      { params: batch },
+      actionJson,
+      owners,
+      opts,
+    );
   }
 
   /// Place a SCALE ladder (`scale_order`, action 213) via `POST /exchange`. One
@@ -820,15 +567,14 @@ export class Client {
   }
 
   /// Cancel all of the sender's open orders (optionally one asset) via
-  /// `POST /exchange`, signed under the legacy opaque scheme. The server DOES
-  /// have typed `cancel_all_orders` forms (both owner-less and owner-carrying);
-  /// for the typed path — including the agent-resolved `owner` (cancel another
-  /// account's orders as its approved agent) — use `cancelAllOrdersTyped`.
+  /// `POST /exchange`, signed under the typed scheme. Delegates to
+  /// `cancelAllOrdersTyped`; pass `opts.owner` there to cancel another account's
+  /// orders as its approved agent (the owner-carrying digest).
   async cancelAllOrders(
     params: CancelAllOrders = {},
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeCancelAllOrdersAction(params), opts);
+    return this.cancelAllOrdersTyped(params, opts);
   }
 
   // ── TWAP ──────────────────────────────────────
@@ -866,7 +612,11 @@ export class Client {
     params: UpdateLeverage,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeUpdateLeverageAction(params), opts);
+    return this.submitTyped(
+      'update_leverage',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
   }
 
   /// Add or remove isolated margin on an open position via `POST /exchange`.
@@ -874,10 +624,7 @@ export class Client {
     params: UpdateIsolatedMargin,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(
-      buildNativeUpdateIsolatedMarginAction(params),
-      opts,
-    );
+    return this.updateIsolatedMarginTyped(params, opts);
   }
 
   /// Top up the margin of a strict-isolated-only position via `POST /exchange`.
@@ -885,10 +632,7 @@ export class Client {
     params: TopUpIsolatedOnlyMargin,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(
-      buildNativeTopUpIsolatedOnlyMarginAction(params),
-      opts,
-    );
+    return this.topUpIsolatedOnlyMarginTyped(params, opts);
   }
 
   /// Enroll into or out of portfolio margin via `POST /exchange`.
@@ -896,8 +640,9 @@ export class Client {
     params: UserPortfolioMargin,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(
-      buildNativeUserPortfolioMarginAction(params),
+    return this.submitTyped(
+      'user_portfolio_margin',
+      params as unknown as Record<string, unknown>,
       opts,
     );
   }
@@ -932,7 +677,11 @@ export class Client {
     params: SetDisplayName,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeSetDisplayNameAction(params), opts);
+    return this.submitTyped(
+      'set_display_name',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
   }
 
   /// Set the account referrer (one-time) via `POST /exchange`.
@@ -940,15 +689,29 @@ export class Client {
     params: SetReferrer,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeSetReferrerAction(params), opts);
+    return this.submitTyped(
+      'set_referrer',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
   }
 
   /// Approve an agent wallet to sign on this account's behalf via `POST /exchange`.
+  /// `name` / `expires_at_ms` default to `""` / `0` (never expires) when omitted
+  /// — matching the node's typed digest, which always binds both fields.
   async approveAgent(
     params: ApproveAgent,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeApproveAgentAction(params), opts);
+    return this.submitTyped(
+      'approve_agent',
+      {
+        agent: params.agent,
+        name: params.name ?? '',
+        expires_at_ms: params.expires_at_ms ?? 0,
+      },
+      opts,
+    );
   }
 
   /// Approve a builder fee ceiling (`max_bps`; `0` revokes) via `POST /exchange`.
@@ -956,8 +719,9 @@ export class Client {
     params: ApproveBuilderFee,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(
-      buildNativeApproveBuilderFeeAction(params),
+    return this.submitTyped(
+      'approve_builder_fee',
+      params as unknown as Record<string, unknown>,
       opts,
     );
   }
@@ -967,8 +731,9 @@ export class Client {
     params: ConvertToMultiSigUser,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(
-      buildNativeConvertToMultiSigUserAction(params),
+    return this.submitTyped(
+      'convert_to_multi_sig_user',
+      params as unknown as Record<string, unknown>,
       opts,
     );
   }
@@ -1025,10 +790,7 @@ export class Client {
     params: UserSetAbstraction,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(
-      buildNativeUserSetAbstractionAction(params),
-      opts,
-    );
+    return this.userSetAbstractionTyped(params, opts);
   }
 
   /// As an approved agent, set an abstraction config value for `params.user`
@@ -1037,10 +799,7 @@ export class Client {
     params: AgentSetAbstraction,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(
-      buildNativeAgentSetAbstractionAction(params),
-      opts,
-    );
+    return this.agentSetAbstractionTyped(params, opts);
   }
 
   /// Pay a priority fee (bps) for block-front placement via `POST /exchange`.
@@ -1048,7 +807,7 @@ export class Client {
     params: PriorityBid,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativePriorityBidAction(params), opts);
+    return this.priorityBidTyped(params, opts);
   }
 
   // ── staking ──────────────────────────────────
@@ -1058,15 +817,39 @@ export class Client {
     params: TokenDelegate,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeTokenDelegateAction(params), opts);
+    return this.tokenDelegateTyped(params, opts);
   }
 
-  /// Claim accrued staking rewards via `POST /exchange`.
+  /// Claim accrued staking rewards via `POST /exchange`. Omit `params.validator`
+  /// (or pass the zero address) to claim across every validator (`address(0)` =
+  /// claim-all, the node sentinel — always bound into the typed digest).
   async claimRewards(
     params: ClaimRewards = {},
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeClaimRewardsAction(params), opts);
+    return this.submitTyped(
+      'claim_rewards',
+      { validator: params.validator ?? ZERO_ADDRESS },
+      opts,
+    );
+  }
+
+  /// Drain the sender's accrued builder-code fee credit into spendable
+  /// cross-collateral via `POST /exchange` (`claim_builder_rewards`, typed
+  /// scheme). No params. SENDER-AUTHORIZED.
+  async claimBuilderRewards(
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped('claim_builder_rewards', {}, opts);
+  }
+
+  /// Drain the sender's accrued referrer fee credit into spendable
+  /// cross-collateral via `POST /exchange` (`claim_referral_rewards`, typed
+  /// scheme). No params. SENDER-AUTHORIZED.
+  async claimReferralRewards(
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped('claim_referral_rewards', {}, opts);
   }
 
   /// Alias another account as this account's staking target via `POST /exchange`.
@@ -1074,7 +857,11 @@ export class Client {
     params: LinkStakingUser,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeLinkStakingUserAction(params), opts);
+    return this.submitTyped(
+      'link_staking_user',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
   }
 
   // ── encrypted orders ───────────────────────────
@@ -1084,10 +871,7 @@ export class Client {
     params: SubmitEncryptedOrder,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(
-      buildNativeSubmitEncryptedOrderAction(params),
-      opts,
-    );
+    return this.submitEncryptedOrderTyped(params, opts);
   }
 
   /// Submit a threshold-encrypted order via the W1 `encrypted_order_submit`
@@ -1115,7 +899,11 @@ export class Client {
     params: CreateVault,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeCreateVaultAction(params), opts);
+    return this.submitTyped(
+      'create_vault',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
   }
 
   /// Leader moves capital into / out of a vault via `POST /exchange`.
@@ -1123,15 +911,21 @@ export class Client {
     params: VaultTransfer,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeVaultTransferAction(params), opts);
+    return this.vaultTransferTyped(params, opts);
   }
 
-  /// Leader updates vault configuration via `POST /exchange`.
+  /// Leader updates vault configuration via `POST /exchange`. Only the vault
+  /// NAME is signed / applied (the node's typed `vault_modify` binds `new_name`
+  /// alone); an omitted `new_name` signs the empty-string sentinel (no rename).
   async vaultModify(
     params: VaultModify,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeVaultModifyAction(params), opts);
+    return this.submitTyped(
+      'vault_modify',
+      { vault_id: params.vault_id, new_name: params.new_name ?? '' },
+      opts,
+    );
   }
 
   /// Follower redeems shares from a vault via `POST /exchange`. SENDER-AUTHORIZED.
@@ -1139,21 +933,21 @@ export class Client {
     params: VaultWithdraw,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeVaultWithdrawAction(params), opts);
+    return this.vaultWithdrawTyped(params, opts);
   }
 
   /// Follower deposits USD into a vault, minting shares at the current NAV, via
   /// `POST /exchange` (`vault_distribute`). The deposit rides the `pnl` field
   /// (legacy node name) as a positive decimal string. SENDER-AUTHORIZED.
-  ///
-  /// Forward-compat: the node currently returns `UnsupportedAction` for this tag
-  /// on `/exchange` until it bridges the handler; the SDK emits the byte-correct
-  /// wire shape so it goes live the moment the bridge lands.
   async vaultDistribute(
     params: VaultDistribute,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeVaultDistributeAction(params), opts);
+    return this.submitTyped(
+      'vault_distribute',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
   }
 
   // ── MetaBridge ───────────────────────────────
@@ -1163,7 +957,7 @@ export class Client {
     params: MbWithdraw,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.postSenderAuthorized(buildNativeMbWithdrawAction(params), opts);
+    return this.mbWithdrawTyped(params, opts);
   }
 
   // ── RFQ / FBA microstructure (W1 typed path) ──────────────────────────────
@@ -1184,6 +978,21 @@ export class Client {
   ): Promise<NativeExchangeAck> {
     return this.submitTyped(
       'rfq_request',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Post a maker quote onto an open RFQ session (`rfq_quote`, typed scheme).
+  /// Numeric fields are RAW `u64` wire values; `stp_group` is optional (omit when
+  /// absent). Pass `opts.owner` to quote AS a vault (operator path) — it binds the
+  /// node's owner-carrying `RfqQuote` digest and rides in `params.owner`.
+  async rfqQuote(
+    params: RfqQuote,
+    opts: { nonce?: bigint; chainId?: number; owner?: string } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'rfq_quote',
       params as unknown as Record<string, unknown>,
       opts,
     );
@@ -1215,73 +1024,10 @@ export class Client {
     );
   }
 
-  /// Sign a pre-built sender-authorized action JSON and POST it to `/exchange`.
-  ///
-  /// Shared by the actions where the recovered signer IS the actor (no `owner`
-  /// to cross-check): `set_position_mode`, `spot_order`, `spot_cancel`. Mirrors
-  /// `submitOrderNative`'s flow minus the owner-vs-signer guard.
-  private async postSenderAuthorized(
-    actionJson: string,
-    opts: { nonce?: bigint; chainId?: number },
-  ): Promise<NativeExchangeAck> {
-    if (this.privateKey === undefined) {
-      throw new Error(
-        'this action requires a privateKey in ClientOpts (this Client is read-only)',
-      );
-    }
-    const nonce = opts.nonce ?? nextNonce();
-    const signed = await signNativeAction(
-      this.privateKey,
-      actionJson,
-      nonce,
-      opts.chainId,
-    );
-    return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
-      method: 'POST',
-      rawJson: nativeRequestBody(signed),
-      bearer: this.jwt,
-    });
-  }
-
-  /// Sign a pre-built batch action whose inner orders / cancels each carry an
-  /// `owner`, and POST it to `/exchange`. Recovers the signer once and rejects
-  /// unless EVERY inner `owner` equals it (the node sets the sender to the
-  /// recovered signer for all of them).
-  private async postBatchOwnerChecked(
-    actionJson: string,
-    owners: string[],
-    opts: { nonce?: bigint; chainId?: number },
-  ): Promise<NativeExchangeAck> {
-    if (this.privateKey === undefined) {
-      throw new Error(
-        'this action requires a privateKey in ClientOpts (this Client is read-only)',
-      );
-    }
-    const nonce = opts.nonce ?? nextNonce();
-    const signed = await signNativeAction(
-      this.privateKey,
-      actionJson,
-      nonce,
-      opts.chainId,
-    );
-    const signer = await recoverNativeSigner(signed, opts.chainId);
-    for (const owner of owners) {
-      if (signer.toLowerCase() !== owner.toLowerCase()) {
-        throw new Error(`batch item owner ${owner} != recovered signer ${signer}`);
-      }
-    }
-    return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
-      method: 'POST',
-      rawJson: nativeRequestBody(signed),
-      bearer: this.jwt,
-    });
-  }
-
   // ============================================================================
   // Trading-set typed scheme (the typed `/exchange`) — order / cancel / TWAP /
-  // batch actions. These are the DEFAULT path for the order builders below; the
-  // server still accepts the legacy opaque scheme during migration, reachable
-  // via `{ legacy: true }` in the call options.
+  // batch actions. Every trading action signs the EIP-712 typed digest; the node
+  // is typed-only (the opaque `MetaFluxAction` scheme is gone).
   // ============================================================================
 
   /// Sign a trading action under the typed (EIP-712) scheme and POST it with
@@ -1318,18 +1064,15 @@ export class Client {
     });
   }
 
-  /// Route a sender-authorized trading action through the typed scheme (default)
-  /// or the legacy opaque scheme (`{ legacy: true }`). `actionJson` is the
-  /// canonical bytes; `actionType` + `payload` drive the typed digest.
+  /// Route a sender-authorized trading action through the typed scheme.
+  /// `actionJson` is the canonical bytes; `actionType` + `payload` drive the
+  /// typed digest.
   private async postTradeAction(
     actionType: string,
     payload: TypedOrderPayload,
     actionJson: string,
     opts: TradeOpts,
   ): Promise<NativeExchangeAck> {
-    if (opts.legacy) {
-      return this.postSenderAuthorized(actionJson, opts);
-    }
     return this.postTypedOrder(actionType, payload, actionJson, opts);
   }
 
@@ -1822,9 +1565,9 @@ export class Client {
   /// `ws.subscribe({ type: 'l2_book', coin: '1' })`.
   ///
   /// If this client holds a private key, the returned `WsClient` is seeded with
-  /// a signer so it can POST signed exchange actions over the socket
+  /// a signer so it can POST signed typed exchange actions over the socket
   /// (`ws.submitOrder` / `ws.cancelOrder` / `ws.postAction`) — signed against
-  /// the MTF-native chain id (`MTF_CHAIN_ID`), the same domain the REST
+  /// the MTF-native chain id (`MTF_CHAIN_ID`), the same typed digest the REST
   /// `/exchange` path uses. A read-only client yields a WS client that can still
   /// subscribe and `postInfo`, but not `postAction`.
   async connectWs(config: Partial<WsConfig> = {}): Promise<WsClient> {
@@ -1835,27 +1578,10 @@ export class Client {
     return ws;
   }
 
-  /// `fetchMarkets` — list of all CCXT-compat market descriptors.
-  /// Unauthenticated.
-  async getMarkets(): Promise<Market[]> {
-    return httpRequest<Market[]>(this.baseUrl, '/ccxt/markets');
-  }
-
-  /// `fetchPositions` for a given account. Authenticated. The CCXT
-  /// surface defines `fetchPositions(symbols?)`; the MTF gateway
-  /// adapter accepts an explicit `account` query parameter so the
-  /// caller can fetch positions for sub-accounts they control.
-  async getPositions(account: string): Promise<Position[]> {
-    if (!isHexAddress(account)) {
-      throw new RangeError(
-        `getPositions: account must be a 0x-prefixed 20-byte hex string, got '${account}'`,
-      );
-    }
-    return httpRequest<Position[]>(this.baseUrl, '/ccxt/positions', {
-      query: { account },
-      bearer: this.jwt,
-    });
-  }
+  // NOTE: The CCXT market / position reads (`getMarkets` / `getPositions`, which
+  // hit the deleted `/ccxt/*` routes — ADR-028) were REMOVED. Use the MTF-native
+  // `/info` reads instead: `client.info.markets()` for the market universe and
+  // `client.info.accountState(address)` for an account's positions / balances.
 
   /// Internal: set the JWT after a successful `/auth` exchange. Exposed
   /// so an external auth flow (wallet popup, etc.) can plant a token.
@@ -1867,32 +1593,6 @@ export class Client {
 // ============================================================================
 // Encoding helpers — narrow + private
 // ============================================================================
-
-/// Encode a `Uint8Array` as a base64url string (no padding).
-///
-/// Matches the encoding the gateway's `LoginEnvelope.signature` field
-/// expects. We
-/// avoid Buffer/global polyfills here because the SDK targets both
-/// node and the browser; manual base64 is small and avoids the
-/// dependency.
-function bytesToBase64Url(bytes: Uint8Array): string {
-  // Build a binary string of the bytes. `String.fromCharCode` is
-  // bounded to ~65k arguments per call — safe for any signature
-  // (65 bytes) or payload (under 1KB).
-  let binary = '';
-  for (const b of bytes) binary += String.fromCharCode(b);
-  const b64 = btoa(binary);
-  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-/// Encode a `Uint8Array` as a hex string with optional `0x` prefix.
-function bytesToHex(bytes: Uint8Array, prefix: string = ''): string {
-  let out = prefix;
-  for (const b of bytes) {
-    out += b.toString(16).padStart(2, '0');
-  }
-  return out;
-}
 
 /// Derive the WS endpoint URL from the client's HTTP base URL: map the scheme
 /// (`http`→`ws`, `https`→`wss`), strip any trailing slash, and append `/ws`
@@ -1907,19 +1607,4 @@ function httpToWsUrl(baseUrl: string): string {
   }
   if (url.endsWith('/')) url = url.slice(0, -1);
   return url.endsWith('/ws') ? url : `${url}/ws`;
-}
-
-/// Validate that a string is a `0x` + 40 hex chars EVM address.
-function isHexAddress(s: string): boolean {
-  if (s.length !== 42) return false;
-  if (!s.startsWith('0x')) return false;
-  for (let i = 2; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    const isHex =
-      (c >= 0x30 && c <= 0x39) ||
-      (c >= 0x41 && c <= 0x46) ||
-      (c >= 0x61 && c <= 0x66);
-    if (!isHex) return false;
-  }
-  return true;
 }

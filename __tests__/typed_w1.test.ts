@@ -41,6 +41,16 @@ const CIPHERTEXT = Uint8Array.from([0xde, 0xad, 0xbe, 0xef, 0x01, 0x02, 0x03]);
 const ENCODE_TYPES = {
   rfq_request:
     'MetaFluxTransaction:RfqRequest(string metafluxChain,uint32 market,uint8 side,uint64 size,bool hasLimitPx,uint64 limitPx,uint64 expiryMs,bool hasStpGroup,uint64 stpGroup,uint64 nonce)',
+  rfq_quote:
+    'MetaFluxTransaction:RfqQuote(string metafluxChain,uint64 rfqId,uint64 price,uint64 maxSize,uint64 validUntilMs,bool hasStpGroup,uint64 stpGroup,uint64 nonce)',
+  rfq_quote_with_owner:
+    'MetaFluxTransaction:RfqQuote(string metafluxChain,address owner,uint64 rfqId,uint64 price,uint64 maxSize,uint64 validUntilMs,bool hasStpGroup,uint64 stpGroup,uint64 nonce)',
+  vault_distribute:
+    'MetaFluxTransaction:VaultDistribute(string metafluxChain,uint64 vaultId,string pnl,uint64 nonce)',
+  claim_builder_rewards:
+    'MetaFluxTransaction:ClaimBuilderRewards(string metafluxChain,uint64 nonce)',
+  claim_referral_rewards:
+    'MetaFluxTransaction:ClaimReferralRewards(string metafluxChain,uint64 nonce)',
   rfq_accept:
     'MetaFluxTransaction:RfqAccept(string metafluxChain,uint64 rfqId,uint32 quoteIdx,uint64 size,uint64 nonce)',
   fba_submit:
@@ -64,6 +74,15 @@ describe('W1 typed-action encodeType strings (frozen contract)', () => {
   it('match the node type strings byte-for-byte', async () => {
     const { encodeType, primaryType } = await import('../src/native/typed.js');
     expect(encodeType('rfq_request')).toBe(ENCODE_TYPES.rfq_request);
+    expect(encodeType('rfq_quote')).toBe(ENCODE_TYPES.rfq_quote);
+    // The owner-carrying variant inserts `address owner` after metafluxChain,
+    // selecting the node's `RFQ_QUOTE_WITH_OWNER` type.
+    expect(encodeType('rfq_quote', true)).toBe(ENCODE_TYPES.rfq_quote_with_owner);
+    expect(encodeType('vault_distribute')).toBe(ENCODE_TYPES.vault_distribute);
+    expect(encodeType('claim_builder_rewards')).toBe(ENCODE_TYPES.claim_builder_rewards);
+    expect(encodeType('claim_referral_rewards')).toBe(
+      ENCODE_TYPES.claim_referral_rewards,
+    );
     expect(encodeType('rfq_accept')).toBe(ENCODE_TYPES.rfq_accept);
     expect(encodeType('fba_submit')).toBe(ENCODE_TYPES.fba_submit);
     // The two aliases reuse the existing primary type (NOT a new struct).
@@ -304,5 +323,163 @@ describe.skipIf(!wasmBuilt)('W1 typed-action digests', () => {
         CHAIN_ID,
       ),
     ).toThrow(/side must be one of/);
+  });
+});
+
+// ── P0+P1: node-authoritative KATs (rfq_quote / vault_distribute / claims) ──
+//
+// Unlike the self-computed regression pins above, these five digests are COPIED
+// VERBATIM from the node's own `typed_action_kat_vectors` output
+// (`core-state::signing_typed_tests`, chain 114514) — the SAME inputs the node
+// signs. A CROSS-IMPL match proves the TS digest equals the byte the node
+// verifies; a drift 401s the action. Never edit these by hand — regenerate from
+// `cargo test -p core-state typed_action_kat_vectors -- --nocapture`.
+const NODE_KAT = {
+  // owner=None, rfq_id=9, price=105, max_size=500, valid_until_ms=9000,
+  // stp_group absent, nonce=54.
+  rfq_quote: '86ea54e354da6e4626aeaf4001a27bee86793e4fde366d0cfa8662ace831ee25',
+  // owner=0xe4…e4 (addr(0xE4)), else identical, nonce=54.
+  rfq_quote_with_owner:
+    '6583f5d725c522a8a0adbec966da23784dff48c90be3835086e0a4f070179bed',
+  // vault_id=42, pnl="250.75", nonce=18.
+  vault_distribute:
+    'a51d392ef7a24aef8600eaa3e31ff67b32f9c35ed3383045c33f330b605f3939',
+  // nonce=18.
+  claim_builder_rewards:
+    'dd59fd416f3ac3a676accca8202f4a39828f869cbf5df63c42cdcff835d0fcb3',
+  // nonce=18.
+  claim_referral_rewards:
+    'f8b8d9b7762ef89c7efb12e9b5150ce5b2ffeb8045e8656e77684a27c3683e60',
+} as const;
+
+const KAT_OWNER = '0xe4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4';
+
+describe('P0+P1 wire shapes (rfq_quote)', () => {
+  it('rfq_quote flattens Option<u64> stp_group + omits absent keys', async () => {
+    const { buildTyped, typedDataV4 } = await import('../src/native/typed.js');
+    // stp_group present.
+    const full = buildTyped(
+      'rfq_quote',
+      { rfq_id: 9, price: 105, max_size: 500, valid_until_ms: 9000, stp_group: 3 },
+      54n,
+      CHAIN_ID,
+    );
+    expect(JSON.parse(full.actionJson)).toEqual({
+      type: 'rfq_quote',
+      params: { rfq_id: 9, price: 105, max_size: 500, valid_until_ms: 9000, stp_group: 3 },
+    });
+    const data = typedDataV4(full);
+    expect(data.types[data.primaryType].map((f) => f.name)).toEqual([
+      'metafluxChain',
+      'rfqId',
+      'price',
+      'maxSize',
+      'validUntilMs',
+      'hasStpGroup',
+      'stpGroup',
+      'nonce',
+    ]);
+    expect(data.message.hasStpGroup).toBe(true);
+    expect(data.message.stpGroup).toBe(3);
+
+    // stp_group absent: key omitted on the wire; presence half false.
+    const bare = buildTyped(
+      'rfq_quote',
+      { rfq_id: 9, price: 105, max_size: 500, valid_until_ms: 9000 },
+      54n,
+      CHAIN_ID,
+    );
+    expect(JSON.parse(bare.actionJson)).toEqual({
+      type: 'rfq_quote',
+      params: { rfq_id: 9, price: 105, max_size: 500, valid_until_ms: 9000 },
+    });
+    expect(typedDataV4(bare).message.hasStpGroup).toBe(false);
+  });
+
+  it('rfq_quote with owner prepends params.owner + binds the owner word', async () => {
+    const { buildTyped } = await import('../src/native/typed.js');
+    const built = buildTyped(
+      'rfq_quote',
+      { rfq_id: 9, price: 105, max_size: 500, valid_until_ms: 9000 },
+      54n,
+      CHAIN_ID,
+      KAT_OWNER,
+    );
+    // owner rides FIRST in params.owner (readback key), then the signed fields.
+    expect(JSON.parse(built.actionJson)).toEqual({
+      type: 'rfq_quote',
+      params: {
+        owner: KAT_OWNER,
+        rfq_id: 9,
+        price: 105,
+        max_size: 500,
+        valid_until_ms: 9000,
+      },
+    });
+  });
+});
+
+describe.skipIf(!wasmBuilt)('P0+P1 node-authoritative typed digests', () => {
+  it('rfq_quote (owner-less) matches the node KAT', async () => {
+    const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
+    const digest = await typedActionDigest(
+      buildTyped(
+        'rfq_quote',
+        { rfq_id: 9, price: 105, max_size: 500, valid_until_ms: 9000 },
+        54n,
+        CHAIN_ID,
+      ),
+    );
+    expect(toHex(digest)).toBe(NODE_KAT.rfq_quote);
+  });
+
+  it('rfq_quote (with owner) matches the node RFQ_QUOTE_WITH_OWNER KAT', async () => {
+    const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
+    const digest = await typedActionDigest(
+      buildTyped(
+        'rfq_quote',
+        { rfq_id: 9, price: 105, max_size: 500, valid_until_ms: 9000 },
+        54n,
+        CHAIN_ID,
+        KAT_OWNER,
+      ),
+    );
+    expect(toHex(digest)).toBe(NODE_KAT.rfq_quote_with_owner);
+    // The owner word genuinely moves the digest.
+    expect(toHex(digest)).not.toBe(NODE_KAT.rfq_quote);
+  });
+
+  it('vault_distribute matches the node KAT (pnl hashed verbatim)', async () => {
+    const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
+    const digest = await typedActionDigest(
+      buildTyped('vault_distribute', { vault_id: 42, pnl: '250.75' }, 18n, CHAIN_ID),
+    );
+    expect(toHex(digest)).toBe(NODE_KAT.vault_distribute);
+  });
+
+  it('claim_builder_rewards / claim_referral_rewards match the node KATs', async () => {
+    const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
+    const builder = await typedActionDigest(
+      buildTyped('claim_builder_rewards', {}, 18n, CHAIN_ID),
+    );
+    expect(toHex(builder)).toBe(NODE_KAT.claim_builder_rewards);
+    const referral = await typedActionDigest(
+      buildTyped('claim_referral_rewards', {}, 18n, CHAIN_ID),
+    );
+    expect(toHex(referral)).toBe(NODE_KAT.claim_referral_rewards);
+    // The two paramless claims are distinct primary types → distinct digests.
+    expect(toHex(builder)).not.toBe(toHex(referral));
+  });
+
+  it('the paramless claims emit the required "params":{} wire body', async () => {
+    const { buildTyped } = await import('../src/native/typed.js');
+    // The node struct-variants carry `params: Claim*RewardsParams {}` (no serde
+    // default), so the key MUST be present — a bare `{"type":...}` would 400.
+    expect(buildTyped('claim_builder_rewards', {}, 1n, CHAIN_ID).actionJson).toBe(
+      '{"type":"claim_builder_rewards","params":{}}',
+    );
+    expect(buildTyped('claim_referral_rewards', {}, 1n, CHAIN_ID).actionJson).toBe(
+      '{"type":"claim_referral_rewards","params":{}}',
+    );
   });
 });

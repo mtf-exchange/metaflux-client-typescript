@@ -427,7 +427,7 @@ export function buildNativeScaleOrderAction(params: ScaleOrder): string {
     throw new RangeError('dist must be flat | lin_asc | lin_desc | custom');
   }
   if (params.tif !== 'alo' && params.tif !== 'gtc') {
-    throw new RangeError('scale_order tif must be alo | gtc (ioc/aon rest nothing)');
+    throw new RangeError('scale_order tif must be alo | gtc (ioc rests nothing)');
   }
   validateCloid(params.cloid);
   const parts: string[] = [];

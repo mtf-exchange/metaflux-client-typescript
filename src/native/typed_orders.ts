@@ -287,12 +287,14 @@ const VALID_KIND: ReadonlySet<string> = new Set([
   'stop_loss',
   'take_profit',
 ]);
-const VALID_TIF: ReadonlySet<string> = new Set(['gtc', 'ioc', 'aon', 'alo']);
+// `aon` / `reject` are omitted: the node rejects both at lowering
+// (UnsupportedTif / UnsupportedStp), so an order carrying them can never
+// execute. Matches the Rust SDK and the NativeTif / NativeStpMode unions.
+const VALID_TIF: ReadonlySet<string> = new Set(['gtc', 'ioc', 'alo']);
 const VALID_STP: ReadonlySet<string> = new Set([
   'cancel_oldest',
   'cancel_newest',
   'cancel_both',
-  'reject',
 ]);
 const VALID_POSITION_SIDE: ReadonlySet<string> = new Set(['long', 'short']);
 const VALID_TPSL: ReadonlySet<string> = new Set(['tp', 'sl']);

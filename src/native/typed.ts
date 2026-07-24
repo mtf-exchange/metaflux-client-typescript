@@ -577,6 +577,24 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('stpGroup', 'opt-uint64', 'stp_group'),
     ],
   },
+  // `rfq_quote` — a maker posts a quote onto an open RFQ session (161). The
+  // numeric fields are RAW u64 wire values (fixed-point lots / price), digest-
+  // symmetric with `rfq_request`; the optional `stp_group` flattens to a presence
+  // bool + a u64 value. Owner-supporting (a vault operator quotes AS the vault):
+  // an optional `owner` binds right after metafluxChain, selecting the node's
+  // `RFQ_QUOTE_WITH_OWNER` type.
+  rfq_quote: {
+    pascal: 'RfqQuote',
+    wireType: 'rfq_quote',
+    fields: [
+      f('rfqId', 'uint64', 'rfq_id'),
+      f('price', 'uint64', 'price'),
+      f('maxSize', 'uint64', 'max_size'),
+      f('validUntilMs', 'uint64', 'valid_until_ms'),
+      f('hasStpGroup', 'presence-bool', 'stp_group'),
+      f('stpGroup', 'opt-uint64', 'stp_group'),
+    ],
+  },
   rfq_accept: {
     pascal: 'RfqAccept',
     wireType: 'rfq_accept',
@@ -656,6 +674,9 @@ function requireSpec(actionType: string): TypedSpec {
 /// byte-identical to the Rust SDK's `CANCEL_ALL_ORDERS_WITH_OWNER` shape.
 const ACCOUNT_OWNER_SUPPORTING: ReadonlySet<string> = new Set([
   'cancel_all_orders',
+  // A vault operator quotes AS the vault: `owner` binds right after
+  // metafluxChain, selecting the node's `RFQ_QUOTE_WITH_OWNER` type.
+  'rfq_quote',
 ]);
 
 /// Whether `actionType` accepts a digest-level agent-resolved `owner`.

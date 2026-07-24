@@ -67,26 +67,6 @@ describe.skipIf(!wasmBuilt)('WASM crypto round-trips', () => {
     expect(Array.from(s1)).toEqual(Array.from(s2));
   });
 
-  it('Client.signOrder produces a 65-byte signature + 20-byte signer', async () => {
-    // End-to-end: encode -> hash -> sign -> recover -> address.
-    const { Client } = await import('../src/client.js');
-    const privKey = new Uint8Array(32).fill(0x07);
-    const client = new Client({
-      baseUrl: 'http://localhost:0', // never hit; signOrder doesn't fetch.
-      privateKey: privKey,
-    });
-    const signed = await client.signOrder({
-      asset: 0,
-      side: 0,
-      sizeE8: 100_000_000n, // 1.0 base units
-      priceE8: 5_000_000_000_000n, // 50000.0
-      tif: 0,
-    });
-    expect(signed.signature.length).toBe(65);
-    expect(signed.signer.length).toBe(20);
-    expect(signed.payload.length).toBeGreaterThan(0);
-  });
-
   it('encode_limit_order is deterministic for identical inputs', async () => {
     const { encodeLimitOrder } = await import('../src/wallet/wasm.js');
     const a = await encodeLimitOrder(1, 0, 100n, 200n, 0);

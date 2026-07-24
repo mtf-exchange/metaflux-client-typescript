@@ -39,6 +39,28 @@ export interface RfqRequest {
   stp_group?: number | bigint | null;
 }
 
+/// `rfq_quote` — a maker posts a quote onto an open RFQ session. Mirrors the
+/// node's frozen `RfqQuote` typed struct.
+///
+/// All numeric fields are RAW `u64` wire values (fixed-point lots / price), NOT
+/// decimal-scaled — pass a `number` or `bigint`. `stp_group` is `Option<u64>`:
+/// the typed digest flattens it to a presence bool + a value word, and the POST
+/// `params` carries the key ONLY when present (omit, or pass `null`, to leave it
+/// absent). To quote AS a vault (operator path), pass `opts.owner` on
+/// `Client.rfqQuote` — it binds the node's owner-carrying digest.
+export interface RfqQuote {
+  /// Parent RFQ session id (`u64`).
+  rfq_id: number | bigint;
+  /// Quote price (`u64`, fixed-point).
+  price: number | bigint;
+  /// Maximum size the maker will fill (`u64`).
+  max_size: number | bigint;
+  /// Server-clock quote expiry (ms, `u64`).
+  valid_until_ms: number | bigint;
+  /// Optional STP group id (`u64`). Omit or pass `null` when absent.
+  stp_group?: number | bigint | null;
+}
+
 /// `rfq_accept` — a taker crosses against a specific resting quote. Mirrors the
 /// node's frozen `RfqAccept` typed struct.
 export interface RfqAccept {

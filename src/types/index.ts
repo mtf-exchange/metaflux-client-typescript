@@ -88,7 +88,7 @@ export type {
   VaultDistribute,
 } from './vault.js';
 export type { SubmitEncryptedOrder, EncryptedOrderSubmit } from './encrypted.js';
-export type { CoreSide, RfqRequest, RfqAccept } from './rfq.js';
+export type { CoreSide, RfqRequest, RfqQuote, RfqAccept } from './rfq.js';
 export type { FbaSubmit } from './fba.js';
 export type {
   // EIP-712 typed-action payloads (the structured wallet-signing path).

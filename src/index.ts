@@ -357,6 +357,7 @@ export type {
   // RFQ / FBA.
   CoreSide,
   RfqRequest,
+  RfqQuote,
   RfqAccept,
   FbaSubmit,
   // EIP-712 typed-action payloads (structured wallet-signing path).

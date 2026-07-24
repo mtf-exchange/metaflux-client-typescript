@@ -392,6 +392,215 @@ describe.skipIf(!wasmBuilt)(
   },
 );
 
+// ── P0: redirected methods sign the typed digest (== submitTyped path) ──
+//
+// Every dedicated method that formerly routed through the OPAQUE
+// `postSenderAuthorized` lane (which the typed-only `/exchange` 401s) now signs
+// the typed EIP-712 digest. The contract: each method's `/exchange` request body
+// is BYTE-IDENTICAL to the generic `submitTyped(<tag>, <payload>)` call for the
+// same input — so the digest can never diverge from the pinned typed KATs. The
+// three defaulting cases (approveAgent name/expiry, claimRewards validator,
+// vaultModify new_name) match the node's `unwrap_or_default` on the omitted
+// fields.
+const ZERO = '0x0000000000000000000000000000000000000000';
+
+describe.skipIf(!wasmBuilt)('P0 redirected methods == typed submitTyped path', () => {
+  const PRIV = new Uint8Array(32).fill(0x2d);
+  let bodies: string[] = [];
+  let savedFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    bodies = [];
+    savedFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(
+      async (_url: unknown, init: { body?: unknown } = {}) => {
+        bodies.push(String(init.body ?? ''));
+        return { ok: true, status: 200, text: async () => '{}' } as Response;
+      },
+    ) as unknown as typeof globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = savedFetch;
+  });
+
+  async function bodyOf(call: () => Promise<unknown>): Promise<string> {
+    bodies = [];
+    await call();
+    expect(bodies.length).toBe(1);
+    const body = bodies[0];
+    if (body === undefined) throw new Error('no request body captured');
+    return body;
+  }
+
+  async function client() {
+    const { Client } = await import('../src/client.js');
+    return new Client({ baseUrl: 'http://localhost:0', privateKey: PRIV });
+  }
+
+  type C = Awaited<ReturnType<typeof client>>;
+  const CASES: ReadonlyArray<{
+    readonly name: string;
+    readonly tag: string;
+    readonly payload: Record<string, unknown>;
+    readonly conv: (c: C, n: bigint) => Promise<unknown>;
+  }> = [
+    {
+      name: 'setPositionMode',
+      tag: 'set_position_mode',
+      payload: { hedge: true },
+      conv: (c, n) => c.setPositionMode({ hedge: true }, { nonce: n }),
+    },
+    {
+      name: 'updateLeverage',
+      tag: 'update_leverage',
+      payload: { asset: 2, leverage: 10, is_isolated: true },
+      conv: (c, n) =>
+        c.updateLeverage({ asset: 2, leverage: 10, is_isolated: true }, { nonce: n }),
+    },
+    {
+      name: 'userPortfolioMargin',
+      tag: 'user_portfolio_margin',
+      payload: { enroll: true },
+      conv: (c, n) => c.userPortfolioMargin({ enroll: true }, { nonce: n }),
+    },
+    {
+      name: 'setReferrer',
+      tag: 'set_referrer',
+      payload: { referrer: ADDR },
+      conv: (c, n) => c.setReferrer({ referrer: ADDR }, { nonce: n }),
+    },
+    {
+      name: 'linkStakingUser',
+      tag: 'link_staking_user',
+      payload: { target: ADDR },
+      conv: (c, n) => c.linkStakingUser({ target: ADDR }, { nonce: n }),
+    },
+    {
+      name: 'createVault',
+      tag: 'create_vault',
+      payload: { name: 'mlp', lock_period_secs: 604800 },
+      conv: (c, n) =>
+        c.createVault({ name: 'mlp', lock_period_secs: 604800 }, { nonce: n }),
+    },
+    {
+      name: 'spotMarginClose',
+      tag: 'spot_margin_close',
+      payload: { pair: 200, limit_px: 200_000_000 },
+      conv: (c, n) => c.spotMarginClose({ pair: 200, limit_px: 200_000_000 }, { nonce: n }),
+    },
+    {
+      name: 'vaultDistribute',
+      tag: 'vault_distribute',
+      payload: { vault_id: 42, pnl: '1000.5' },
+      conv: (c, n) => c.vaultDistribute({ vault_id: 42, pnl: '1000.5' }, { nonce: n }),
+    },
+    {
+      name: 'updateIsolatedMargin (twin)',
+      tag: 'update_isolated_margin',
+      payload: { asset: 1, delta: '-12.5' },
+      conv: (c, n) => c.updateIsolatedMargin({ asset: 1, delta: '-12.5' }, { nonce: n }),
+    },
+    {
+      name: 'priorityBid (twin)',
+      tag: 'priority_bid',
+      payload: { asset: 1, bid_bps: 5 },
+      conv: (c, n) => c.priorityBid({ asset: 1, bid_bps: 5 }, { nonce: n }),
+    },
+    {
+      name: 'earnDeposit (twin)',
+      tag: 'earn_deposit',
+      payload: { asset: 100, amount: '5000' },
+      conv: (c, n) => c.earnDeposit({ asset: 100, amount: '5000' }, { nonce: n }),
+    },
+    {
+      name: 'mbWithdraw (twin)',
+      tag: 'mb_withdraw',
+      payload: { chain: 'Base', asset: 0, amount: 1_000_000, dst_addr: ADDR },
+      conv: (c, n) =>
+        c.mbWithdraw({ chain: 'Base', asset: 0, amount: 1_000_000, dst_addr: ADDR }, { nonce: n }),
+    },
+    {
+      name: 'claimBuilderRewards',
+      tag: 'claim_builder_rewards',
+      payload: {},
+      conv: (c, n) => c.claimBuilderRewards({ nonce: n }),
+    },
+    {
+      name: 'claimReferralRewards',
+      tag: 'claim_referral_rewards',
+      payload: {},
+      conv: (c, n) => c.claimReferralRewards({ nonce: n }),
+    },
+    {
+      name: 'rfqQuote',
+      tag: 'rfq_quote',
+      payload: { rfq_id: 9, price: 105, max_size: 500, valid_until_ms: 9000 },
+      conv: (c, n) =>
+        c.rfqQuote(
+          { rfq_id: 9, price: 105, max_size: 500, valid_until_ms: 9000 },
+          { nonce: n },
+        ),
+    },
+    // Defaulting cases: the convenience method fills the node's `unwrap_or_default`.
+    {
+      name: 'approveAgent (defaults name / expires_at_ms)',
+      tag: 'approve_agent',
+      payload: { agent: ADDR, name: '', expires_at_ms: 0 },
+      conv: (c, n) => c.approveAgent({ agent: ADDR }, { nonce: n }),
+    },
+    {
+      name: 'claimRewards (defaults validator to 0x0)',
+      tag: 'claim_rewards',
+      payload: { validator: ZERO },
+      conv: (c, n) => c.claimRewards({}, { nonce: n }),
+    },
+    {
+      name: 'vaultModify (defaults new_name)',
+      tag: 'vault_modify',
+      payload: { vault_id: 7, new_name: '' },
+      conv: (c, n) => c.vaultModify({ vault_id: 7 }, { nonce: n }),
+    },
+  ];
+
+  for (const tc of CASES) {
+    it(`${tc.name} body == submitTyped(${tc.tag}) byte-for-byte`, async () => {
+      const c = await client();
+      const conv = await bodyOf(() => tc.conv(c, 7n));
+      const generic = await bodyOf(() => c.submitTyped(tc.tag, tc.payload, { nonce: 7n }));
+      expect(conv).toBe(generic);
+      const parsed = JSON.parse(conv) as {
+        action: { type: string; params?: unknown };
+      };
+      expect(parsed.action.type).toBe(tc.tag);
+    });
+  }
+
+  it('rfqQuote with opts.owner binds the owner-carrying digest', async () => {
+    const c = await client();
+    const owner = '0xe4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4';
+    const withOwner = await bodyOf(() =>
+      c.rfqQuote(
+        { rfq_id: 9, price: 105, max_size: 500, valid_until_ms: 9000 },
+        { nonce: 7n, owner },
+      ),
+    );
+    const ownerLess = await bodyOf(() =>
+      c.rfqQuote(
+        { rfq_id: 9, price: 105, max_size: 500, valid_until_ms: 9000 },
+        { nonce: 7n },
+      ),
+    );
+    // Owner rides in params.owner and moves the signature (distinct digest).
+    const parsed = JSON.parse(withOwner) as {
+      action: { params: { owner?: string } };
+      signature: string;
+    };
+    expect(parsed.action.params.owner).toBe(owner);
+    expect(withOwner).not.toBe(ownerLess);
+  });
+});
+
 // ── O8: a Market order is take-only — the SDK forces tif="ioc" ──
 // The node lowers a Market kind to a marketable limit; a Market+Gtc/Alo would
 // REST the unfilled remainder on the book at the caller's price (the footgun).
