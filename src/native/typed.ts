@@ -616,20 +616,6 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('stpGroup', 'opt-uint64', 'stp_group'),
     ],
   },
-  // `encrypted_order_submit` — a NEW /exchange tag that ALIASES the existing
-  // `SubmitEncryptedOrder` digest: SAME pascal + SAME 5 fields as
-  // `submit_encrypted_order`, only the wire `type` tag differs. One signing form.
-  encrypted_order_submit: {
-    pascal: 'SubmitEncryptedOrder',
-    wireType: 'encrypted_order_submit',
-    fields: [
-      f('ciphertext', 'bytes', 'ciphertext'),
-      f('commitment', 'bytes32', 'commitment'),
-      f('threshold', 'uint8', 'threshold'),
-      f('targetBlock', 'uint64', 'target_block'),
-      f('revealDeadlineMs', 'uint64', 'reveal_deadline_ms'),
-    ],
-  },
   // `pm_unenroll` — a NEW paramless /exchange tag that ALIASES the
   // `UserPortfolioMargin{enroll:false}` digest: SAME pascal + SAME `bool enroll`
   // field as `user_portfolio_margin`, but `enroll` is forced `false` and never

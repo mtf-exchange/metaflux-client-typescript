@@ -502,19 +502,21 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(toHex(base)).not.toBe(toHex(otherChain));
   });
 
-  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 48 reachable actions', async () => {
+  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 47 reachable actions', async () => {
     const { isTypedAction, TYPED_ACTION_TYPES } = await import('../src/native/typed.js');
-    expect(TYPED_ACTION_TYPES.length).toBe(48);
+    expect(TYPED_ACTION_TYPES.length).toBe(47);
     // The multi-sig acting wrapper (user + inner blob + roster signatures).
     expect(isTypedAction('multi_sig')).toBe(true);
     expect(isTypedAction('approve_agent')).toBe(true);
     expect(isTypedAction('submit_order')).toBe(false);
-    // The W1 RFQ / FBA / encrypted-alias / pm-alias actions (rfq_quote added P1).
+    // The W1 RFQ / FBA / pm-alias actions (rfq_quote added P1). The dead
+    // `encrypted_order_submit` alias was dropped — the node refuses it at
+    // admission; use `submit_encrypted_order`.
     expect(isTypedAction('rfq_request')).toBe(true);
     expect(isTypedAction('rfq_quote')).toBe(true);
     expect(isTypedAction('rfq_accept')).toBe(true);
     expect(isTypedAction('fba_submit')).toBe(true);
-    expect(isTypedAction('encrypted_order_submit')).toBe(true);
+    expect(isTypedAction('encrypted_order_submit')).toBe(false);
     expect(isTypedAction('pm_unenroll')).toBe(true);
     // The 3 actions added for the web claim/vault-deposit flows.
     expect(isTypedAction('claim_referral_rewards')).toBe(true);

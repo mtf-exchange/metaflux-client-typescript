@@ -132,7 +132,7 @@ export {
   buildNativeVaultDistributeAction,
   buildNativeMbWithdrawAction,
   // RFQ / FBA / encrypted-order are signed via the W1 typed path
-  // (`Client.rfqRequest` / `rfqAccept` / `fbaSubmit` / `encryptedOrderSubmit` →
+  // (`Client.rfqRequest` / `rfqAccept` / `fbaSubmit` / `submitEncryptedOrder` →
   // `submitTyped`), not opaque action builders.
   // Spot CLOB + spot margin (leveraged spot) + Earn (lending pool).
   buildNativeSpotOrderAction,
@@ -196,6 +196,24 @@ export type {
   SubAccountEntry,
   Mip3ActiveBids,
   Mip3Bid,
+  // P2 wave-1 typed /info reads.
+  OrderStatusInfo,
+  RestingOrderStatus,
+  TriggerOrderStatus,
+  HistoricalOrders,
+  HistoricalOrder,
+  UserFunding,
+  UserFundingRecord,
+  UserLedgerUpdates,
+  UserNonFundingLedgerUpdates,
+  LedgerUpdate,
+  SpotMarginState,
+  SpotMarginAccount,
+  SpotMarginParams,
+  EarnState,
+  EarnPool,
+  PmSummary,
+  EncodeAction,
   // Node-snapshot parity shapes.
   Markets,
   SpotMeta,
@@ -343,7 +361,6 @@ export type {
   LinkStakingUser,
   // Encrypted orders.
   SubmitEncryptedOrder,
-  EncryptedOrderSubmit,
   // Vaults.
   VaultKind,
   CreateVault,

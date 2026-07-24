@@ -1,15 +1,17 @@
-// W1 typed-action KAT — RFQ / FBA microstructure + the two digest aliases.
+// W1 typed-action KAT — RFQ / FBA microstructure + the pm_unenroll digest alias.
 //
-// Pins the TS typed-action digest for the five W1 additions so a drift in field
+// Pins the TS typed-action digest for the W1 additions so a drift in field
 // order / type / flattening is caught before it reaches the wire:
 //   - rfq_request / rfq_accept / fba_submit  (NEW sender-authorized typed actions)
-//   - encrypted_order_submit  (NEW tag, ALIAS of the SubmitEncryptedOrder digest)
 //   - pm_unenroll             (NEW paramless tag, ALIAS of UserPortfolioMargin{false})
+//
+// (The dead `encrypted_order_submit` alias was dropped — the node refuses it at
+// admission. Use `submit_encrypted_order`.)
 //
 // There is no pinned cross-impl server fixture for these yet, so the contract is
 // asserted three ways: (1) the encodeType strings match the node's frozen type
-// strings byte-for-byte; (2) the two aliases reproduce the EXACT digest of the
-// action they alias (the node reuses the same TypedAction); (3) a regression pin
+// strings byte-for-byte; (2) the alias reproduces the EXACT digest of the
+// action it aliases (the node reuses the same TypedAction); (3) a regression pin
 // on the computed digest for the three new shapes. All over the same 0x1901
 // machinery the 41 contract KATs already validate.
 
@@ -30,12 +32,6 @@ function toHex(bytes: Uint8Array): string {
   return out;
 }
 
-// A deterministic 32-byte commitment + a short ciphertext for the encrypted KATs.
-const COMMITMENT = Uint8Array.from(
-  Array.from({ length: 32 }, (_, i) => (i * 7 + 1) & 0xff),
-);
-const CIPHERTEXT = Uint8Array.from([0xde, 0xad, 0xbe, 0xef, 0x01, 0x02, 0x03]);
-
 // The frozen node EIP-712 type strings these actions must reproduce (verbatim
 // from the W1 node `signing_typed_*` encoders).
 const ENCODE_TYPES = {
@@ -55,8 +51,6 @@ const ENCODE_TYPES = {
     'MetaFluxTransaction:RfqAccept(string metafluxChain,uint64 rfqId,uint32 quoteIdx,uint64 size,uint64 nonce)',
   fba_submit:
     'MetaFluxTransaction:FbaSubmit(string metafluxChain,uint32 market,uint8 side,uint64 size,uint64 price,bool hasStpGroup,uint64 stpGroup,uint64 nonce)',
-  encrypted_order_submit:
-    'MetaFluxTransaction:SubmitEncryptedOrder(string metafluxChain,bytes ciphertext,bytes32 commitment,uint8 threshold,uint64 targetBlock,uint64 revealDeadlineMs,uint64 nonce)',
   pm_unenroll:
     'MetaFluxTransaction:UserPortfolioMargin(string metafluxChain,bool enroll,uint64 nonce)',
 } as const;
@@ -85,14 +79,8 @@ describe('W1 typed-action encodeType strings (frozen contract)', () => {
     );
     expect(encodeType('rfq_accept')).toBe(ENCODE_TYPES.rfq_accept);
     expect(encodeType('fba_submit')).toBe(ENCODE_TYPES.fba_submit);
-    // The two aliases reuse the existing primary type (NOT a new struct).
-    expect(encodeType('encrypted_order_submit')).toBe(
-      ENCODE_TYPES.encrypted_order_submit,
-    );
+    // The pm_unenroll alias reuses the existing primary type (NOT a new struct).
     expect(encodeType('pm_unenroll')).toBe(ENCODE_TYPES.pm_unenroll);
-    expect(primaryType('encrypted_order_submit')).toBe(
-      'MetaFluxTransaction:SubmitEncryptedOrder',
-    );
     expect(primaryType('pm_unenroll')).toBe(
       'MetaFluxTransaction:UserPortfolioMargin',
     );
@@ -186,55 +174,9 @@ describe('W1 typed-action wire shapes', () => {
     const built = buildTyped('pm_unenroll', {}, 4n, CHAIN_ID);
     expect(built.actionJson).toBe('{"type":"pm_unenroll"}');
   });
-
-  it('encrypted_order_submit carries the 5-field params object', async () => {
-    const { buildTyped } = await import('../src/native/typed.js');
-    const built = buildTyped(
-      'encrypted_order_submit',
-      {
-        ciphertext: CIPHERTEXT,
-        commitment: COMMITMENT,
-        threshold: 2,
-        target_block: 1000,
-        reveal_deadline_ms: 1_700_000_000_000,
-      },
-      5n,
-      CHAIN_ID,
-    );
-    const parsed = JSON.parse(built.actionJson) as {
-      type: string;
-      params: Record<string, unknown>;
-    };
-    expect(parsed.type).toBe('encrypted_order_submit');
-    expect(Object.keys(parsed.params)).toEqual([
-      'ciphertext',
-      'commitment',
-      'threshold',
-      'target_block',
-      'reveal_deadline_ms',
-    ]);
-  });
 });
 
 describe.skipIf(!wasmBuilt)('W1 typed-action digests', () => {
-  it('encrypted_order_submit reproduces the SubmitEncryptedOrder digest exactly', async () => {
-    const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
-    const payload = {
-      ciphertext: CIPHERTEXT,
-      commitment: COMMITMENT,
-      threshold: 2,
-      target_block: 1000,
-      reveal_deadline_ms: 1_700_000_000_000,
-    };
-    const aliasDigest = await typedActionDigest(
-      buildTyped('encrypted_order_submit', payload, 5n, CHAIN_ID),
-    );
-    const baseDigest = await typedActionDigest(
-      buildTyped('submit_encrypted_order', payload, 5n, CHAIN_ID),
-    );
-    expect(toHex(aliasDigest)).toBe(toHex(baseDigest));
-  });
-
   it('pm_unenroll reproduces the UserPortfolioMargin{enroll:false} digest exactly', async () => {
     const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
     const aliasDigest = await typedActionDigest(

@@ -132,17 +132,19 @@ export interface TradesByTime {
   trades: TradeRecord[];
 }
 
-/// One fill inside a `UserFills` / `UserFillsByTime` history.
+/// One fill inside a `UserFills` / `UserFillsByTime` history. Also the `filled`
+/// branch of an `OrderStatusInfo`.
 export interface UserFill {
-  /// Numeric asset id the fill executed on. NOTE: unlike the trade tape, the
-  /// committed fill ring still renders the numeric id here — resolve symbols
-  /// via `markets`.
-  coin: number;
+  /// Market the fill executed on — the coin SYMBOL. A perp symbol (`"MTF"`) or
+  /// a spot pair NAME (`"MTF/USDC"`). The node fill serializer renders the
+  /// symbol, matching the trade tape (not a numeric id).
+  coin: string;
   /// This leg's side token — `"B"` = buy, `"A"` = sell.
   side: TradeSide;
-  /// Execution price, whole-USDC decimal string.
+  /// Execution price, 8-dp tape decimal string (trailing zeros kept).
   px: string;
-  /// Filled size, whole units as a decimal string.
+  /// Filled size, decimal string. PERP: human plane (`sz_decimals` fraction
+  /// digits). SPOT: the raw integer plane (`szd=0` pin) — no fraction part.
   sz: string;
   /// Fill timestamp (consensus ms).
   time: number;
@@ -156,10 +158,11 @@ export interface UserFill {
   closed_pnl: string;
   /// Direction label, e.g. `"Open Long"` / `"Close Short"`.
   dir: string;
-  /// Signed leg size BEFORE the fill, whole units (signed) decimal string.
+  /// Signed leg size BEFORE the fill, same size plane as `sz` (signed).
   start_position: string;
-  /// Committed block height the fill settled in.
-  block: number;
+  /// Committed block height the fill settled in. The node ring always carries
+  /// it; a gateway archive-normalized fill may omit it.
+  block?: number;
   /// Transaction hash of the originating order (`0x`-hex); empty string when
   /// there is no signed taker action (maker legs / system fills).
   hash: string;
@@ -335,4 +338,201 @@ export interface Mip3ActiveBids {
   started_at_ms: number;
   /// Bids.
   bids: Mip3Bid[];
+}
+
+/// The `resting` branch of an `OrderStatusInfo` — a live order in a perp or
+/// spot book.
+export interface RestingOrderStatus {
+  /// Server order id.
+  oid: number;
+  /// Market symbol (perp `"MTF"`) or spot pair name (`"MTF/USDC"`).
+  coin: string;
+  /// Order side, lowercase `"bid"` / `"ask"`.
+  side: 'bid' | 'ask';
+  /// Resting price, tick-snapped normalized decimal string.
+  px: string;
+  /// Remaining size, normalized decimal string.
+  size: string;
+  /// Insertion timestamp (consensus ms).
+  inserted_at_ms: number;
+  /// Client order id (`0x`-hex), or `null` when the order carried none.
+  cloid: string | null;
+}
+
+/// The `triggered` branch of an `OrderStatusInfo` — a parked TP / SL / stop
+/// entry awaiting its mark cross.
+export interface TriggerOrderStatus {
+  /// Server order id.
+  oid: number;
+  /// Market symbol (perp `"MTF"`) or spot pair name (`"MTF/USDC"`).
+  coin: string;
+  /// Order side, lowercase `"bid"` / `"ask"`.
+  side: 'bid' | 'ask';
+  /// Trigger price, tick-snapped normalized decimal string.
+  trigger_px: string;
+  /// `true` = fire when the mark rises to `trigger_px`; `false` = when it falls.
+  trigger_above: boolean;
+  /// Order size, normalized decimal string.
+  size: string;
+  /// Registration timestamp (consensus ms).
+  registered_at_ms: number;
+  /// Whether the trigger has already fired.
+  fired: boolean;
+  /// `true` = market trigger (`limit_px` is `null`); `false` = limit trigger.
+  is_market: boolean;
+  /// Limit price for a limit trigger, normalized decimal string; `null` for a
+  /// market trigger.
+  limit_px: string | null;
+}
+
+/// `order_status` — single-order lifecycle lookup by `oid` or `cloid`. A
+/// `status`-tagged union; resolution order is resting → triggered → filled.
+///
+/// A `cloid`-only query resolves resting / triggered hits only — the fill ring
+/// is oid-keyed, so a cloid that hit no live order returns `unknown`.
+export type OrderStatusInfo =
+  | { status: 'resting'; order: RestingOrderStatus }
+  | { status: 'triggered'; trigger: TriggerOrderStatus }
+  | { status: 'filled'; fill: UserFill }
+  | { status: 'unknown' };
+
+/// One record inside a `HistoricalOrders` response. The node fold emits the
+/// eight Always fields; a gateway archive row is a documented SUPERSET that
+/// adds the converted `limit_px` / `avg_px` / `sz` / `orig_sz` / `total_sz`
+/// plus order-control fields — all optional here.
+export interface HistoricalOrder {
+  /// Server order id.
+  oid: number;
+  /// Market symbol (perp `"MTF"`) or spot pair name (`"MTF/USDC"`).
+  coin: string;
+  /// Side token — `"B"` = buy, `"A"` = sell.
+  side: TradeSide;
+  /// Order status. `"filled"` only today (the committed ring carries executed
+  /// legs); cancel / reject / expire arrive with the retention seam.
+  status: string;
+  /// Fill price, 8-dp tape decimal string.
+  px: string;
+  /// Total filled size, normalized decimal string (trailing zeros trimmed).
+  filled_sz: string;
+  /// Order timestamp (consensus ms).
+  time: number;
+  /// Transaction hash (`0x`-hex), or the empty-string sentinel.
+  hash: string;
+  /// Committed block height. Node fold Always; a gateway archive row omits it.
+  block?: number;
+  /// Limit price, 8-dp tape decimal string (gateway archive superset).
+  limit_px?: string;
+  /// Average fill price, 8-dp tape decimal string (gateway archive superset).
+  avg_px?: string;
+  /// Filled size, normalized decimal string (gateway archive superset).
+  sz?: string;
+  /// Original order size, normalized decimal string (gateway archive superset).
+  orig_sz?: string;
+  /// Total order size, normalized decimal string (gateway archive superset).
+  total_sz?: string;
+  /// Time-in-force token (gateway archive superset).
+  tif?: string;
+  /// Whether the order was reduce-only (gateway archive superset).
+  reduce_only?: boolean;
+  /// Client order id (`0x`-hex) (gateway archive superset).
+  cloid?: string;
+  /// Cancel reason (gateway archive superset).
+  cancel_reason?: string;
+  /// Error label (gateway archive superset).
+  error?: string;
+}
+
+/// `historical_orders` — the account's past (executed) orders, keyed by
+/// `address`. Optional `limit` caps the most-recent records.
+export interface HistoricalOrders {
+  /// Resolved account address (0x). Absent on a no-archive gateway's typed-empty
+  /// fallback (it omits `address`); present on the real archive path.
+  address?: string;
+  /// Orders, newest first (one record per oid).
+  orders: HistoricalOrder[];
+}
+
+/// One realized-funding row inside a `UserFunding` response.
+export interface UserFundingRecord {
+  /// Market symbol the payment settled on (`"MTF"`).
+  coin: string;
+  /// Payment timestamp (consensus ms).
+  time: number;
+  /// Signed funding payment in whole USDC, verbatim decimal string. May carry
+  /// up to ~28 significant digits — DO NOT re-parse through a fixed-precision
+  /// decimal, which would corrupt it; keep it as a string.
+  usdc: string;
+  /// Signed position size at settlement, decimal string.
+  szi: string;
+  /// The funding rate charged, decimal string.
+  funding_rate: string;
+}
+
+/// `user_funding` — per-account realized funding-payment history, keyed by
+/// `address`. Optional `start_time` / `end_time` (u64 ms) are echoed. `fundings`
+/// is `[]` on a bare node today; the gateway archive leg returns real rows.
+export interface UserFunding {
+  /// Resolved account address (0x). Absent on a no-archive gateway's typed-empty
+  /// fallback; present on the real archive path.
+  address?: string;
+  /// Echoed window start (ms): `null` when the node echoed it as absent, or
+  /// absent entirely on the archive-backed path (the indexer echoes neither).
+  start_time?: number | null;
+  /// Echoed window end (ms); same absence semantics as `start_time`.
+  end_time?: number | null;
+  /// Funding payments.
+  fundings: UserFundingRecord[];
+}
+
+/// `user_ledger_updates` — per-account balance-ledger deltas (node kind), keyed
+/// by `address`. Optional `start_time` / `end_time` are echoed.
+///
+/// `updates` is `[]` on the node today, and the future node record shape is
+/// doc-locked and DIFFERS from the gateway union (`amount` / `amount_units` vs
+/// `delta`) — so the record type is deliberately left as raw JSON (`unknown[]`).
+/// For the gateway-served normalized union use `userNonFundingLedgerUpdates`.
+export interface UserLedgerUpdates {
+  /// Resolved account address (0x).
+  address: string;
+  /// Echoed window start (ms), `null` when the request omitted it.
+  start_time: number | null;
+  /// Echoed window end (ms), `null` when the request omitted it.
+  end_time: number | null;
+  /// Ledger deltas — untyped pending the retention-seam record shape.
+  updates: unknown[];
+}
+
+/// One record inside a `UserNonFundingLedgerUpdates` union. Two row shapes
+/// (money-movement / trade) share `coin` + `time`; the rest varies per row.
+export interface LedgerUpdate {
+  /// Symbol resolved from the row's id space (token id for money movements,
+  /// market id for trade rows). E.g. `"USDC"`, `"PURR"`, `"MTF"`.
+  coin: string;
+  /// Event timestamp (consensus ms).
+  time: number;
+  /// Event kind, e.g. `"deposit"` / `"spot_transfer"` / `"trade"`.
+  kind?: string;
+  /// Signed balance delta, decimal string (money-movement rows).
+  delta?: string;
+  /// Counterparty address (`0x`), when applicable.
+  counterparty?: string;
+  /// Deterministic trade id (trade rows).
+  tid?: number;
+  /// Realized PnL, decimal string (trade rows).
+  realized_pnl?: string;
+  /// Fee paid, decimal string (trade rows).
+  fee?: string;
+  /// Fee token symbol (trade rows).
+  fee_token?: string;
+}
+
+/// `user_non_funding_ledger_updates` — the gateway-served normalized ledger
+/// union, keyed by `address`. Optional `start_time` / `end_time` filter the
+/// window.
+///
+/// NOTE the camelCase collection key `ledgerUpdates` — it is the only camelCase
+/// key on this read surface (the gateway passthrough emits it verbatim).
+export interface UserNonFundingLedgerUpdates {
+  /// Ledger union rows.
+  ledgerUpdates: LedgerUpdate[];
 }

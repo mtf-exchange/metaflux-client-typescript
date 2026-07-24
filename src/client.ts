@@ -67,7 +67,6 @@ import type {
   CreateSubAccount,
   CreateVault,
   CWithdraw,
-  EncryptedOrderSubmit,
   FbaSubmit,
   LinkStakingUser,
   MbWithdraw,
@@ -872,23 +871,6 @@ export class Client {
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
     return this.submitEncryptedOrderTyped(params, opts);
-  }
-
-  /// Submit a threshold-encrypted order via the W1 `encrypted_order_submit`
-  /// typed alias (`POST /exchange`). Carries the SAME 5-field payload as
-  /// `submitEncryptedOrder` and signs the SAME `SubmitEncryptedOrder` EIP-712
-  /// digest (only the wire `type` tag differs). `ciphertext` signs as EIP-712
-  /// `bytes` (`keccak256(raw)`), `commitment` as a `bytes32`; both POST as JSON
-  /// byte arrays.
-  async encryptedOrderSubmit(
-    params: EncryptedOrderSubmit,
-    opts: { nonce?: bigint; chainId?: number } = {},
-  ): Promise<NativeExchangeAck> {
-    return this.submitTyped(
-      'encrypted_order_submit',
-      params as unknown as Record<string, unknown>,
-      opts,
-    );
   }
 
   // ── vaults ───────────────────────────────────

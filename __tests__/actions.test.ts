@@ -236,14 +236,14 @@ describe.skipIf(!wasmBuilt)('real native write-action sign → recover', () => {
 
 // ── W1 microstructure convenience methods route through the typed path ──
 //
-// The legacy `rfqRequest` / `rfqAccept` / `fbaSubmit` / `encryptedOrderSubmit` /
-// `pmUnenroll` methods emitted the pre-W1 OPAQUE sender-authorized shape that
-// the typed-only `/exchange` REJECTS. They now sign the W1 typed structs via
-// `submitTyped`. The contract: each convenience method's signed `/exchange` body
-// is BYTE-IDENTICAL to the generic `submitTyped(<tag>, payload)` path for the
-// same input (so the digest can never diverge), carries `sig_scheme:"typed"`,
-// and never re-emits the old opaque wrapper keys (`rfq`/`accept`/`submit`/
-// `encrypted`). The typed digests themselves are pinned in `typed_w1.test.ts`.
+// The legacy `rfqRequest` / `rfqAccept` / `fbaSubmit` / `pmUnenroll` methods
+// emitted the pre-W1 OPAQUE sender-authorized shape that the typed-only
+// `/exchange` REJECTS. They now sign the W1 typed structs via `submitTyped`. The
+// contract: each convenience method's signed `/exchange` body is BYTE-IDENTICAL
+// to the generic `submitTyped(<tag>, payload)` path for the same input (so the
+// digest can never diverge), carries `sig_scheme:"typed"`, and never re-emits
+// the old opaque wrapper keys (`rfq`/`accept`/`submit`). The typed digests
+// themselves are pinned in `typed_w1.test.ts`.
 describe.skipIf(!wasmBuilt)(
   'W1 microstructure convenience methods == generic typed path',
   () => {
@@ -331,29 +331,6 @@ describe.skipIf(!wasmBuilt)(
             { nonce: n },
           ),
         opaqueKey: '"submit":',
-      },
-      {
-        name: 'encryptedOrderSubmit',
-        tag: 'encrypted_order_submit',
-        payload: {
-          ciphertext: new Uint8Array([0xde, 0xad, 0xbe, 0xef]),
-          commitment: new Uint8Array(32).fill(7),
-          threshold: 2,
-          target_block: 1000,
-          reveal_deadline_ms: 1_700_000_000_000,
-        },
-        conv: (c, n) =>
-          c.encryptedOrderSubmit(
-            {
-              ciphertext: new Uint8Array([0xde, 0xad, 0xbe, 0xef]),
-              commitment: new Uint8Array(32).fill(7),
-              threshold: 2,
-              target_block: 1000,
-              reveal_deadline_ms: 1_700_000_000_000,
-            },
-            { nonce: n },
-          ),
-        opaqueKey: '"encrypted":',
       },
     ];
 

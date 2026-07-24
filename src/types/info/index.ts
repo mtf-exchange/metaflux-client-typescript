@@ -24,6 +24,13 @@ export type {
   PendingUnstake,
   FeeSchedule,
   FeeTier,
+  SpotMarginState,
+  SpotMarginAccount,
+  SpotMarginParams,
+  EarnState,
+  EarnPool,
+  PmSummary,
+  EncodeAction,
 } from './core.js';
 export type {
   TradeSide,
@@ -50,6 +57,16 @@ export type {
   SubAccountEntry,
   Mip3ActiveBids,
   Mip3Bid,
+  OrderStatusInfo,
+  RestingOrderStatus,
+  TriggerOrderStatus,
+  HistoricalOrders,
+  HistoricalOrder,
+  UserFunding,
+  UserFundingRecord,
+  UserLedgerUpdates,
+  UserNonFundingLedgerUpdates,
+  LedgerUpdate,
 } from './reads.js';
 export type {
   Markets,

@@ -31,11 +31,14 @@ import type {
   BlockInfo,
   CandleSnapshot,
   DelegatorSummary,
+  EarnState,
+  EncodeAction,
   ExchangeStatus,
   FeeSchedule,
   FrontendOpenOrders,
   FundingHistory,
   GossipRootIps,
+  HistoricalOrders,
   L2Book,
   L2BookParams,
   LeadingVaults,
@@ -47,18 +50,24 @@ import type {
   Mip3ActiveBids,
   NodeInfo,
   OpenOrders,
+  OrderStatusInfo,
   PerpDexs,
   PerpsAtOpenInterestCap,
+  PmSummary,
   PredictedFunding,
   RecentTrades,
   SpotClearinghouseState,
   SpotDeployState,
+  SpotMarginState,
   SpotMeta,
   StakingState,
   SubAccounts,
   TradesByTime,
   UserFills,
   UserFillsByTime,
+  UserFunding,
+  UserLedgerUpdates,
+  UserNonFundingLedgerUpdates,
   UserRateLimit,
   UserRole,
   UserToMultiSigSigners,
@@ -289,6 +298,151 @@ export class InfoApi {
     return this.post<Mip3ActiveBids>({ type: 'mip3_active_bids' });
   }
 
+  // ── P2 wave-1 typed reads (order / history / spot-margin / earn / pm) ────
+
+  /// `order_status` — single-order lifecycle lookup. Pass EXACTLY one of `oid`
+  /// (u64) or `cloid` (`0x` + 32 hex). Returns a `status`-tagged union
+  /// (`resting` / `triggered` / `filled` / `unknown`); resolution order is
+  /// resting → triggered → filled.
+  ///
+  /// A `cloid`-only query resolves resting / triggered hits only — the fill
+  /// ring is oid-keyed, so a cloid that hit no live order returns `unknown`.
+  async orderStatus(query: {
+    oid?: number | bigint;
+    cloid?: string;
+  }): Promise<OrderStatusInfo> {
+    const hasOid = query.oid !== undefined;
+    const hasCloid = query.cloid !== undefined;
+    if (hasOid === hasCloid) {
+      throw new TypeError(
+        'orderStatus requires exactly one of `oid` or `cloid`',
+      );
+    }
+    const body: { type: string; [k: string]: unknown } = {
+      type: 'order_status',
+    };
+    if (hasOid) {
+      const oid = query.oid as number | bigint;
+      if (typeof oid === 'bigint') {
+        // Fail LOUD rather than silently truncate an oid beyond the f64 safe
+        // integer range (Number(bigint) would lose precision).
+        if (oid > BigInt(Number.MAX_SAFE_INTEGER)) {
+          throw new RangeError(
+            `orderStatus oid ${oid} exceeds Number.MAX_SAFE_INTEGER; would lose precision`,
+          );
+        }
+        body.oid = Number(oid);
+      } else {
+        body.oid = oid;
+      }
+    }
+    if (hasCloid) body.cloid = query.cloid;
+    return this.post<OrderStatusInfo>(body);
+  }
+
+  /// `historical_orders` — the account's past (executed) orders, keyed by
+  /// `address` (0x). Optional `limit` caps the most-recent records (sent ONLY
+  /// when provided). Newest first; statuses are `"filled"` only today.
+  async historicalOrders(
+    address: string,
+    limit?: number,
+  ): Promise<HistoricalOrders> {
+    const body: { type: string; [k: string]: unknown } = {
+      type: 'historical_orders',
+      address,
+    };
+    if (limit !== undefined) body.limit = limit;
+    return this.post<HistoricalOrders>(body);
+  }
+
+  /// `user_funding` — per-account realized funding-payment history, keyed by
+  /// `address` (0x). Optional `startTime` / `endTime` (ms) filter the window,
+  /// sent as `start_time` / `end_time` ONLY when provided (and echoed back).
+  async userFunding(
+    address: string,
+    startTime?: number,
+    endTime?: number,
+  ): Promise<UserFunding> {
+    const body: { type: string; [k: string]: unknown } = {
+      type: 'user_funding',
+      address,
+    };
+    if (startTime !== undefined) body.start_time = startTime;
+    if (endTime !== undefined) body.end_time = endTime;
+    return this.post<UserFunding>(body);
+  }
+
+  /// `user_ledger_updates` — per-account balance-ledger deltas (NODE kind),
+  /// keyed by `address` (0x). Optional window bounds as above. The `updates`
+  /// records are untyped (`unknown[]`) pending the retention-seam shape; for
+  /// the gateway-served NORMALIZED union use `userNonFundingLedgerUpdates`.
+  async userLedgerUpdates(
+    address: string,
+    startTime?: number,
+    endTime?: number,
+  ): Promise<UserLedgerUpdates> {
+    const body: { type: string; [k: string]: unknown } = {
+      type: 'user_ledger_updates',
+      address,
+    };
+    if (startTime !== undefined) body.start_time = startTime;
+    if (endTime !== undefined) body.end_time = endTime;
+    return this.post<UserLedgerUpdates>(body);
+  }
+
+  /// `user_non_funding_ledger_updates` — the GATEWAY-served normalized ledger
+  /// union, keyed by `address` (0x). Optional window bounds as above. NOTE the
+  /// response collection key is camelCase `ledgerUpdates`.
+  async userNonFundingLedgerUpdates(
+    address: string,
+    startTime?: number,
+    endTime?: number,
+  ): Promise<UserNonFundingLedgerUpdates> {
+    const body: { type: string; [k: string]: unknown } = {
+      type: 'user_non_funding_ledger_updates',
+      address,
+    };
+    if (startTime !== undefined) body.start_time = startTime;
+    if (endTime !== undefined) body.end_time = endTime;
+    return this.post<UserNonFundingLedgerUpdates>(body);
+  }
+
+  /// `spot_margin_state` — every spot-margin position of one user.
+  ///
+  /// REQUEST KEY is `user` (0x hex), NOT `address` — the spot-margin read
+  /// surface keys by `user`.
+  async spotMarginState(user: string): Promise<SpotMarginState> {
+    return this.post<SpotMarginState>({ type: 'spot_margin_state', user });
+  }
+
+  /// `earn_state` — every Earn lending pool. Pass the optional `user` (0x hex)
+  /// to also get that user's per-pool `user_shares` / `user_value` (sent ONLY
+  /// when provided).
+  async earnState(user?: string): Promise<EarnState> {
+    const body: { type: string; [k: string]: unknown } = { type: 'earn_state' };
+    if (user !== undefined) body.user = user;
+    return this.post<EarnState>(body);
+  }
+
+  /// `pm_summary` — one account's portfolio-margin summary, keyed by `address`
+  /// (0x). An unknown / non-enrolled address answers `enrolled:false` +
+  /// zeroed figures. The `*_cents` fields are USD-CENTS-plane integer strings.
+  async pmSummary(address: string): Promise<PmSummary> {
+    return this.post<PmSummary>({ type: 'pm_summary', address });
+  }
+
+  /// `encode_action` — lower a wire action to its canonical core `Action` JSON.
+  ///
+  /// SDK-critical for `multi_sig`: the returned `action_json` STRING's exact
+  /// bytes are the `inner_action_blob` every M-of-N member signs (cross-ref
+  /// `native/multisig`). `action` is the familiar `{type, params}` wire form.
+  async encodeAction(action: {
+    type: string;
+    [k: string]: unknown;
+  }): Promise<EncodeAction> {
+    return this.post<EncodeAction>({ type: 'encode_action', action });
+  }
+
   // ── node snapshot reads ─────────────────────────────────────────────────
 
   /// `spot_meta` — spot pair universe + token registry.
@@ -429,7 +583,7 @@ export class InfoApi {
   /// Raw escape hatch — POST an arbitrary `{type, ...}` body to `/info`,
   /// validate the envelope, and return the unwrapped `data` typed. For request
   /// shapes the SDK doesn't yet model (e.g. `oracle_sources`,
-  /// `fba_batch_state`, `order_status`, governance reads).
+  /// `fba_batch_state`, `rfq_open`, governance reads).
   async raw<T = unknown>(body: { type: string; [k: string]: unknown }): Promise<T> {
     return this.post<T>(body);
   }

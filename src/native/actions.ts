@@ -1077,5 +1077,5 @@ export function buildNativeEarnWithdrawAction(
 // NOTE: `cross_chain_send` was removed — it was never a public `/exchange`
 // action (the node only accepts it on the EVM core-writer path). The RFQ / FBA /
 // encrypted-order builders that once lived here were migrated to the W1 typed
-// path (`rfq_request` / `rfq_accept` / `fba_submit` / `encrypted_order_submit`,
+// path (`rfq_request` / `rfq_accept` / `fba_submit` / `submit_encrypted_order`,
 // signed via `../native/typed`).

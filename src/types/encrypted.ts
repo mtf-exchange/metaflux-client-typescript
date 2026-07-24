@@ -20,9 +20,3 @@ export interface SubmitEncryptedOrder {
   /// (`u64`).
   reveal_deadline_ms: number | bigint;
 }
-
-/// `encrypted_order_submit` — a NEW `/exchange` action tag that ALIASES the
-/// `SubmitEncryptedOrder` typed digest (same EIP-712 struct, only the wire
-/// `type` tag differs). It carries the SAME 5-field W1 payload as
-/// `SubmitEncryptedOrder` (was a distinct 3-field opaque shape before W1).
-export type EncryptedOrderSubmit = SubmitEncryptedOrder;

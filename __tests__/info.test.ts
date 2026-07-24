@@ -672,37 +672,355 @@ describe('InfoApi deployed-gateway read shapes', () => {
     expect(o.orders[0]?.cloid).toBeNull();
   });
 
-  it('userFills decodes the committed fill-ring record shape', async () => {
+  it('userFills decodes the committed fill-ring record shape (coin SYMBOL)', async () => {
     const api = new InfoApi(BASE);
+    // Canonical node fill shape: coin SYMBOL, 8-dp tape px, human-plane sz,
+    // `time`, `block`.
     nextData = {
       address: ADDR,
       fills: [
         {
-          coin: 0,
+          coin: 'MTF',
           side: 'B',
-          px: '67042.50',
-          sz: '0.125',
-          time: 1_700_000_000_555,
-          oid: 12345,
-          tid: 90123,
-          fee: '4.19',
+          px: '0.12126000',
+          sz: '112.22',
+          time: 1_784_820_001_998,
+          oid: 42,
+          tid: 7,
+          fee: '0.000952',
           closed_pnl: '0',
           dir: 'Open Long',
-          start_position: '0',
-          block: 562,
-          hash: '0x2315b79b9e82c2deb279a59448bf7841f3767d30d874e5b544d75bb9fd1e9b0c',
+          start_position: '-357795.12',
+          block: 8_416_000,
+          hash: '',
         },
       ],
     };
     const res = await api.userFills(ADDR);
     const f = res.fills[0]!;
-    // Fill rings render the NUMERIC asset id (unlike the symbol-keyed tape).
-    expect(f.coin).toBe(0);
+    // The node fill serializer renders the coin SYMBOL (a string), matching the
+    // trade tape — NOT the numeric asset id.
+    expect(f.coin).toBe('MTF');
+    expect(typeof f.coin).toBe('string');
     expect(f.side).toBe('B');
     expect(f.dir).toBe('Open Long');
     expect(typeof f.fee).toBe('string');
     expect(typeof f.closed_pnl).toBe('string');
-    expect(f.tid).toBe(90123);
+    expect(f.tid).toBe(7);
+    // The trace-hash empty sentinel means "no on-chain tx".
+    expect(f.hash).toBe('');
+  });
+});
+
+// P2 wave-1 typed reads. Fixture VALUES mirror the node canonical wire shapes:
+// the perp fill / order / funding / ledger-union records, the account-history
+// empty-shape pins, and the pm_summary zeroed / enrolled shapes.
+describe('InfoApi P2 wave-1 reads', () => {
+  it('orderStatus sends exactly one of oid | cloid, and rejects neither/both', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { status: 'unknown' };
+    await api.orderStatus({ oid: 42 });
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'order_status',
+      oid: 42,
+    });
+    const CLOID = '0x00000000000000000000000000000abc';
+    await api.orderStatus({ cloid: CLOID });
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'order_status',
+      cloid: CLOID,
+    });
+    // Neither → throw; both → throw (the node requires exactly one).
+    await expect(api.orderStatus({})).rejects.toThrow(/exactly one/);
+    await expect(api.orderStatus({ oid: 1, cloid: CLOID })).rejects.toThrow(
+      /exactly one/,
+    );
+  });
+
+  it('orderStatus decodes the filled branch (canonical fill record)', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      status: 'filled',
+      fill: {
+        coin: 'MTF',
+        side: 'B',
+        px: '0.12126000',
+        sz: '112.22',
+        time: 1_784_820_001_998,
+        oid: 42,
+        tid: 7,
+        fee: '0.000952',
+        closed_pnl: '0',
+        dir: 'Open Long',
+        start_position: '-357795.12',
+        block: 8_416_000,
+        hash: '',
+      },
+    };
+    const res = await api.orderStatus({ oid: 42 });
+    expect(res.status).toBe('filled');
+    if (res.status === 'filled') {
+      expect(res.fill.coin).toBe('MTF');
+      expect(res.fill.px).toBe('0.12126000');
+      expect(typeof res.fill.sz).toBe('string');
+    }
+  });
+
+  it('orderStatus decodes the resting branch (lowercase side, nullable cloid)', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      status: 'resting',
+      order: {
+        oid: 42,
+        coin: 'MTF',
+        side: 'bid',
+        px: '0.12',
+        size: '112.22',
+        inserted_at_ms: 1_784_820_001_000,
+        cloid: null,
+      },
+    };
+    const res = await api.orderStatus({ oid: 42 });
+    expect(res.status).toBe('resting');
+    if (res.status === 'resting') {
+      expect(res.order.side).toBe('bid');
+      expect(res.order.cloid).toBeNull();
+      expect(res.order.oid).toBe(42);
+    }
+  });
+
+  it('historicalOrders sends address + optional limit, decodes the canonical row', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { address: ADDR, orders: [] };
+    await api.historicalOrders(ADDR);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'historical_orders',
+      address: ADDR,
+    });
+    // order_canonical (gateway archive superset row).
+    nextData = {
+      address: ADDR,
+      orders: [
+        {
+          oid: 9,
+          coin: 'MTF',
+          side: 'A',
+          status: 'filled',
+          time: 1_784_820_001_000,
+          px: '194.78000000',
+          filled_sz: '112.2',
+          hash: '',
+          limit_px: '194.78000000',
+          avg_px: '194.78000000',
+          sz: '112.2',
+          orig_sz: '112.2',
+          total_sz: '112.2',
+          tif: 'Gtc',
+          reduce_only: false,
+        },
+      ],
+    };
+    const res = await api.historicalOrders(ADDR, 50);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'historical_orders',
+      address: ADDR,
+      limit: 50,
+    });
+    const o = res.orders[0]!;
+    expect(o.oid).toBe(9);
+    expect(o.side).toBe('A');
+    expect(o.status).toBe('filled');
+    expect(o.px).toBe('194.78000000');
+    expect(o.filled_sz).toBe('112.2');
+    expect(o.tif).toBe('Gtc');
+    expect(o.reduce_only).toBe(false);
+  });
+
+  it('userFunding echoes window bounds + keeps the 28-digit usdc verbatim', async () => {
+    const api = new InfoApi(BASE);
+    // Node empty-shape pin.
+    nextData = { address: ADDR, start_time: null, end_time: null, fundings: [] };
+    await api.userFunding(ADDR);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'user_funding',
+      address: ADDR,
+    });
+    // funding_canonical: usdc carries 28 significant digits — must survive as a
+    // string (a fixed-precision re-parse would corrupt it).
+    const USDC_28 = '0.0189543210987654321098765432';
+    nextData = {
+      address: ADDR,
+      start_time: 1,
+      end_time: 2,
+      fundings: [
+        {
+          coin: 'MTF',
+          time: 1_784_800_000_000,
+          usdc: USDC_28,
+          szi: '17415',
+          funding_rate: '-0.0005',
+        },
+      ],
+    };
+    const res = await api.userFunding(ADDR, 1, 2);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'user_funding',
+      address: ADDR,
+      start_time: 1,
+      end_time: 2,
+    });
+    expect(res.fundings[0]?.coin).toBe('MTF');
+    expect(res.fundings[0]?.usdc).toBe(USDC_28);
+    expect(res.fundings[0]?.funding_rate).toBe('-0.0005');
+  });
+
+  it('userLedgerUpdates types the envelope, leaves records raw', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { address: ADDR, start_time: null, end_time: null, updates: [] };
+    await api.userLedgerUpdates(ADDR);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'user_ledger_updates',
+      address: ADDR,
+    });
+    const res = await api.userLedgerUpdates(ADDR);
+    expect(res.updates).toEqual([]);
+  });
+
+  it('userNonFundingLedgerUpdates decodes the camelCase ledgerUpdates union', async () => {
+    const api = new InfoApi(BASE);
+    // ledger_canonical 3-row union (money-movement / spot-token / trade).
+    nextData = {
+      ledgerUpdates: [
+        { coin: 'USDC', time: 1_784_800_000_001, kind: 'deposit', delta: '100', counterparty: '0xabc' },
+        { coin: 'PURR', time: 1_784_800_000_002, kind: 'spot_transfer', delta: '5' },
+        { coin: 'MTF', time: 1_784_800_000_003, kind: 'trade', tid: 77, realized_pnl: '1.5', fee: '0.02', fee_token: 'USDC' },
+      ],
+    };
+    const res = await api.userNonFundingLedgerUpdates(ADDR, 1, 2);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'user_non_funding_ledger_updates',
+      address: ADDR,
+      start_time: 1,
+      end_time: 2,
+    });
+    expect(res.ledgerUpdates).toHaveLength(3);
+    expect(res.ledgerUpdates[0]?.coin).toBe('USDC');
+    expect(res.ledgerUpdates[1]?.kind).toBe('spot_transfer');
+    expect(res.ledgerUpdates[2]?.tid).toBe(77);
+    expect(res.ledgerUpdates[2]?.fee_token).toBe('USDC');
+  });
+
+  it('spotMarginState is keyed by `user` (NOT address)', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      user: ADDR,
+      accounts: [
+        {
+          pair: 200,
+          collateral: '1000',
+          borrowed: '500',
+          borrow_index_snapshot: '1',
+          base_held: '2.5',
+          current_debt: '500',
+          params: { init_bps: '2000', maint_bps: '1250' },
+        },
+      ],
+    };
+    const res = await api.spotMarginState(ADDR);
+    // The request key is `user`, NOT `address` — the spot-margin surface quirk.
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'spot_margin_state',
+      user: ADDR,
+    });
+    expect(res.user).toBe(ADDR);
+    const a = res.accounts[0]!;
+    expect(a.pair).toBe(200);
+    expect(a.current_debt).toBe('500');
+    expect(a.params?.init_bps).toBe('2000');
+  });
+
+  it('earnState sends `user` only when provided; user_* fields ride with it', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { pools: [] };
+    await api.earnState();
+    expect(JSON.parse(captured!.body)).toEqual({ type: 'earn_state' });
+    nextData = {
+      pools: [
+        {
+          asset: 0,
+          total_supplied: '10000',
+          total_borrowed: '4000',
+          idle: '6000',
+          shares_total: '10000',
+          share_value: '1',
+          borrow_index: '1',
+          reserve_factor_bps: '1000',
+          borrow_rate_bps_annual: '500',
+          reserve_accrued: '3',
+          user_shares: '250',
+          user_value: '250',
+        },
+      ],
+    };
+    const res = await api.earnState(ADDR);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'earn_state',
+      user: ADDR,
+    });
+    const p = res.pools[0]!;
+    expect(p.asset).toBe(0);
+    expect(p.idle).toBe('6000');
+    expect(p.user_shares).toBe('250');
+    expect(p.user_value).toBe('250');
+  });
+
+  it('pmSummary is keyed by address; decodes enrolled + zeroed shapes', async () => {
+    const api = new InfoApi(BASE);
+    // Enrolled: cents-plane integer strings.
+    nextData = {
+      address: ADDR,
+      enrolled: true,
+      enrolled_at_ms: 1_784_800_000_000,
+      last_computed_block: 8_416_000,
+      pm_maint_margin_cents: '125000',
+      net_value_cents: '500000',
+      concentration_penalty_cents: '0',
+    };
+    const res = await api.pmSummary(ADDR);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'pm_summary',
+      address: ADDR,
+    });
+    expect(res.enrolled).toBe(true);
+    expect(res.pm_maint_margin_cents).toBe('125000');
+    expect(typeof res.net_value_cents).toBe('string');
+    // Unknown / non-enrolled → 200 zeroed with enrolled:false.
+    nextData = {
+      address: ADDR,
+      enrolled: false,
+      enrolled_at_ms: 0,
+      last_computed_block: 0,
+      pm_maint_margin_cents: '0',
+      net_value_cents: '0',
+      concentration_penalty_cents: '0',
+    };
+    const zero = await api.pmSummary(ADDR);
+    expect(zero.enrolled).toBe(false);
+    expect(zero.enrolled_at_ms).toBe(0);
+  });
+
+  it('encodeAction posts the wire action + returns the canonical action_json', async () => {
+    const api = new InfoApi(BASE);
+    const ACTION = { type: 'c_deposit', params: { amount: '100' } };
+    nextData = { action_json: '{"CDeposit":{"amount":"100"}}' };
+    const res = await api.encodeAction(ACTION);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'encode_action',
+      action: ACTION,
+    });
+    // The returned STRING's bytes are the multi_sig inner_action_blob.
+    expect(typeof res.action_json).toBe('string');
+    expect(res.action_json).toBe('{"CDeposit":{"amount":"100"}}');
   });
 });
 

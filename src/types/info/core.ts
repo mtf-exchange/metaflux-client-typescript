@@ -356,3 +356,119 @@ export interface FeeSchedule {
   /// Referrer share of the base taker take, decimal bps string.
   referrer_share_bps: string;
 }
+
+/// The `params` block on a `SpotMarginAccount` — the pair's risk parameters.
+/// `null` on the account when margin is disabled / uncalibrated for the pair.
+export interface SpotMarginParams {
+  /// Initial-margin requirement, bps as a decimal string.
+  init_bps: string;
+  /// Maintenance-margin requirement, bps as a decimal string.
+  maint_bps: string;
+}
+
+/// One spot-margin position inside a `SpotMarginState`. All magnitudes are
+/// full-precision normalized decimal strings (fractional planes — borrow
+/// indices, sub-unit base sizes — that whole-unit truncation would destroy).
+export interface SpotMarginAccount {
+  /// Spot pair id.
+  pair: number;
+  /// Posted collateral, decimal string.
+  collateral: string;
+  /// Borrowed principal, decimal string.
+  borrowed: string;
+  /// Borrow-index snapshot at the last accrual, decimal string.
+  borrow_index_snapshot: string;
+  /// Base asset held in the position, decimal string.
+  base_held: string;
+  /// Current accrued debt = `borrowed × (pool.borrow_index / snapshot)`,
+  /// decimal string.
+  current_debt: string;
+  /// Pair risk parameters, or `null` when margin is disabled / uncalibrated.
+  params: SpotMarginParams | null;
+}
+
+/// `spot_margin_state` — every spot-margin position of one user.
+///
+/// REQUEST KEY is `user` (0x hex), NOT `address` — the node's spot-margin read
+/// surface keys by `user`.
+export interface SpotMarginState {
+  /// Echoed user address (0x).
+  user: string;
+  /// Spot-margin positions, in deterministic pair-id order.
+  accounts: SpotMarginAccount[];
+}
+
+/// One Earn lending pool inside an `EarnState`. `user_shares` / `user_value`
+/// appear ONLY when the request carried a `user`. All magnitudes are
+/// full-precision normalized decimal strings.
+export interface EarnPool {
+  /// Pool asset (token) id.
+  asset: number;
+  /// Total supplied principal, decimal string.
+  total_supplied: string;
+  /// Total borrowed principal, decimal string.
+  total_borrowed: string;
+  /// Idle liquidity = `total_supplied − total_borrowed`, decimal string.
+  idle: string;
+  /// Total outstanding shares, decimal string.
+  shares_total: string;
+  /// NAV per share = `total_supplied / shares_total` (`"0"` when no shares),
+  /// decimal string.
+  share_value: string;
+  /// Current borrow index, decimal string.
+  borrow_index: string;
+  /// Reserve factor, bps as a decimal string.
+  reserve_factor_bps: string;
+  /// Annualized borrow rate, bps as a decimal string.
+  borrow_rate_bps_annual: string;
+  /// Accrued protocol reserve, decimal string.
+  reserve_accrued: string;
+  /// The user's share balance, decimal string. Present only when `user` was
+  /// sent (zero string for a non-supplier).
+  user_shares?: string;
+  /// The user's stake value = `user_shares × share_value`, decimal string.
+  /// Present only when `user` was sent.
+  user_value?: string;
+}
+
+/// `earn_state` — every Earn lending pool, plus one user's stake when the
+/// optional `user` (0x hex) is sent.
+export interface EarnState {
+  /// Pools, in committed order.
+  pools: EarnPool[];
+}
+
+/// `pm_summary` — one account's portfolio-margin summary.
+///
+/// REQUEST KEY is `address` (0x hex); an `account_id` is rejected. An unknown /
+/// non-enrolled address answers 200 with `enrolled:false` and zeroed figures.
+///
+/// The `*_cents` fields are USD-CENTS-plane integer strings (NOT whole USDC) —
+/// divide by 100 for dollars.
+export interface PmSummary {
+  /// Resolved account address (0x).
+  address: string;
+  /// Whether the account is enrolled in portfolio margin.
+  enrolled: boolean;
+  /// Enrollment timestamp (consensus ms); `0` when not enrolled.
+  enrolled_at_ms: number;
+  /// Block height of the last PM computation; `0` when not enrolled.
+  last_computed_block: number;
+  /// Maintenance-margin requirement, USD-cents integer string.
+  pm_maint_margin_cents: string;
+  /// Net account value, USD-cents integer string.
+  net_value_cents: string;
+  /// Concentration penalty, USD-cents integer string.
+  concentration_penalty_cents: string;
+}
+
+/// `encode_action` — the canonical core `Action` JSON for a wire action.
+///
+/// SDK-critical for `multi_sig`: the returned STRING's exact bytes are the
+/// `inner_action_blob` every M-of-N member signs. The node lowers the wire
+/// action via the SAME `into_action` path admission uses, so the bytes a member
+/// signs match the bytes the `multi_sig` handler verifies and executes.
+export interface EncodeAction {
+  /// The canonical externally-tagged core `Action` JSON string (the blob).
+  action_json: string;
+}
