@@ -284,8 +284,10 @@ export interface BlockInfo {
 export interface AgentEntry {
   /// Approved agent wallet address (0x).
   agent: string;
-  /// Agent approval expiry (consensus ms).
-  expires_at_ms: number;
+  /// Optional agent label the node emits (absent when unnamed).
+  name?: string;
+  /// Agent approval expiry (consensus ms); `null` for a never-expiring approval.
+  expires_at_ms: number | null;
 }
 
 /// `agents` — approved agent / API wallets for an account, keyed by `address`.
@@ -302,6 +304,8 @@ export interface SubAccountEntry {
   index: number;
   /// Sub-account address (0x).
   address: string;
+  /// Sub-account equity, whole-USDC decimal string (`"0"` when uncommitted).
+  equity: string;
 }
 
 /// `sub_accounts` — sub-accounts of an account, keyed by `address`.

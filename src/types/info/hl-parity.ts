@@ -127,6 +127,12 @@ export interface OrderTrigger {
   /// `true` on a parked (off-book) TP/SL / stop row. Absent on the trigger
   /// block of a resting book order.
   is_parked?: boolean;
+  /// TP/SL-LIMIT read-side: `true` = MARKET trigger, `false` = LIMIT. The node
+  /// emits it (with `limit_px`) on parked rows only; absent on a resting trigger.
+  is_market?: boolean;
+  /// The parked TP/SL-LIMIT limit price (decimal string); present with
+  /// `is_market: false` on parked rows.
+  limit_px?: string;
 }
 
 /// One order inside `FrontendOpenOrders` — `open_orders` plus frontend detail.
