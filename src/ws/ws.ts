@@ -21,7 +21,13 @@
 // SDK dependency-free for both runtimes.
 
 import type { Funding } from '../types/info/core.js';
-import type { L2BookParams, TradeSide } from '../types/info/reads.js';
+import type {
+  L2BookParams,
+  OpenOrder,
+  OrderTif,
+  OrderTrigger,
+  TradeSide,
+} from '../types/info/reads.js';
 import {
   buildNativeCancelAction,
   buildNativeOrderAction,
@@ -40,8 +46,11 @@ import type {
 } from '../types/index.js';
 
 /// Channel names exactly as the gateway's native `/ws` surface accepts them
-/// (snake_case MTF-native) — the 21 channels the gateway serves natively.
-/// `web_data2` was REMOVED: compose `account_state` + `spot_state` instead.
+/// (snake_case MTF-native) — the 22 channels the gateway serves natively.
+///
+/// `web_data2` was REMOVED. So was `spot_state`: a subscribe to it now answers
+/// with the error envelope. Compose `account_state` + `web_data` instead. The
+/// REST `spot_clearinghouse_state` read still works.
 export type WsChannel =
   // per-market (require `coin` — the market SYMBOL, e.g. "BTC")
   | 'l2_book'
@@ -66,12 +75,13 @@ export type WsChannel =
   | 'user_twap_slice_fills'
   | 'user_twap_history'
   | 'account_state'
-  | 'spot_state'
+  | 'web_data'
+  | 'spot_margin_state'
   // per-account + market (`active_asset_data` needs `user` + `coin`)
   | 'active_asset_data';
 
 /// All known channels — handy for callers that want to subscribe broadly. The
-/// exact 21 native gateway channels.
+/// exact 22 native gateway channels.
 export const WS_CHANNELS: readonly WsChannel[] = [
   'l2_book',
   'bbo',
@@ -92,7 +102,8 @@ export const WS_CHANNELS: readonly WsChannel[] = [
   'user_twap_slice_fills',
   'user_twap_history',
   'account_state',
-  'spot_state',
+  'web_data',
+  'spot_margin_state',
   'active_asset_data',
 ] as const;
 
@@ -106,8 +117,8 @@ export const WS_CHANNELS: readonly WsChannel[] = [
 ///   - `user`     — per-account channels (`fills`, `user_events`,
 ///                  `order_updates`, `open_orders`, `notifications`,
 ///                  `ledger_updates`, `user_fundings`, `user_twap_slice_fills`,
-///                  `user_twap_history`, `account_state`, `spot_state`,
-///                  `active_asset_data`); the 0x address.
+///                  `user_twap_history`, `account_state`, `web_data`,
+///                  `spot_margin_state`, `active_asset_data`); the 0x address.
 ///   - `interval` — `candles` only (`1m`/`5m`/`15m`/`1h`/`4h`/`1d`)
 /// Global channels (`all_mids`, `markets`, `explorer_block`, `explorer_txs`)
 /// take none.
@@ -207,15 +218,19 @@ export interface WsFill {
   hash: string;
 }
 
-/// The `order` object inside a `WsOrderUpdate`. Fields the event kind does
-/// not carry are `null`, so one shape decodes every lifecycle record.
+/// The `order` object inside a `WsOrderUpdate` — the SAME canonical row the
+/// REST `open_orders` read and the WS `open_orders` snapshot render.
+///
+/// Every field except `coin` is nullable here. A cancel or reject record
+/// carries the coin and little else, so one shape decodes every lifecycle
+/// record.
 export interface WsOrderUpdateOrder {
   /// Market symbol (e.g. `"BTC"`).
   coin: string;
-  /// Side token (`"B"` / `"A"`), or `null` when unknown.
+  /// Side token, or `null` when unknown.
   side: TradeSide | null;
-  /// Limit price, whole-USDC decimal string, or `null`.
-  limit_px: string | null;
+  /// Order price, whole-USDC decimal string, or `null`.
+  px: string | null;
   /// REMAINING size after the commit (whole units), or `null`. On a `filled`
   /// record this is `orig_sz − filled_sz`; the filled amount itself rides the
   /// top-level `filled_sz`.
@@ -226,14 +241,23 @@ export interface WsOrderUpdateOrder {
   oid: number | null;
   /// Client order id (`0x`-hex), or `null`.
   cloid: string | null;
-  /// Time-in-force label (e.g. `"GTC"`), or `null`.
-  tif: string | null;
+  /// Time-in-force token, or `null`.
+  tif: OrderTif | null;
   /// Reduce-only flag, or `null`.
   reduce_only: boolean | null;
+  /// Trigger detail, or `null`. A live delta never carries one.
+  trigger: OrderTrigger | null;
+  /// Insertion timestamp (consensus ms), or `null`. A live delta carries
+  /// `null` here — read the event time from the record's `time` instead.
+  inserted_at: number | null;
 }
 
+/// One `open_orders` channel record — the canonical order row. The channel
+/// data is a BARE ARRAY of these rows, and every frame is a FULL snapshot.
+export type WsOpenOrder = OpenOrder;
+
 /// One `order_updates` channel record — per-account order lifecycle. Each
-/// push is an array of records; the initial snapshot is `[]`.
+/// push is an array of records.
 export interface WsOrderUpdate {
   /// The order's fixed-shape body.
   order: WsOrderUpdateOrder;
@@ -242,13 +266,15 @@ export interface WsOrderUpdate {
   /// leg reports per-match `filled_sz` with `status` still `open` while size
   /// rests); `rejected` carries `reason` + null `oid`.
   status: 'open' | 'filled' | 'canceled' | 'rejected' | 'cancel_rejected';
-  /// Filled size (whole units decimal string), or `null`.
+  /// Filled size (whole units decimal string), or `null`. On a MAKER record
+  /// this is THIS match's size, not the cumulative filled amount.
   filled_sz: string | null;
   /// Average fill price (whole-USDC decimal string), or `null`.
   avg_px: string | null;
   /// Rejection reason, or `null`.
   reason: string | null;
-  /// Record timestamp (consensus ms).
+  /// Record timestamp (consensus ms). On the on-subscribe snapshot the node
+  /// copies it from the row's `inserted_at`, not the current block time.
   time: number;
 }
 
@@ -315,6 +341,10 @@ export interface ExplorerTx {
 export interface WsFrame {
   channel: string;
   data: unknown;
+  /// `true` marks an on-subscribe FULL snapshot; `false` (or absent) marks a
+  /// post-subscribe delta. Absent reads as a delta, so an older node that does
+  /// not send the flag never makes a delta look like a snapshot.
+  is_snapshot?: boolean;
 }
 
 /// Handler invoked for every inbound channel frame.
@@ -578,14 +608,22 @@ export class WsClient {
   }
 
   /// Subscribe to the per-user live PERP account-state stream (0x address).
-  /// With `spot_state`, this replaces the removed `web_data2` composite.
+  /// With `web_data`, this replaces the removed `web_data2` composite.
   async subscribeAccountState(user: string): Promise<void> {
     return this.subscribe({ type: 'account_state', user });
   }
 
-  /// Subscribe to the per-user live SPOT clearinghouse-state stream (0x address).
-  async subscribeSpotState(user: string): Promise<void> {
-    return this.subscribe({ type: 'spot_state', user });
+  /// Subscribe to the per-user consolidated account snapshot (`web_data`, 0x
+  /// address): vault, staking, sub-accounts, multisig, and agents. Each frame
+  /// is the same body the REST `web_data` read returns.
+  async subscribeWebData(user: string): Promise<void> {
+    return this.subscribe({ type: 'web_data', user });
+  }
+
+  /// Subscribe to the per-user spot-margin position stream (0x address). Each
+  /// frame is the same body the REST `spot_margin_state` read returns.
+  async subscribeSpotMarginState(user: string): Promise<void> {
+    return this.subscribe({ type: 'spot_margin_state', user });
   }
 
   /// Subscribe to per-(user, market) leverage / margin-mode context.
@@ -908,6 +946,9 @@ export class WsClient {
       const parsed = JSON.parse(raw) as Partial<WsFrame>;
       if (typeof parsed.channel !== 'string') return; // ignore malformed
       frame = { channel: parsed.channel, data: parsed.data };
+      if (typeof parsed.is_snapshot === 'boolean') {
+        frame.is_snapshot = parsed.is_snapshot;
+      }
     } catch {
       return; // ignore non-JSON frames
     }

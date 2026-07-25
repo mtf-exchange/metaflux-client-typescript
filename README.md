@@ -51,7 +51,8 @@ console.log(book.bids.length, trades.trades.length, funding.length, bars.candles
 const acct = await client.info.accountState(
   '0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025',
 );
-console.log(acct.account_value, acct.positions);
+// Positions are grouped by perp dex; the core dex key is the empty string.
+console.log(acct.account_value, acct.clearinghouse_state['']?.positions);
 
 // ---- Signed order — POST /exchange (MTF-native signed action) ----
 const ack = await client.submitOrderNative({
@@ -239,13 +240,21 @@ out-of-band signing.
 
 ### WebSocket streams
 
-The gateway serves 19 native snake_case channels: `l2_book`, `bbo`, `trades`,
-`active_asset_ctx`, `all_mids`, `explorer_block`, `explorer_txs`, `candles`,
-`fills`, `user_events`, `order_updates`, `notifications`, `ledger_updates`,
-`user_fundings`, `user_twap_slice_fills`, `user_twap_history`,
-`account_state`, `spot_state`, and `active_asset_data`. `web_data2` was
-removed — compose `account_state` + `spot_state` instead. Per-market channels
-take `coin` (the market symbol); per-account channels take `user` (0x address).
+The gateway serves 22 native snake_case channels: `l2_book`, `bbo`, `trades`,
+`active_asset_ctx`, `all_mids`, `markets`, `explorer_block`, `explorer_txs`,
+`candles`, `fills`, `user_events`, `order_updates`, `open_orders`,
+`notifications`, `ledger_updates`, `user_fundings`, `user_twap_slice_fills`,
+`user_twap_history`, `account_state`, `web_data`, `spot_margin_state`, and
+`active_asset_data`. Per-market channels take `coin` (the market symbol);
+per-account channels take `user` (0x address).
+
+`web_data2` and `spot_state` were both removed. Compose `account_state` +
+`web_data` instead. The REST `spot_clearinghouse_state` read still works, but
+note that `account_state.balances` skips an all-zero token row, which
+`spot_state` used to emit.
+
+Each frame carries an `is_snapshot` flag: `true` marks an on-subscribe full
+snapshot, `false` or absent marks a delta.
 
 ```ts
 import { WsClient, type WsTrade } from '@metaflux-dex/client';
@@ -266,10 +275,12 @@ await ws.subscribeExplorerTxs(); // global tx tape; rows carry the action hash
 ```
 
 Typed record shapes are exported for the data channels (`WsTrade`, `WsFill`,
-`WsOrderUpdate`, `WsUserFunding`, `ExplorerBlock`, `ExplorerTx`,
+`WsOpenOrder`, `WsOrderUpdate`, `WsUserFunding`, `ExplorerBlock`, `ExplorerTx`,
 `ActiveAssetCtx`, `AllMids`). On `order_updates`, a `filled` record carries
 the cumulative `filled_sz` + `avg_px` while `order.orig_sz` is the original
-size and `order.sz` the post-fill remainder. `user_fundings` records are
+size and `order.sz` the post-fill remainder; on a MAKER record `filled_sz` is
+THIS match's size, not the cumulative amount. The inner `order` is the SAME
+canonical row the REST `open_orders` read returns. `user_fundings` records are
 `{coin, payment, szi, fundingRate, time}`.
 
 ### Power-user exports

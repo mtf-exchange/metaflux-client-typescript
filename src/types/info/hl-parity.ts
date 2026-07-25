@@ -4,7 +4,7 @@
 // names are the exact snake_case keys the node emits inside `{type, data}.data`.
 // Money magnitudes that can exceed 2^53 are typed `string`.
 
-import type { MarketInfo, TokenEvmContract } from './core.js';
+import type { MarketInfo, TokenBalance, TokenEvmContract } from './core.js';
 
 /// One spot pair inside `SpotMeta` (also `markets.spot.pairs`).
 export interface SpotPair {
@@ -78,26 +78,25 @@ export interface Markets {
   spot: SpotMeta;
 }
 
-/// One spot balance inside `SpotClearinghouseState` (and the WS `spot_state`
-/// stream).
-export interface SpotBalance {
-  /// Spot asset id.
-  asset: number;
-  /// Token symbol, else `asset:<id>`.
-  name: string;
-  /// Total balance (spendable + hold), whole-token decimal string.
-  total: string;
-  /// Amount reserved by resting spot orders, whole-token decimal string.
-  hold: string;
-}
+/// One spot balance inside `SpotClearinghouseState`. The same `{asset, name,
+/// total, hold}` row `account_state.balances` carries.
+export type SpotBalance = TokenBalance;
 
 /// `spot_clearinghouse_state` — per-account spot token balances. With
 /// `account_state` this replaces the removed `web_data2` composite.
+///
+/// The WS `spot_state` channel that used to mirror this read is GONE. Read the
+/// balances from `account_state` instead; note that `account_state.balances`
+/// skips an all-zero token row, which `spot_state` used to emit.
 export interface SpotClearinghouseState {
   /// Echo of the requested 0x address.
   address: string;
   /// Spot balances.
   balances: SpotBalance[];
+  /// Committed block height of the snapshot.
+  height: number;
+  /// Consensus timestamp of that block (unix ms).
+  time: number;
 }
 
 /// `exchange_status` — global trading status.
@@ -105,7 +104,7 @@ export interface ExchangeStatus {
   /// Spot trading globally disabled.
   spot_disabled: boolean;
   /// Post-only window end (consensus ms); `0` = none.
-  post_only_until_time_ms: number;
+  post_only_until_time: number;
   /// Post-only window end (height); `0` = none.
   post_only_until_height: number;
   /// Scheduled upgrade-halt height, or `null` if none.
@@ -116,55 +115,6 @@ export interface ExchangeStatus {
   frozen: boolean;
   /// Whether startup replay has completed (reads are live).
   replay_complete: boolean;
-}
-
-/// A trigger detail attached to a `FrontendOpenOrder`.
-export interface OrderTrigger {
-  /// Trigger price, canonical decimal string (whole-USDC, tick-snapped).
-  trigger_px: string;
-  /// Whether the trigger fires above (`true`) or below the price.
-  trigger_above: boolean;
-  /// `true` on a parked (off-book) TP/SL / stop row. Absent on the trigger
-  /// block of a resting book order.
-  is_parked?: boolean;
-  /// TP/SL-LIMIT read-side: `true` = MARKET trigger, `false` = LIMIT. The node
-  /// emits it (with `limit_px`) on parked rows only; absent on a resting trigger.
-  is_market?: boolean;
-  /// The parked TP/SL-LIMIT limit price (decimal string); present with
-  /// `is_market: false` on parked rows.
-  limit_px?: string;
-}
-
-/// One order inside `FrontendOpenOrders` — `open_orders` plus frontend detail.
-/// Parked TP/SL / stop triggers are surfaced too, with `tif: "trigger"` and a
-/// populated `trigger` block.
-export interface FrontendOpenOrder {
-  /// On-chain order id.
-  oid: number;
-  /// Market symbol (e.g. `"BTC"`).
-  coin: string;
-  /// Order side.
-  side: 'bid' | 'ask';
-  /// Resting price, canonical decimal string (whole-USDC, tick-snapped).
-  px: string;
-  /// Remaining size, canonical decimal string (whole units).
-  size: string;
-  /// Time-in-force; `"trigger"` for an off-book parked stop.
-  tif: 'alo' | 'ioc' | 'gtc' | 'trigger';
-  /// Client order id (0x), or `null` if none.
-  cloid: string | null;
-  /// Trigger detail if registered for the oid, else `null`.
-  trigger: OrderTrigger | null;
-  /// Insertion timestamp (consensus ms).
-  inserted_at_ms: number;
-}
-
-/// `frontend_open_orders` — resting orders with tif / cloid / trigger detail.
-export interface FrontendOpenOrders {
-  /// Echo of the requested 0x address.
-  address: string;
-  /// Orders.
-  orders: FrontendOpenOrder[];
 }
 
 /// One account flagged for liquidation.
@@ -233,7 +183,7 @@ export interface VaultSummary {
   name: string;
   /// Vault leader address (0x).
   leader: string;
-  /// NAV proxy (high-water mark, USD cents), decimal string.
+  /// NAV proxy (high-water mark), WHOLE-USDC decimal string.
   tvl: string;
   /// Number of share holders.
   follower_count: number;
@@ -296,9 +246,9 @@ export interface SpotDeployState {
   /// Current high bidder (0x), or `null`.
   current_winner: string | null;
   /// Auction close timestamp (consensus ms).
-  auction_end_ms: number;
+  auction_end: number;
   /// Auction start timestamp (consensus ms).
-  started_at_ms: number;
+  started_at: number;
   /// Cumulative burned winning-bid notional, decimal string.
   total_burned: string;
   /// Total escrowed deposit (base units), decimal string.
@@ -364,7 +314,7 @@ export interface ValidatorL1Vote {
   /// Casting validator address (0x).
   validator: string;
   /// Submission timestamp (consensus ms).
-  submitted_at_ms: number;
+  submitted_at: number;
 }
 
 /// `validator_l1_votes` — current validator L1 votes.
@@ -410,9 +360,9 @@ export interface ValidatorSummary {
   /// Currently jailed.
   is_jailed: boolean;
   /// Jail start ts (consensus ms), or `null` if not jailed.
-  jailed_at_ms: number | null;
+  jailed_at: number | null;
   /// Earliest unjail ts (consensus ms), or `null` if not jailed.
-  unjail_at_ms: number | null;
+  unjail_at: number | null;
   /// First epoch the validator was active.
   first_active_epoch: number;
 }

@@ -157,7 +157,7 @@ describe('WsClient wire protocol', () => {
     ws.close();
   });
 
-  it('exposes the exact 21 native gateway channel names (web_data2 GONE)', () => {
+  it('exposes the exact 22 native gateway channel names (spot_state GONE)', () => {
     expect([...WS_CHANNELS]).toEqual([
       'l2_book',
       'bbo',
@@ -178,13 +178,54 @@ describe('WsClient wire protocol', () => {
       'user_twap_slice_fills',
       'user_twap_history',
       'account_state',
-      'spot_state',
+      'web_data',
+      'spot_margin_state',
       'active_asset_data',
     ]);
-    expect(WS_CHANNELS).toHaveLength(21);
-    expect(WS_CHANNELS).toContain('markets');
-    expect(WS_CHANNELS).toContain('open_orders');
+    expect(WS_CHANNELS).toHaveLength(22);
+    expect(WS_CHANNELS).toContain('web_data');
+    expect(WS_CHANNELS).toContain('spot_margin_state');
+    // Both removed server-side: a subscribe answers with the error envelope.
     expect(WS_CHANNELS).not.toContain('web_data2');
+    expect(WS_CHANNELS).not.toContain('spot_state');
+  });
+
+  it('subscribes to the two new per-account channels by `user`', async () => {
+    const ws = new WsClient('wss://x/ws', { autoReconnect: false });
+    const p = ws.connect();
+    const sock = MockSocket.instances[0]!;
+    sock.open();
+    await p;
+
+    const USER = '0x00000000000000000000000000000000000000aa';
+    await ws.subscribeWebData(USER);
+    expect(sock.sent).toContain(
+      `{"method":"subscribe","subscription":{"type":"web_data","user":"${USER}"}}`,
+    );
+    await ws.subscribeSpotMarginState(USER);
+    expect(sock.sent).toContain(
+      `{"method":"subscribe","subscription":{"type":"spot_margin_state","user":"${USER}"}}`,
+    );
+    ws.close();
+  });
+
+  it('surfaces the is_snapshot envelope flag; absent reads as a delta', async () => {
+    const ws = new WsClient('wss://x/ws', { autoReconnect: false });
+    const p = ws.connect();
+    const sock = MockSocket.instances[0]!;
+    sock.open();
+    await p;
+
+    const got: WsFrame[] = [];
+    ws.onMessage((f) => got.push(f));
+    sock.inbound('{"channel":"open_orders","data":[],"is_snapshot":true}');
+    sock.inbound('{"channel":"open_orders","data":[],"is_snapshot":false}');
+    sock.inbound('{"channel":"open_orders","data":[]}');
+    expect(got[0]?.is_snapshot).toBe(true);
+    expect(got[1]?.is_snapshot).toBe(false);
+    // An absent flag stays absent, so a delta is never read as a snapshot.
+    expect(got[2]?.is_snapshot).toBeUndefined();
+    ws.close();
   });
 
   it('subscribe helpers send the coin market SYMBOL', async () => {

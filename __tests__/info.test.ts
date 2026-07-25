@@ -79,12 +79,51 @@ describe('InfoApi request shapes', () => {
 
   it('accountState is keyed by 0x address (NOT a numeric account_id)', async () => {
     const api = new InfoApi(BASE);
-    nextData = { address: ADDR, account_value: '0', positions: [] };
+    nextData = {
+      address: ADDR,
+      account_value: '0',
+      clearinghouse_state: { '': { positions: [] } },
+      balances: [],
+    };
     await api.accountState(ADDR);
     expect(JSON.parse(captured!.body)).toEqual({
       type: 'account_state',
       address: ADDR,
     });
+  });
+
+  it('webData is keyed by 0x address and unwraps the consolidated facets', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      address: ADDR,
+      vault: { equities: [], vaults: [] },
+      staking: {
+        state: { total_staked: '0', delegations: [], pending_unstakes: [] },
+        summary: {
+          total_delegated: '0',
+          pending_withdrawal: '0',
+          claimable_rewards: '0',
+          n_delegations: 0,
+        },
+      },
+      sub_accounts: [],
+      multisig: { is_multi_sig: false, threshold: 0, signers: [] },
+      agents: [{ agent: ADDR, name: 'bot', expires_at: 1_784_800_000_000 }],
+      height: 8_416_000,
+      time: 1_784_820_001_000,
+    };
+    const res = await api.webData(ADDR);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'web_data',
+      address: ADDR,
+    });
+    // Each nested facet drops its own `address`; the snapshot carries it once.
+    expect(res.address).toBe(ADDR);
+    expect(res.staking.summary.n_delegations).toBe(0);
+    // `height` / `time` are FLAT at the top level, not nested under `as_of`.
+    expect(res.height).toBe(8_416_000);
+    expect(res.time).toBe(1_784_820_001_000);
+    expect(res.agents[0]?.expires_at).toBe(1_784_800_000_000);
   });
 
   it('marketInfo is keyed by coin SYMBOL (NOT asset_id)', async () => {
@@ -319,13 +358,14 @@ describe('InfoApi request shapes', () => {
     const api = new InfoApi(BASE);
     nextData = {
       coin: 'BTC',
-      samples: [{ ts_ms: 1, premium: '0.0057', funding_rate: '0.0057' }],
+      samples: [{ ts: 1, premium: '0.0057', funding_rate: '0.0057' }],
     };
     const res = await api.fundingHistory('BTC');
     expect(JSON.parse(captured!.body)).toEqual({
       type: 'funding_history',
       coin: 'BTC',
     });
+    expect(res.samples[0]?.ts).toBe(1);
     expect(res.samples[0]?.premium).toBe('0.0057');
     expect(res.samples[0]?.funding_rate).toBe('0.0057');
   });
@@ -333,14 +373,14 @@ describe('InfoApi request shapes', () => {
   it('predictedFundings unwraps the per-market array', async () => {
     const api = new InfoApi(BASE);
     nextData = [
-      { coin: 'BTC', predicted_rate: '0.0037', next_funding_time: 1_783_011_600_000 },
+      { coin: 'BTC', predicted_rate: '0.0037', next_funding_ts: 1_783_011_600_000 },
     ];
     const res = await api.predictedFundings();
     expect(JSON.parse(captured!.body)).toEqual({ type: 'predicted_fundings' });
     expect(res[0]?.coin).toBe('BTC');
     // Clamped, actually-charged rate as a decimal string; boundary is ms.
     expect(typeof res[0]?.predicted_rate).toBe('string');
-    expect(typeof res[0]?.next_funding_time).toBe('number');
+    expect(res[0]?.next_funding_ts).toBe(1_783_011_600_000);
   });
 
   it('candleSnapshot is keyed by coin + interval (the single candle query)', async () => {
@@ -648,7 +688,7 @@ describe('InfoApi deployed-gateway read shapes', () => {
     expect(f2.taker_bps).toBeUndefined();
   });
 
-  it('openOrders decodes coin-keyed rows (lowercase side, cloid nullable)', async () => {
+  it('openOrders decodes the canonical row (side B/A, sz, inserted_at)', async () => {
     const api = new InfoApi(BASE);
     nextData = {
       address: ADDR,
@@ -656,20 +696,80 @@ describe('InfoApi deployed-gateway read shapes', () => {
         {
           oid: 12345,
           coin: 'BTC',
-          side: 'bid',
+          side: 'B',
           px: '25000',
-          size: '60',
+          sz: '60',
+          orig_sz: null,
           cloid: null,
-          inserted_at_ms: 1_700_000_000_000,
+          tif: 'gtc',
+          reduce_only: false,
+          trigger: null,
+          inserted_at: 1_700_000_000_000,
         },
       ],
     };
     const o = await api.openOrders(ADDR);
-    expect(o.orders[0]?.coin).toBe('BTC');
-    expect(o.orders[0]?.side).toBe('bid');
-    expect(o.orders[0]?.px).toBe('25000');
-    expect(o.orders[0]?.oid).toBe(12345);
-    expect(o.orders[0]?.cloid).toBeNull();
+    const row = o.orders[0]!;
+    expect(row.coin).toBe('BTC');
+    expect(row.side).toBe('B');
+    expect(row.px).toBe('25000');
+    expect(row.sz).toBe('60');
+    expect(row.oid).toBe(12345);
+    expect(row.cloid).toBeNull();
+    expect(row.tif).toBe('gtc');
+    expect(row.reduce_only).toBe(false);
+    expect(row.trigger).toBeNull();
+    expect(row.inserted_at).toBe(1_700_000_000_000);
+  });
+
+  it('openOrders carries a parked trigger row (tif "trigger" + trigger block)', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      address: ADDR,
+      orders: [
+        {
+          oid: 777,
+          coin: 'MTF/USDC',
+          side: 'A',
+          px: null,
+          sz: '5',
+          orig_sz: null,
+          cloid: null,
+          tif: 'trigger',
+          reduce_only: true,
+          trigger: {
+            trigger_px: '0.11',
+            trigger_above: false,
+            is_parked: true,
+            is_market: false,
+            limit_px: '0.10',
+          },
+          inserted_at: 1_700_000_000_000,
+        },
+      ],
+    };
+    const o = await api.openOrders(ADDR);
+    const row = o.orders[0]!;
+    // A parked row rides the SAME kind the removed `frontend_open_orders`
+    // used to serve, so `tif` must accept the non-TIF token "trigger".
+    expect(row.tif).toBe('trigger');
+    expect(row.coin).toBe('MTF/USDC');
+    expect(row.trigger?.is_parked).toBe(true);
+    expect(row.trigger?.is_market).toBe(false);
+    expect(row.trigger?.limit_px).toBe('0.10');
+  });
+
+  it('l2Book levels carry `sz`, not `size`', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      coin: 'BTC',
+      bids: [{ px: '25000', sz: '1.5', n_orders: 2 }],
+      asks: [{ px: '25001', sz: '0.75', n_orders: 1 }],
+    };
+    const b = await api.l2Book('BTC');
+    expect(b.bids[0]?.sz).toBe('1.5');
+    expect(b.bids[0]?.n_orders).toBe(2);
+    expect(b.asks[0]?.px).toBe('25001');
   });
 
   it('userFills decodes the committed fill-ring record shape (coin SYMBOL)', async () => {
@@ -766,26 +866,55 @@ describe('InfoApi P2 wave-1 reads', () => {
     }
   });
 
-  it('orderStatus decodes the resting branch (lowercase side, nullable cloid)', async () => {
+  it('orderStatus decodes the resting branch (side B/A, sz, inserted_at)', async () => {
     const api = new InfoApi(BASE);
     nextData = {
       status: 'resting',
       order: {
         oid: 42,
         coin: 'MTF',
-        side: 'bid',
+        side: 'B',
         px: '0.12',
-        size: '112.22',
-        inserted_at_ms: 1_784_820_001_000,
+        sz: '112.22',
+        inserted_at: 1_784_820_001_000,
         cloid: null,
       },
     };
     const res = await api.orderStatus({ oid: 42 });
     expect(res.status).toBe('resting');
     if (res.status === 'resting') {
-      expect(res.order.side).toBe('bid');
+      expect(res.order.side).toBe('B');
+      expect(res.order.sz).toBe('112.22');
+      expect(res.order.inserted_at).toBe(1_784_820_001_000);
       expect(res.order.cloid).toBeNull();
       expect(res.order.oid).toBe(42);
+    }
+  });
+
+  it('orderStatus decodes the triggered branch (sz, registered_at)', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      status: 'triggered',
+      trigger: {
+        oid: 43,
+        coin: 'MTF',
+        side: 'A',
+        trigger_px: '0.20',
+        trigger_above: true,
+        sz: '10',
+        registered_at: 1_784_820_002_000,
+        fired: false,
+        is_market: true,
+        limit_px: null,
+      },
+    };
+    const res = await api.orderStatus({ oid: 43 });
+    expect(res.status).toBe('triggered');
+    if (res.status === 'triggered') {
+      expect(res.trigger.side).toBe('A');
+      expect(res.trigger.sz).toBe('10');
+      expect(res.trigger.registered_at).toBe(1_784_820_002_000);
+      expect(res.trigger.limit_px).toBeNull();
     }
   });
 
@@ -916,7 +1045,7 @@ describe('InfoApi P2 wave-1 reads', () => {
       user: ADDR,
       accounts: [
         {
-          pair: 200,
+          pair: 'BTC/USDC',
           collateral: '1000',
           borrowed: '500',
           borrow_index_snapshot: '1',
@@ -934,9 +1063,12 @@ describe('InfoApi P2 wave-1 reads', () => {
     });
     expect(res.user).toBe(ADDR);
     const a = res.accounts[0]!;
-    expect(a.pair).toBe(200);
+    // The pair is symbolized — a raw numeric pair id is no longer emitted.
+    expect(a.pair).toBe('BTC/USDC');
     expect(a.current_debt).toBe('500');
+    // Both bps params stay JSON STRINGS of integers.
     expect(a.params?.init_bps).toBe('2000');
+    expect(a.params?.maint_bps).toBe('1250');
   });
 
   it('earnState sends `user` only when provided; user_* fields ride with it', async () => {
@@ -948,6 +1080,7 @@ describe('InfoApi P2 wave-1 reads', () => {
       pools: [
         {
           asset: 0,
+          name: 'USDC',
           total_supplied: '10000',
           total_borrowed: '4000',
           idle: '6000',
@@ -969,6 +1102,8 @@ describe('InfoApi P2 wave-1 reads', () => {
     });
     const p = res.pools[0]!;
     expect(p.asset).toBe(0);
+    // The token row is `{asset, name}` — a client never resolves a bare id.
+    expect(p.name).toBe('USDC');
     expect(p.idle).toBe('6000');
     expect(p.user_shares).toBe('250');
     expect(p.user_value).toBe('250');
@@ -980,7 +1115,7 @@ describe('InfoApi P2 wave-1 reads', () => {
     nextData = {
       address: ADDR,
       enrolled: true,
-      enrolled_at_ms: 1_784_800_000_000,
+      enrolled_at: 1_784_800_000_000,
       last_computed_block: 8_416_000,
       pm_maint_margin_cents: '125000',
       net_value_cents: '500000',
@@ -992,13 +1127,16 @@ describe('InfoApi P2 wave-1 reads', () => {
       address: ADDR,
     });
     expect(res.enrolled).toBe(true);
+    expect(res.enrolled_at).toBe(1_784_800_000_000);
+    // The standalone read KEEPS the `*_cents` names; only the folded
+    // `account_state` twins are whole-USDC.
     expect(res.pm_maint_margin_cents).toBe('125000');
     expect(typeof res.net_value_cents).toBe('string');
     // Unknown / non-enrolled → 200 zeroed with enrolled:false.
     nextData = {
       address: ADDR,
       enrolled: false,
-      enrolled_at_ms: 0,
+      enrolled_at: 0,
       last_computed_block: 0,
       pm_maint_margin_cents: '0',
       net_value_cents: '0',
@@ -1006,7 +1144,7 @@ describe('InfoApi P2 wave-1 reads', () => {
     };
     const zero = await api.pmSummary(ADDR);
     expect(zero.enrolled).toBe(false);
-    expect(zero.enrolled_at_ms).toBe(0);
+    expect(zero.enrolled_at).toBe(0);
   });
 
   it('encodeAction posts the wire action + returns the canonical action_json', async () => {
@@ -1047,5 +1185,267 @@ describe('InfoApi envelope validation', () => {
           JSON.stringify({ type: 'something_else', data: {} }),
       }) as Response) as typeof fetch;
     await expect(api.nodeInfo()).rejects.toThrow(/type mismatch/);
+  });
+});
+
+// The node renamed the client-facing read surface. These specs pin the NEW
+// keys, so a regression to the old ones fails here rather than at runtime.
+describe('InfoApi realigned read shapes', () => {
+  it('accountState groups positions by dex and returns balances as an array', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      address: ADDR,
+      account_value: '1000',
+      free_collateral: '400',
+      init_margin: '600',
+      health: '850',
+      tier: 'Safe',
+      abstraction: 'unified',
+      clearinghouse_state: {
+        '': {
+          positions: [
+            {
+              coin: 'BTC',
+              size: '-0.5',
+              entry: '25000',
+              upnl: '12.5',
+              isolated: false,
+              lev: 10,
+              liq: '30000',
+              roe: '0.05',
+              funding: '-1.25',
+              margin: '1250',
+              maint_margin: '150',
+              notional: '12500',
+            },
+          ],
+        },
+        '0x00000000000000000000000000000000000000cc': { positions: [] },
+      },
+      balances: [
+        { asset: 0, name: 'USDC', total: '1000', hold: '25' },
+        { asset: 7, name: 'BTC', total: '0.5', hold: '0' },
+      ],
+      pm_maint_margin: '0',
+      pm_net_value: '0',
+      pm_concentration_penalty: '0',
+      position_mode: 'one_way',
+      height: 8_416_000,
+      time: 1_784_820_001_000,
+    };
+    const res = await api.accountState(ADDR);
+    // The core dex key is the empty string and is always present.
+    const core = res.clearinghouse_state['']!;
+    const pos = core.positions[0]!;
+    // A POSITION size key is `size` and is SIGNED. Order / book / trade rows
+    // use `sz` instead — the two are deliberately different.
+    expect(pos.size).toBe('-0.5');
+    expect(pos.maint_margin).toBe('150');
+    // A one-way account omits the hedge leg label.
+    expect(pos.side).toBeUndefined();
+    // A MIP-3 deployer dex keys by the deployer address.
+    expect(
+      res.clearinghouse_state['0x00000000000000000000000000000000000000cc'],
+    ).toBeDefined();
+    // Balances are an ARRAY of token rows, USDC first.
+    expect(res.balances[0]?.name).toBe('USDC');
+    expect(res.balances[1]?.asset).toBe(7);
+    // The folded PM figures are whole-USDC and always present.
+    expect(res.pm_maint_margin).toBe('0');
+    expect(res.pm_net_value).toBe('0');
+    expect(res.pm_concentration_penalty).toBe('0');
+    expect(res.position_mode).toBe('one_way');
+    // REST bodies carry a flat height/time stamp.
+    expect(res.height).toBe(8_416_000);
+    expect(res.time).toBe(1_784_820_001_000);
+  });
+
+  it('accountState keeps the hedge leg label distinct from the side token', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      address: ADDR,
+      clearinghouse_state: {
+        '': {
+          positions: [
+            {
+              coin: 'BTC',
+              size: '0.5',
+              entry: '25000',
+              upnl: '0',
+              isolated: false,
+              lev: 5,
+              liq: '0',
+              roe: '0',
+              funding: '0',
+              margin: '0',
+              maint_margin: '0',
+              notional: '12500',
+              side: 'long',
+            },
+          ],
+        },
+      },
+      balances: [],
+    };
+    const res = await api.accountState(ADDR);
+    // A hedge leg label is "long" / "short" — NOT the "B" / "A" side token.
+    expect(res.clearinghouse_state['']?.positions[0]?.side).toBe('long');
+  });
+
+  it('vaultState renders share_price on the human plane and keeps lock_period_ms', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      vault: VAULT,
+      name: 'alpha',
+      tvl: '100000',
+      share_price: '1.045',
+      depositor_count: 12,
+      high_water_mark: '100000',
+      performance_fee_bps: 1000,
+      lock_period_ms: 86_400_000,
+      strategy: 'User',
+    };
+    const res = await api.vaultState(VAULT);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'vault_state',
+      vault: VAULT,
+    });
+    // `share_price` is whole USDC per WHOLE share. The node already applied
+    // the share scale, so a client must NOT multiply by 1e18 again.
+    expect(res.share_price).toBe('1.045');
+    // `tvl` / `high_water_mark` are whole USDC, not cents.
+    expect(res.tvl).toBe('100000');
+    // `lock_period_ms` is a DURATION and KEEPS its `_ms` suffix.
+    expect(res.lock_period_ms).toBe(86_400_000);
+  });
+
+  it('marketInfo keeps the funding interval_ms duration and the _ts boundary', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      coin: 'BTC',
+      funding: {
+        rate_per_hr: '1',
+        cap_per_hr: '4',
+        interval_ms: 3_600_000,
+        next_payment_ts: 1_783_011_600_000,
+      },
+    };
+    const res = await api.marketInfo('BTC');
+    // A DURATION keeps `_ms`; only timestamps dropped the suffix.
+    expect(res.funding.interval_ms).toBe(3_600_000);
+    expect(res.funding.next_payment_ts).toBe(1_783_011_600_000);
+  });
+
+  it('timestamp fields dropped the _ms suffix across the read surface', async () => {
+    const api = new InfoApi(BASE);
+
+    nextData = {
+      height: 8_416_000,
+      round: 8_416_000,
+      epoch: 12,
+      timestamp: 1_784_820_001_000,
+      block_hash: '0x00',
+    };
+    expect((await api.blockInfo()).timestamp).toBe(1_784_820_001_000);
+
+    nextData = {
+      address: ADDR,
+      agents: [{ agent: ADDR, name: 'bot', expires_at: null }],
+    };
+    expect((await api.agents(ADDR)).agents[0]?.expires_at).toBeNull();
+
+    nextData = {
+      coin: 'BTC',
+      last_trade: 1_784_820_001_000,
+      trades: [],
+    };
+    expect((await api.recentTrades('BTC')).last_trade).toBe(1_784_820_001_000);
+
+    nextData = {
+      auction_round: 3,
+      current_bid: '500',
+      current_winner: null,
+      auction_end: 1_784_900_000_000,
+      started_at: 1_784_800_000_000,
+      bids: [{ bidder: ADDR, amount: '500', submitted_at: 1_784_810_000_000, tag: 'X' }],
+    };
+    const mip3 = await api.mip3ActiveBids();
+    expect(mip3.auction_end).toBe(1_784_900_000_000);
+    expect(mip3.started_at).toBe(1_784_800_000_000);
+    expect(mip3.bids[0]?.submitted_at).toBe(1_784_810_000_000);
+
+    nextData = {
+      spot_disabled: false,
+      post_only_until_time: 1_784_900_000_000,
+      post_only_until_height: 0,
+      scheduled_freeze_height: null,
+      mip3_enabled: true,
+      frozen: false,
+      replay_complete: true,
+    };
+    // `post_only_until_time` keeps `_time` and drops only `_ms`.
+    expect((await api.exchangeStatus()).post_only_until_time).toBe(
+      1_784_900_000_000,
+    );
+
+    nextData = {
+      auction_round: 1,
+      current_bid: '0',
+      current_winner: null,
+      auction_end: 1_784_900_000_000,
+      started_at: 1_784_800_000_000,
+      total_burned: '0',
+      deposit: '0',
+    };
+    const deploy = await api.spotDeployState();
+    expect(deploy.auction_end).toBe(1_784_900_000_000);
+    expect(deploy.started_at).toBe(1_784_800_000_000);
+
+    nextData = { latest_round: 9, votes: [{ round: 9, validator: ADDR, submitted_at: 5 }] };
+    expect((await api.validatorL1Votes()).votes[0]?.submitted_at).toBe(5);
+
+    nextData = {
+      epoch: 12,
+      total_stake: '1',
+      n_active: 1,
+      validators: [
+        {
+          validator: ADDR,
+          signer: ADDR,
+          validator_index: 0,
+          stake: '1',
+          self_stake: '1',
+          commission_bps: '500',
+          is_active: true,
+          is_jailed: false,
+          jailed_at: null,
+          unjail_at: null,
+          first_active_epoch: 1,
+        },
+      ],
+    };
+    const vs = await api.validatorSummaries();
+    expect(vs.validators[0]?.jailed_at).toBeNull();
+    expect(vs.validators[0]?.unjail_at).toBeNull();
+  });
+
+  it('spotClearinghouseState still serves the REST read and carries the stamp', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      address: ADDR,
+      balances: [{ asset: 0, name: 'USDC', total: '10', hold: '0' }],
+      height: 8_416_000,
+      time: 1_784_820_001_000,
+    };
+    const res = await api.spotClearinghouseState(ADDR);
+    // Only the WS `spot_state` CHANNEL was removed; this REST read stays.
+    expect(res.balances[0]?.name).toBe('USDC');
+    expect(res.height).toBe(8_416_000);
+  });
+
+  it('drops the frontend_open_orders method', () => {
+    const api = new InfoApi(BASE) as unknown as Record<string, unknown>;
+    // The kind has no dispatch arm on the node; a request 400s.
+    expect(api.frontendOpenOrders).toBeUndefined();
   });
 });

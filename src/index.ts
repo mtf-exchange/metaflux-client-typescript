@@ -155,8 +155,8 @@ export type {
   NodeInfo,
   AccountState,
   AccountPosition,
-  Balances,
-  SpotHolding,
+  DexPositions,
+  TokenBalance,
   Tier,
   MarginMode,
   Abstraction,
@@ -173,6 +173,8 @@ export type {
   FeeSchedule,
   FeeTier,
   TradeSide,
+  OrderTif,
+  OrderTrigger,
   OpenOrders,
   OpenOrder,
   L2Book,
@@ -222,9 +224,6 @@ export type {
   SpotClearinghouseState,
   SpotBalance,
   ExchangeStatus,
-  FrontendOpenOrders,
-  FrontendOpenOrder,
-  OrderTrigger,
   Liquidatable,
   LiquidatableAccount,
   ActiveAssetData,
@@ -249,6 +248,10 @@ export type {
   ValidatorSummaries,
   ValidatorSummary,
   GossipRootIps,
+  // The consolidated `web_data` account snapshot.
+  WebData,
+  WebDataStaking,
+  WebDataVault,
 } from './types/info/index.js';
 export {
   // MTF-native WebSocket client + subscription/channel types.
@@ -265,6 +268,7 @@ export {
   type ActiveAssetDataFrame,
   type WsTrade,
   type WsFill,
+  type WsOpenOrder,
   type WsOrderUpdate,
   type WsOrderUpdateOrder,
   type WsUserFunding,

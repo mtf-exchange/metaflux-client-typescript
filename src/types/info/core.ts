@@ -53,6 +53,10 @@ export type Abstraction = 'unified' | 'portfolio';
 ///
 /// All USD magnitudes are whole-USDC decimal strings. `size` is the signed
 /// REAL size (whole units, sign preserved for shorts).
+///
+/// The size key here is `size`, NOT the `sz` that order / book / trade rows
+/// carry. The two size keys are deliberately different: a position size is
+/// signed, an order size is not.
 export interface AccountPosition {
   /// Market symbol (e.g. `"BTC"`).
   coin: string;
@@ -74,46 +78,42 @@ export interface AccountPosition {
   funding: string;
   /// Margin used by the position, whole-USDC decimal string.
   margin: string;
+  /// Maintenance margin this leg requires, whole-USDC decimal string.
+  maint_margin: string;
   /// Position notional value, whole-USDC decimal string.
   notional: string;
   /// Hedge-mode leg label (`"long"` / `"short"`). Absent on a one-way account's
   /// net position (whose `size` sign carries the direction).
+  ///
+  /// This `side` is a LEG LABEL. It is not the `"B"` / `"A"` side token that
+  /// order, book, and trade rows carry.
   side?: 'long' | 'short';
 }
 
-/// One spot holding inside `Balances.spot`, keyed by token symbol.
-export interface SpotHolding {
-  /// The token's real SPOT asset id — use this for transfers (the perp
-  /// markets table is a different id space).
-  asset_id: number;
+/// The positions of one perp dex inside `AccountState.clearinghouse_state`.
+/// The object wraps `positions` so the node can add per-dex fields later.
+export interface DexPositions {
+  /// Open positions on that dex.
+  positions: AccountPosition[];
+}
+
+/// One token balance row. The shape is shared by `account_state.balances` and
+/// `spot_clearinghouse_state.balances`.
+export interface TokenBalance {
+  /// Token asset id.
+  asset: number;
+  /// Token symbol (e.g. `"USDC"`).
+  name: string;
   /// Total balance (spendable + hold), whole-token decimal string.
   total: string;
   /// Amount reserved by resting spot orders, whole-token decimal string.
   hold: string;
-  /// Whole-USDC mark value of the holding, or `null` when no spot price exists.
-  value: string | null;
-  /// `0x` EVM contract bound to the token, or `null` when it has no binding.
-  evm_contract: string | null;
-  /// Unrealized spot PnL vs recorded cost basis, whole-USDC (signed), or
-  /// `null` when no cost basis is recorded.
-  pnl: string | null;
-}
-
-/// Per-account balances inside an `AccountState`.
-export interface Balances {
-  /// USDC collateral (cross account value), whole-USDC decimal string.
-  usdc: string;
-  /// USDC's canonical EVM contract address (`0x` hex).
-  usdc_evm_contract: string;
-  /// Spot holdings keyed by token symbol.
-  spot: Record<string, SpotHolding>;
 }
 
 /// `account_state` — rich per-account snapshot keyed by `address`.
 ///
 /// Margin scalars are whole-USDC decimal strings. This read (with
-/// `spot_state` / `spot_clearinghouse_state`) replaces the removed
-/// `web_data2` composite.
+/// `spot_clearinghouse_state`) replaces the removed `web_data2` composite.
 export interface AccountState {
   /// Echo of the requested 0x address.
   address: string;
@@ -121,22 +121,39 @@ export interface AccountState {
   account_value: string;
   /// Equity minus initial margin held by open positions, decimal string.
   free_collateral: string;
-  /// Maintenance margin requirement, decimal string.
-  maint_margin: string;
   /// Initial margin requirement, decimal string.
   init_margin: string;
-  /// `account_value - maint_margin` (signed decimal string).
+  /// `account_value - maint_margin` (signed decimal string). Read the
+  /// maintenance margin itself from the `margin_summary` read.
   health: string;
   /// Liquidation tier.
   tier: Tier;
   /// Margin abstraction class (`abstraction === 'portfolio'` = PM enrolled).
   abstraction: Abstraction;
-  /// Per-asset open positions.
-  positions: AccountPosition[];
-  /// Account balances.
-  balances: Balances;
+  /// Open positions grouped by perp dex. The core dex key is the empty string
+  /// `""` and is always present; a MIP-3 deployer dex key is the deployer's
+  /// lowercase 0x address.
+  clearinghouse_state: Record<string, DexPositions>;
+  /// Token balances. The USDC row is always first; an all-zero token row is
+  /// skipped.
+  balances: TokenBalance[];
+  /// Portfolio-margin maintenance requirement, whole-USDC decimal string.
+  /// Always present — `"0"` when the account is not PM-enrolled. Gate the
+  /// meaning on `abstraction === 'portfolio'`.
+  pm_maint_margin: string;
+  /// Portfolio-margin net account value, whole-USDC decimal string. Same
+  /// presence rule as `pm_maint_margin`.
+  pm_net_value: string;
+  /// Portfolio-margin concentration penalty, whole-USDC decimal string. Same
+  /// presence rule as `pm_maint_margin`.
+  pm_concentration_penalty: string;
   /// Position mode: `"one_way"` (single net position) or `"hedge"` (two-way).
   position_mode: 'one_way' | 'hedge';
+  /// Committed block height of the snapshot. Compare it across two reads to
+  /// reject a stale snapshot.
+  height: number;
+  /// Consensus timestamp of that block (unix ms).
+  time: number;
 }
 
 /// Per-market funding parameters inside a `MarketInfo`.
@@ -278,13 +295,15 @@ export interface VaultState {
   vault: string;
   /// Vault display name.
   name: string;
-  /// TVL = high-water-mark NAV proxy, USD cents as a decimal string.
+  /// TVL = high-water-mark NAV proxy, WHOLE-USDC decimal string.
   tvl: string;
-  /// Share price (NAV / total shares), decimal string.
+  /// Share price = NAV / total shares, WHOLE USDC per WHOLE share, full
+  /// precision. The node already applies the share scale, so a client that
+  /// multiplies by `1e18` reads the price 1e18 times too high.
   share_price: string;
   /// Distinct depositor count.
   depositor_count: number;
-  /// High-water mark, USD cents as a decimal string.
+  /// High-water mark, WHOLE-USDC decimal string.
   high_water_mark: string;
   /// Leader management/performance fee in bps.
   performance_fee_bps: number;
@@ -359,6 +378,9 @@ export interface FeeSchedule {
 
 /// The `params` block on a `SpotMarginAccount` — the pair's risk parameters.
 /// `null` on the account when margin is disabled / uncalibrated for the pair.
+///
+/// Both bps fields are JSON STRINGS of integers. Other bps fields on this
+/// surface (`performance_fee_bps`) are raw numbers, so do not normalize.
 export interface SpotMarginParams {
   /// Initial-margin requirement, bps as a decimal string.
   init_bps: string;
@@ -370,8 +392,8 @@ export interface SpotMarginParams {
 /// full-precision normalized decimal strings (fractional planes — borrow
 /// indices, sub-unit base sizes — that whole-unit truncation would destroy).
 export interface SpotMarginAccount {
-  /// Spot pair id.
-  pair: number;
+  /// Spot pair NAME (e.g. `"BTC/USDC"`) — the same symbol the market reads use.
+  pair: string;
   /// Posted collateral, decimal string.
   collateral: string;
   /// Borrowed principal, decimal string.
@@ -404,6 +426,9 @@ export interface SpotMarginState {
 export interface EarnPool {
   /// Pool asset (token) id.
   asset: number;
+  /// Token symbol beside the numeric `asset` — the same `{asset, name}` token
+  /// row `account_state.balances` carries.
+  name: string;
   /// Total supplied principal, decimal string.
   total_supplied: string;
   /// Total borrowed principal, decimal string.
@@ -444,14 +469,16 @@ export interface EarnState {
 /// non-enrolled address answers 200 with `enrolled:false` and zeroed figures.
 ///
 /// The `*_cents` fields are USD-CENTS-plane integer strings (NOT whole USDC) —
-/// divide by 100 for dollars.
+/// divide by 100 for dollars. The folded `account_state` twins
+/// (`pm_maint_margin` / `pm_net_value` / `pm_concentration_penalty`) are
+/// whole-USDC instead.
 export interface PmSummary {
   /// Resolved account address (0x).
   address: string;
   /// Whether the account is enrolled in portfolio margin.
   enrolled: boolean;
   /// Enrollment timestamp (consensus ms); `0` when not enrolled.
-  enrolled_at_ms: number;
+  enrolled_at: number;
   /// Block height of the last PM computation; `0` when not enrolled.
   last_computed_block: number;
   /// Maintenance-margin requirement, USD-cents integer string.

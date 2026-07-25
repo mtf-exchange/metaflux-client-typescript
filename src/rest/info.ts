@@ -35,7 +35,6 @@ import type {
   EncodeAction,
   ExchangeStatus,
   FeeSchedule,
-  FrontendOpenOrders,
   FundingHistory,
   GossipRootIps,
   HistoricalOrders,
@@ -76,6 +75,7 @@ import type {
   ValidatorSummaries,
   VaultState,
   VaultSummaries,
+  WebData,
 } from '../types/info/index.js';
 
 /// The committed `{type, data}` response envelope every `/info` query returns.
@@ -101,8 +101,23 @@ export class InfoApi {
   }
 
   /// `account_state` — rich per-account snapshot keyed by `address` (0x hex).
+  ///
+  /// Positions are grouped by perp dex under `clearinghouse_state`; the core
+  /// dex key is `""`. Balances are an ARRAY of `{asset, name, total, hold}`
+  /// rows, USDC first. `height` / `time` stamp the committed snapshot.
   async accountState(address: string): Promise<AccountState> {
     return this.post<AccountState>({ type: 'account_state', address });
+  }
+
+  /// `web_data` — the consolidated account snapshot keyed by `address` (0x
+  /// hex): vault equities and vault summaries, staking, sub-accounts, the
+  /// multisig signer set, and API-wallet agents.
+  ///
+  /// It carries the account facets `account_state` does not. Use the two
+  /// together for a full account view, or subscribe to the matching WS
+  /// channels.
+  async webData(address: string): Promise<WebData> {
+    return this.post<WebData>({ type: 'web_data', address });
   }
 
   /// `market_info` — rich per-market snapshot keyed by `coin` (the market
@@ -155,8 +170,12 @@ export class InfoApi {
   // ── book / trade / account-history reads ────────────────────────────────
 
   /// `open_orders` — account-scoped resting orders across every perp AND spot
-  /// book, keyed by `address` (0x). Spot resting orders now appear too, labeled
+  /// book, keyed by `address` (0x). Spot resting orders appear too, labeled
   /// with the pair NAME as `coin` (e.g. `"BTC/USDC"`).
+  ///
+  /// Parked TP / SL / stop triggers are in the row set: they carry
+  /// `tif: "trigger"` plus a populated `trigger` block. This read replaces the
+  /// removed `frontend_open_orders` kind, which carried that same detail.
   async openOrders(address: string): Promise<OpenOrders> {
     return this.post<OpenOrders>({ type: 'open_orders', address });
   }
@@ -476,12 +495,6 @@ export class InfoApi {
   /// `exchange_status` — global trading status. No parameters.
   async exchangeStatus(): Promise<ExchangeStatus> {
     return this.post<ExchangeStatus>({ type: 'exchange_status' });
-  }
-
-  /// `frontend_open_orders` — resting orders + tif / cloid / trigger by
-  /// `address` (0x).
-  async frontendOpenOrders(address: string): Promise<FrontendOpenOrders> {
-    return this.post<FrontendOpenOrders>({ type: 'frontend_open_orders', address });
   }
 
   /// `liquidatable` — accounts currently flagged for liquidation. No params.

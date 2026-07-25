@@ -2,13 +2,14 @@
 //   core.ts      — node / account / market / vault / staking / fee shapes
 //   reads.ts     — book / trade / funding / candle / account-history reads
 //   hl-parity.ts — the node-snapshot parity query shapes
+//   web-data.ts  — the consolidated `web_data` account snapshot
 
 export type {
   NodeInfo,
   AccountState,
   AccountPosition,
-  Balances,
-  SpotHolding,
+  DexPositions,
+  TokenBalance,
   Tier,
   MarginMode,
   Abstraction,
@@ -34,6 +35,8 @@ export type {
 } from './core.js';
 export type {
   TradeSide,
+  OrderTif,
+  OrderTrigger,
   OpenOrders,
   OpenOrder,
   L2Book,
@@ -76,9 +79,6 @@ export type {
   SpotClearinghouseState,
   SpotBalance,
   ExchangeStatus,
-  FrontendOpenOrders,
-  FrontendOpenOrder,
-  OrderTrigger,
   Liquidatable,
   LiquidatableAccount,
   ActiveAssetData,
@@ -104,3 +104,4 @@ export type {
   ValidatorSummary,
   GossipRootIps,
 } from './hl-parity.js';
+export type { WebData, WebDataStaking, WebDataVault } from './web-data.js';

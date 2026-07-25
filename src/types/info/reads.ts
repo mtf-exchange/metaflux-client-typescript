@@ -8,38 +8,79 @@
 // SYMBOL, e.g. `"BTC"`); account-scoped reads take `address` (0x hex). The
 // numeric `market_id` / `asset_id` / `account_id` request params are gone.
 
-/// Side token on trade / fill records: `"B"` = buy/bid, `"A"` = sell/ask.
+/// The canonical side token: `"B"` = buy/bid, `"A"` = sell/ask. One token set
+/// for every kind that carries a side — trades, fills, orders, and book reads.
 export type TradeSide = 'B' | 'A';
+
+/// Time-in-force token on an order row. `"trigger"` is not a real TIF: it
+/// labels a PARKED TP / SL / stop row, whose detail rides `OpenOrder.trigger`.
+export type OrderTif = 'alo' | 'ioc' | 'gtc' | 'trigger';
+
+/// The trigger block on an order row.
+///
+/// A resting book order with an attached trigger carries `trigger_px` +
+/// `trigger_above` only. A PARKED (off-book) TP / SL / stop row also carries
+/// `is_parked` + `is_market` + `limit_px`.
+export interface OrderTrigger {
+  /// Trigger price, canonical decimal string (whole-USDC, tick-snapped).
+  trigger_px: string;
+  /// Whether the trigger fires above (`true`) or below the price.
+  trigger_above: boolean;
+  /// `true` on a parked (off-book) TP / SL / stop row. Absent on the trigger
+  /// block of a resting book order.
+  is_parked?: boolean;
+  /// `true` = MARKET trigger (`limit_px` is `null`); `false` = LIMIT trigger.
+  /// Parked rows only.
+  is_market?: boolean;
+  /// Limit price of a parked LIMIT trigger, decimal string; `null` on a market
+  /// trigger.
+  limit_px?: string | null;
+}
 
 /// One resting order inside an `OpenOrders` response.
 ///
-/// `px` / `size` are CANONICAL decimal strings (positive price for **both**
-/// sides, tick-snapped whole-USDC; size in whole units) — no client-side
-/// rescaling is needed. `side` is lowercase `"bid"`/`"ask"`.
+/// This is the ONE canonical order row. The REST `open_orders` read, the WS
+/// `open_orders` snapshot, and the inner `order` of a WS `order_updates`
+/// record all render it, so the three surfaces cannot drift.
 ///
-/// Spot resting orders now appear here alongside perp orders — a spot row's
-/// `coin` is the pair NAME (e.g. `"BTC/USDC"`), with `px` / `size` in that
-/// pair's planes.
+/// `px` / `sz` are CANONICAL decimal strings (positive price for **both**
+/// sides, tick-snapped whole-USDC; size in whole units) — no client-side
+/// rescaling is needed.
+///
+/// Spot resting orders appear here alongside perp orders — a spot row's `coin`
+/// is the pair NAME (e.g. `"BTC/USDC"`), with `px` / `sz` in that pair's
+/// planes. Parked TP / SL / stop triggers are in the row set too: they carry
+/// `tif: "trigger"` and a populated `trigger` block.
 export interface OpenOrder {
   /// Server order id.
   oid: number;
   /// Market symbol the order rests on — a perp symbol (`"BTC"`) or a spot pair
   /// name (`"BTC/USDC"`).
   coin: string;
-  /// Order side, lowercase `"bid"` / `"ask"`.
-  side: 'bid' | 'ask';
+  /// Order side token.
+  side: TradeSide;
   /// Resting price, canonical decimal string (whole-USDC, tick-snapped).
   px: string;
   /// Remaining size, canonical decimal string (whole units).
-  size: string;
+  sz: string;
+  /// Original order size, decimal string. `null` on a snapshot row — the
+  /// committed book does not retain it.
+  orig_sz: string | null;
   /// Client order id (`0x`-hex), or `null` when the order carried none.
   cloid: string | null;
+  /// Time-in-force token, or `null` when unknown.
+  tif: OrderTif | null;
+  /// Whether the order is reduce-only, or `null` when unknown.
+  reduce_only: boolean | null;
+  /// Trigger detail when the order has one, else `null`.
+  trigger: OrderTrigger | null;
   /// Insertion timestamp (consensus ms).
-  inserted_at_ms: number;
+  inserted_at: number;
 }
 
 /// `open_orders` — account-scoped resting orders across every perp AND spot
-/// book. Spot rows carry the pair NAME as `coin` (e.g. `"BTC/USDC"`).
+/// book, plus parked triggers. Spot rows carry the pair NAME as `coin`
+/// (e.g. `"BTC/USDC"`).
 export interface OpenOrders {
   /// Resolved account address (0x).
   address: string;
@@ -67,7 +108,7 @@ export interface L2Level {
   /// Level price, canonical decimal string (whole-USDC, tick-snapped).
   px: string;
   /// Summed size at the level, canonical decimal string (whole units).
-  size: string;
+  sz: string;
   /// Resting orders at the level.
   n_orders: number;
 }
@@ -112,8 +153,8 @@ export interface TradeRecord {
 export interface RecentTrades {
   /// Echoed market symbol.
   coin: string;
-  /// Timestamp of the last trade (`0` if none).
-  last_trade_ms: number;
+  /// Timestamp of the last trade (consensus ms; `0` if none).
+  last_trade: number;
   /// Recent trades (bounded ring; deep history is the indexer's job).
   trades: TradeRecord[];
 }
@@ -194,7 +235,7 @@ export interface UserFillsByTime {
 /// One funding sample inside a `FundingHistory`.
 export interface FundingSample {
   /// Sample timestamp (consensus ms).
-  ts_ms: number;
+  ts: number;
   /// Raw funding premium sample (signed, pre-clamp), decimal string.
   premium: string;
   /// The clamped rate that settlement actually charges (premium passed
@@ -219,7 +260,7 @@ export interface PredictedFunding {
   predicted_rate: string;
   /// Next settlement boundary (unix ms, aligned to the per-asset funding
   /// interval; `0` only when no block is committed yet).
-  next_funding_time: number;
+  next_funding_ts: number;
 }
 
 /// One OHLCV bar from the `candle_snapshot` read / `candles` WS channel.
@@ -275,7 +316,7 @@ export interface BlockInfo {
   /// Current epoch.
   epoch: number;
   /// Block timestamp (consensus ms).
-  timestamp_ms: number;
+  timestamp: number;
   /// Block hash (0x + 32 bytes).
   block_hash: string;
 }
@@ -287,7 +328,7 @@ export interface AgentEntry {
   /// Optional agent label the node emits (absent when unnamed).
   name?: string;
   /// Agent approval expiry (consensus ms); `null` for a never-expiring approval.
-  expires_at_ms: number | null;
+  expires_at: number | null;
 }
 
 /// `agents` — approved agent / API wallets for an account, keyed by `address`.
@@ -323,7 +364,7 @@ export interface Mip3Bid {
   /// Bid amount, decimal string.
   amount: string;
   /// Bid submission timestamp (consensus ms).
-  submitted_at_ms: number;
+  submitted_at: number;
   /// Bid tag (e.g. the proposed market name).
   tag: string;
 }
@@ -337,9 +378,9 @@ export interface Mip3ActiveBids {
   /// Current winning bidder (0x), or `null` if none.
   current_winner: string | null;
   /// Auction close timestamp (consensus ms).
-  auction_end_ms: number;
+  auction_end: number;
   /// Auction start timestamp (consensus ms).
-  started_at_ms: number;
+  started_at: number;
   /// Bids.
   bids: Mip3Bid[];
 }
@@ -351,14 +392,14 @@ export interface RestingOrderStatus {
   oid: number;
   /// Market symbol (perp `"MTF"`) or spot pair name (`"MTF/USDC"`).
   coin: string;
-  /// Order side, lowercase `"bid"` / `"ask"`.
-  side: 'bid' | 'ask';
+  /// Order side token.
+  side: TradeSide;
   /// Resting price, tick-snapped normalized decimal string.
   px: string;
   /// Remaining size, normalized decimal string.
-  size: string;
+  sz: string;
   /// Insertion timestamp (consensus ms).
-  inserted_at_ms: number;
+  inserted_at: number;
   /// Client order id (`0x`-hex), or `null` when the order carried none.
   cloid: string | null;
 }
@@ -370,16 +411,16 @@ export interface TriggerOrderStatus {
   oid: number;
   /// Market symbol (perp `"MTF"`) or spot pair name (`"MTF/USDC"`).
   coin: string;
-  /// Order side, lowercase `"bid"` / `"ask"`.
-  side: 'bid' | 'ask';
+  /// Order side token.
+  side: TradeSide;
   /// Trigger price, tick-snapped normalized decimal string.
   trigger_px: string;
   /// `true` = fire when the mark rises to `trigger_px`; `false` = when it falls.
   trigger_above: boolean;
   /// Order size, normalized decimal string.
-  size: string;
+  sz: string;
   /// Registration timestamp (consensus ms).
-  registered_at_ms: number;
+  registered_at: number;
   /// Whether the trigger has already fired.
   fired: boolean;
   /// `true` = market trigger (`limit_px` is `null`); `false` = limit trigger.

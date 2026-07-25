@@ -4,6 +4,98 @@ All notable changes to the TypeScript SDK are documented here.
 
 ## [Unreleased]
 
+### Read surface realigned — `/info` responses + WS channels (BREAKING)
+
+The node redesigned its client-facing READ surface. This release
+re-points every read DTO, method, and WS channel at the new wire. The write
+(`/exchange`) plane is UNCHANGED — order params keep `side: 'bid' | 'ask'`, and
+the `approve_agent` action keeps `expires_at_ms`.
+
+**Renamed (BREAKING):**
+
+- Side tokens are `"B"` / `"A"` everywhere a row carries a side —
+  `open_orders`, `order_status` (both branches), and the WS `order_updates`
+  inner order. The old `"bid"` / `"ask"` read tokens are gone.
+- The size key on order, book, and trade rows is `sz`. `OpenOrder.size`,
+  `L2Level.size`, `RestingOrderStatus.size`, and `TriggerOrderStatus.size` are
+  all `sz` now.
+- Every `/info` TIMESTAMP field dropped its `_ms` suffix:
+  `OpenOrder.inserted_at_ms` → `inserted_at`, `RestingOrderStatus`
+  `inserted_at_ms` → `inserted_at`, `TriggerOrderStatus.registered_at_ms` →
+  `registered_at`, `AgentEntry.expires_at_ms` → `expires_at`,
+  `FundingSample.ts_ms` → `ts`, `PredictedFunding.next_funding_time` →
+  `next_funding_ts`, `RecentTrades.last_trade_ms` → `last_trade`,
+  `BlockInfo.timestamp_ms` → `timestamp`, `PmSummary.enrolled_at_ms` →
+  `enrolled_at`, `Mip3Bid.submitted_at_ms` → `submitted_at`,
+  `Mip3ActiveBids.auction_end_ms` / `started_at_ms` → `auction_end` /
+  `started_at`, `ExchangeStatus.post_only_until_time_ms` →
+  `post_only_until_time`, `SpotDeployState.auction_end_ms` / `started_at_ms` →
+  `auction_end` / `started_at`, `ValidatorSummary.jailed_at_ms` /
+  `unjail_at_ms` → `jailed_at` / `unjail_at`, and
+  `ValidatorL1Vote.submitted_at_ms` → `submitted_at`.
+- DURATIONS KEEP their `ms` suffix. `VaultState.lock_period_ms` and
+  `Funding.interval_ms` are unchanged. Do not apply a blanket `_ms` strip.
+- `AccountState.positions` (a flat array) → `AccountState.clearinghouse_state`,
+  an object keyed by perp dex. The core dex key is the empty string `""` and is
+  always present; a MIP-3 deployer dex keys by the deployer address.
+- `AccountState.balances` is an ARRAY of `{asset, name, total, hold}` token
+  rows, USDC first. The old `{usdc, usdc_evm_contract, spot}` object is gone,
+  and so are the per-token `value` / `evm_contract` / `pnl` sub-fields. An
+  all-zero token row is SKIPPED.
+- `SpotMarginAccount.pair` is the pair NAME (e.g. `"BTC/USDC"`), not a numeric
+  pair id.
+- `VaultState.share_price` keeps its key but CHANGES PLANE: it is whole USDC
+  per WHOLE share at full precision. A client that still multiplies by the
+  share scale reads the price 1e18 times too high. `tvl` and `high_water_mark`
+  are whole USDC, not cents — the old doc comments were wrong.
+- The WS `order_updates` inner order renamed `limit_px` → `px`.
+
+**Removed (BREAKING):**
+
+- `InfoApi.frontendOpenOrders()` and the `FrontendOpenOrders` /
+  `FrontendOpenOrder` types. The node dropped the kind; an unknown kind now
+  answers `400`. Use `openOrders()` — it carries the same detail.
+- The WS `spot_state` channel and `WsClient.subscribeSpotState()`. A subscribe
+  answers with the error envelope. Compose `account_state` + `web_data`
+  instead. The REST `spotClearinghouseState()` read is unaffected.
+- `AccountState.maint_margin`. It stays on the `margin_summary` read only.
+- The `Balances` and `SpotHolding` types.
+
+**Added:**
+
+- `InfoApi.webData(address)` and the `WebData` / `WebDataVault` /
+  `WebDataStaking` types — the consolidated account snapshot (vault, staking,
+  sub-accounts, multisig, agents). `height` / `time` are FLAT at the top level.
+- WS channels `web_data` and `spot_margin_state`, with
+  `WsClient.subscribeWebData()` and `WsClient.subscribeSpotMarginState()`. The
+  native channel count is 22.
+- `WsFrame.is_snapshot` — `true` marks an on-subscribe full snapshot; `false`
+  or absent marks a delta.
+- The enriched `OpenOrder` row: `orig_sz`, `tif`, `reduce_only`, and a folded
+  `trigger` block. A parked TP / SL / stop row is in the row set with
+  `tif: "trigger"`. The new `OrderTif` type accepts that non-TIF token, and
+  `OrderTrigger` moved beside the order row.
+- `AccountState.pm_maint_margin` / `pm_net_value` /
+  `pm_concentration_penalty` — the folded portfolio-margin figures, whole USDC,
+  always present (`"0"` when not enrolled). Gate the meaning on
+  `abstraction === 'portfolio'`. The standalone `pmSummary()` read KEEPS its
+  cents-plane `*_cents` names.
+- `AccountPosition.maint_margin`.
+- `AccountState.height` / `time` and `SpotClearinghouseState.height` / `time`.
+  The stamp is NOT uniform across reads — `spot_margin_state` carries none.
+- `EarnPool.name` — the token symbol beside the numeric `asset`.
+- `DexPositions` and `TokenBalance` types; `SpotBalance` is now an alias of
+  `TokenBalance`.
+
+**Unchanged, and easy to get wrong:**
+
+- The `account_state` POSITION size key is `size` and it is SIGNED. Only order,
+  book, and trade rows use `sz`.
+- The position `side` is a hedge LEG LABEL (`"long"` / `"short"`) and is absent
+  on a one-way account. It is not the `"B"` / `"A"` side token.
+- `SpotMarginParams.init_bps` / `maint_bps` stay JSON STRINGS of integers, while
+  `performance_fee_bps` and the other bps fields stay raw numbers.
+
 ### 0.14.0 — typed-only `/exchange`: dead-route removal + coverage fixes (BREAKING)
 
 The node accepts ONLY the typed EIP-712 `/exchange` scheme now; the opaque
