@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 import { existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { TypedDataV4 } from '../src/native/typed.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkgDir = resolve(__dirname, '..', 'pkg');
@@ -30,6 +31,19 @@ function toHex(bytes: Uint8Array): string {
   let out = '';
   for (const b of bytes) out += b.toString(16).padStart(2, '0');
   return out;
+}
+
+/// Read the field list of the payload's own primary type.
+///
+/// `typedDataV4` always writes a `types` entry under the `primaryType` it
+/// reports, so a miss means the payload builder broke. The throw names that
+/// cause; without it the failure surfaces later as an opaque `undefined` read.
+function primaryFields(data: TypedDataV4): { name: string; type: string }[] {
+  const fields = data.types[data.primaryType];
+  if (fields === undefined) {
+    throw new Error(`typedDataV4 emitted no types entry for ${data.primaryType}`);
+  }
+  return fields;
 }
 
 // The frozen node EIP-712 type strings these actions must reproduce (verbatim
@@ -116,7 +130,7 @@ describe('W1 typed-action wire shapes', () => {
       },
     });
     const data = typedDataV4(full);
-    expect(data.types[data.primaryType].map((f) => f.name)).toEqual([
+    expect(primaryFields(data).map((f) => f.name)).toEqual([
       'metafluxChain',
       'market',
       'side',
@@ -311,7 +325,7 @@ describe('P0+P1 wire shapes (rfq_quote)', () => {
       params: { rfq_id: 9, price: 105, max_size: 500, valid_until_ms: 9000, stp_group: 3 },
     });
     const data = typedDataV4(full);
-    expect(data.types[data.primaryType].map((f) => f.name)).toEqual([
+    expect(primaryFields(data).map((f) => f.name)).toEqual([
       'metafluxChain',
       'rfqId',
       'price',

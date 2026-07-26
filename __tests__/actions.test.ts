@@ -595,9 +595,9 @@ describe('O8: Market orders are coerced to IOC', () => {
   };
 
   function tifInActionJson(json: string): string {
-    const m = /"tif":"([^"]+)"/.exec(json);
-    if (m === null) throw new Error('no tif in action JSON');
-    return m[1];
+    const tif = /"tif":"([^"]+)"/.exec(json)?.[1];
+    if (tif === undefined) throw new Error('no tif in action JSON');
+    return tif;
   }
 
   it('submit_order: Market + Gtc -> tif:"ioc" in the action JSON', async () => {

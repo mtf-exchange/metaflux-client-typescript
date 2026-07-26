@@ -1,3 +1,10 @@
+// Typecheck-only project that ADDS the test sources.
+//
+// The base tsconfig excludes `__tests__` to keep the emitted dist/ tree
+// src-only, and vitest transforms tests without typechecking them. Both
+// together leave the tests untyped, so a response-DTO key can change to a
+// wrong value and every gate still passes. The `typecheck` script runs this
+// project too, which closes that hole.
 {
   "extends": "./tsconfig.json",
   "include": ["src/**/*", "__tests__/**/*", "vitest.config.ts"],

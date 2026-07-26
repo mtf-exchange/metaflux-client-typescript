@@ -96,6 +96,14 @@ the `approve_agent` action keeps `expires_at_ms`.
 - `SpotMarginParams.init_bps` / `maint_bps` stay JSON STRINGS of integers, while
   `performance_fee_bps` and the other bps fields stay raw numbers.
 
+**Internal — the read DTOs are now typechecked:**
+
+- `pnpm typecheck` also runs the `tsconfig.test.json` project, which adds the
+  test sources. The base project excludes them, and the test runner transforms
+  the tests without typechecking them. A read DTO key could therefore change to
+  a wrong value while typecheck, lint, and all tests stayed green. The renames
+  above are gated now.
+
 ### 0.14.0 — typed-only `/exchange`: dead-route removal + coverage fixes (BREAKING)
 
 The node accepts ONLY the typed EIP-712 `/exchange` scheme now; the opaque

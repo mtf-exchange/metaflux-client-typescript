@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { TypedDataV4 } from '../src/native/typed.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkgDir = resolve(__dirname, '..', 'pkg');
@@ -35,6 +36,19 @@ function toHex(bytes: Uint8Array): string {
   let out = '';
   for (const b of bytes) out += b.toString(16).padStart(2, '0');
   return out;
+}
+
+/// Read the field list of the payload's own primary type.
+///
+/// `typedDataV4` always writes a `types` entry under the `primaryType` it
+/// reports, so a miss means the payload builder broke. The throw names that
+/// cause; without it the failure surfaces later as an opaque `undefined` read.
+function primaryFields(data: TypedDataV4): { name: string; type: string }[] {
+  const fields = data.types[data.primaryType];
+  if (fields === undefined) {
+    throw new Error(`typedDataV4 emitted no types entry for ${data.primaryType}`);
+  }
+  return fields;
 }
 
 /// Every reachable typed action with its server-fixture inputs (snake_case
@@ -390,7 +404,7 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(data.primaryType).toBe('MetaFluxTransaction:ApproveAgent');
 
     // types field order matches the encodeType string (chain, fields..., nonce).
-    const fields = data.types[data.primaryType].map((t) => `${t.type} ${t.name}`);
+    const fields = primaryFields(data).map((t) => `${t.type} ${t.name}`);
     expect(fields).toEqual([
       'string metafluxChain',
       'address agentAddress',
@@ -626,7 +640,7 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
       params: { amount: '250.5', to_evm: true, destination: addr(0xce), asset: 0 },
     });
     const data = typedDataV4(built);
-    const fields = data.types[data.primaryType].map((t) => `${t.type} ${t.name}`);
+    const fields = primaryFields(data).map((t) => `${t.type} ${t.name}`);
     expect(fields).toEqual([
       'string metafluxChain',
       'string amount',
@@ -695,9 +709,7 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     // The signed v4 message renders `chain` as the uint8 code (Arbitrum=2).
     const data = typedDataV4(built);
     expect(data.message.chain).toBe(2);
-    expect(
-      data.types[data.primaryType].find((t) => t.name === 'chain')?.type,
-    ).toBe('uint8');
+    expect(primaryFields(data).find((t) => t.name === 'chain')?.type).toBe('uint8');
   });
 
   it('agent_set_abstraction: value is an EIP-712 string, kind is uint8', async () => {
@@ -711,7 +723,7 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     const data = typedDataV4(built);
     expect(data.message.kind).toBe(3);
     expect(data.message.value).toBe('abstraction-value');
-    const fields = data.types[data.primaryType];
+    const fields = primaryFields(data);
     expect(fields.find((t) => t.name === 'kind')?.type).toBe('uint8');
     expect(fields.find((t) => t.name === 'value')?.type).toBe('string');
     // The same value string appears verbatim in the POST action JSON.
@@ -796,7 +808,7 @@ describe.skipIf(!wasmBuilt)(
       const { buildTyped, typedDataV4 } = await import('../src/native/typed.js');
       const owned = buildTyped('cancel_all_orders', { asset: 4 }, 62n, CHAIN_ID, OWNER_BIND);
       const v4 = typedDataV4(owned);
-      const fields = v4.types[v4.primaryType];
+      const fields = primaryFields(v4);
       expect(fields[0]).toEqual({ name: 'metafluxChain', type: 'string' });
       expect(fields[1]).toEqual({ name: 'owner', type: 'address' });
       expect(v4.message.owner).toBe(OWNER_BIND);
