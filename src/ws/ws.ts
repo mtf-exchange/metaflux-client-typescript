@@ -623,8 +623,9 @@ export interface WsMarketRow {
   coin: string;
   /// Row class.
   kind: MarketKind;
-  /// Mark price, whole-USDC decimal string (tick-snapped).
-  mark_px: string;
+  /// Mark price, whole-USDC decimal string (tick-snapped). `null` on a spot row
+  /// that has no USDC-quoted pair or no trade yet — the key is always present.
+  mark_px: string | null;
   /// Real book mid, tick-snapped. Omitted when the book is one-sided.
   mid_px?: string;
   /// Rolling 24h notional volume, decimal string.
@@ -681,9 +682,11 @@ export interface WsChannelData {
   markets: WsMarketRow[];
   explorer_block: ExplorerBlock[];
   explorer_txs: ExplorerTx[];
-  /// A gateway sends `WsCandleFrame`; a bare node sends `WsNodeCandle[]`.
-  /// Narrow with `Array.isArray`.
-  candles: WsCandleFrame | WsNodeCandle[];
+  /// Three live shapes. A gateway sends `WsCandleFrame`. A bare node sends
+  /// `WsNodeCandle[]` on subscribe and a SINGLE `WsNodeCandle` per commit after
+  /// that, so `Array.isArray` alone cannot narrow it — test for the `candles`
+  /// key first, then for the array.
+  candles: WsCandleFrame | WsNodeCandle[] | WsNodeCandle;
   fills: WsFill[];
   user_events: WsUserEvent;
   order_updates: WsOrderUpdate[];
