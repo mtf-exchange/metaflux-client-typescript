@@ -263,12 +263,15 @@ export interface PredictedFunding {
   next_funding_ts: number;
 }
 
-/// One OHLCV bar from the `candle_snapshot` read / `candles` WS channel.
+/// One OHLCV bar from the `candle_snapshot` read.
 ///
-/// Compact keys (one shape across REST history and the live WS bar):
-/// `t`/`T` bar open/close epoch-ms, `s` symbol, `i` interval token,
-/// `o`/`c`/`h`/`l` whole-USDC decimal strings, `v` base volume, `q` quote
-/// (USD) volume, `n` fill count.
+/// Compact keys: `t`/`T` bar open/close epoch-ms, `s` symbol, `i` interval
+/// token, `o`/`c`/`h`/`l` whole-USDC decimal strings, `v` base volume, `q`
+/// quote (USD) volume, `n` fill count.
+///
+/// The gateway `candles` WS channel carries this SAME bar, wrapped in the
+/// `WsCandleFrame` envelope. A node-direct `/ws` mount carries a DIFFERENT bar
+/// — see `WsNodeCandle`. Do not cast one onto the other.
 export interface Candle {
   /// Bar open timestamp (ms, bucket-aligned).
   t: number;

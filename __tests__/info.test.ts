@@ -1260,6 +1260,38 @@ describe('InfoApi realigned read shapes', () => {
     expect(res.time).toBe(1_784_820_001_000);
   });
 
+  it('accountState surfaces health_deferred, and omits it when priceable', async () => {
+    const api = new InfoApi(BASE);
+    const base = {
+      address: ADDR,
+      account_value: '1000',
+      free_collateral: '1000',
+      init_margin: '0',
+      health: '1000',
+      tier: 'Safe',
+      abstraction: 'unified',
+      clearinghouse_state: { '': { positions: [] } },
+      balances: [],
+      pm_maint_margin: '0',
+      pm_net_value: '0',
+      pm_concentration_penalty: '0',
+      position_mode: 'one_way',
+      height: 8_416_000,
+      time: 1_784_820_001_000,
+    };
+    // The node emits the key ONLY when the risk engine defers on the account.
+    nextData = { ...base, health_deferred: true };
+    const deferred = await api.accountState(ADDR);
+    // Deferred: maint is 0 for want of a price, so `tier` / `health` are not
+    // solvency statements.
+    expect(deferred.health_deferred).toBe(true);
+    expect(deferred.tier).toBe('Safe');
+
+    nextData = base;
+    const priceable = await api.accountState(ADDR);
+    expect(priceable.health_deferred).toBeUndefined();
+  });
+
   it('accountState keeps the hedge leg label distinct from the side token', async () => {
     const api = new InfoApi(BASE);
     nextData = {

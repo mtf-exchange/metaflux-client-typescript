@@ -128,6 +128,12 @@ export interface AccountState {
   health: string;
   /// Liquidation tier.
   tier: Tier;
+  /// Present and `true` ONLY when the risk engine DEFERS on this account: it
+  /// holds a leg no risk path can price. The reported maintenance margin is
+  /// then `0` for want of a price, NOT because the account carries no
+  /// requirement — so `tier` and `health` are not solvency statements. A
+  /// priceable account omits the key. The market-side twin is `px_stale`.
+  health_deferred?: boolean;
   /// Margin abstraction class (`abstraction === 'portfolio'` = PM enrolled).
   abstraction: Abstraction;
   /// Open positions grouped by perp dex. The core dex key is the empty string

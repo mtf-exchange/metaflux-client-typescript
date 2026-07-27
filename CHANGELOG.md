@@ -4,6 +4,57 @@ All notable changes to the TypeScript SDK are documented here.
 
 ## [Unreleased]
 
+### WS channel bodies realigned with the live node wire (BREAKING)
+
+The realignment below covered the `/info` reads. Four WS channel types still
+carried a wire that the node does not send, and most channel bodies had no type
+at all. This closes both.
+
+**Renamed (BREAKING):**
+
+- `WsUserFunding` now matches the node record `{coin, usdc, szi, funding_rate,
+  time}`. `payment` → `usdc`, `fundingRate` → `funding_rate`, and `coin` is a
+  market SYMBOL string, not a numeric asset id. This is a settled-cash channel:
+  the old keys read as `undefined`, which JS then propagates as `NaN` or a
+  silent falsy, never an error. `usdc` also matches the REST `user_funding`
+  history record, so a client can seed from REST and merge live deltas.
+- `ActiveAssetCtx` is `{coin, ctx}`. Every metric moved into the new
+  `ActiveAssetCtxBody`: `mark_px`, `oracle_px`, `mid_px`, `premium`,
+  `day_ntl_vlm`, `prev_day_px`, `change_24h`, `funding`, `open_interest`, plus
+  the conditional `px_stale`. The type was flat, so every metric read as
+  `undefined`. `ctx` is never `null` — the fallback snapshot for an unknown
+  market sends a zeroed body.
+
+**Added:**
+
+- `AccountState.health_deferred` (optional). The node emits it ONLY when the
+  risk engine defers on the account: it holds a leg no risk path can price. The
+  reported maintenance margin is then `0` for want of a price, so `tier` and
+  `health` are not solvency statements. The market-side twin is `px_stale`.
+- A body type for every channel that returned `unknown`: `WsL2Book`, `WsBbo`,
+  `WsL2Level`, `WsCandleFrame`, `WsNodeCandle`, `WsUserEvent`, `WsNotification`,
+  `WsLedgerUpdate`, `WsTwapSliceFill`, `WsTwapHistoryRecord`, `WsMarketRow`,
+  `WsAccountState`, `WsWebData`, `WsSpotMarginState`. Account-family channels
+  reuse the REST DTO the node builds them from.
+- `WsChannelData` maps each channel name to its body type, and `isChannelFrame`
+  narrows a frame to one channel so the compiler checks each field read.
+
+**Fixed:**
+
+- The `Candle` doc claimed one bar shape across REST and WS. A gateway wraps the
+  REST bar in the `WsCandleFrame` envelope, and a node-direct mount sends a
+  different bar entirely (`WsNodeCandle`: `coin` / `interval` labels, no `q`).
+  Casting the REST type onto a node bar produced a wrong chart with no error.
+
+**Notes:**
+
+- `WsL2Level` spells the per-level order count `n`; the REST `L2Level` spells it
+  `n_orders`. Both match their own wire.
+- The two TWAP channels keep their camelCase keys (`twapId`, `executedSz`,
+  `reduceOnly`). That is the server contract, not a defect.
+- `WsSpotMarginState` adds the `height` / `time` stamp that the WS emit path
+  injects and the REST read does not.
+
 ### Read surface realigned — `/info` responses + WS channels (BREAKING)
 
 The node redesigned its client-facing READ surface. This release
