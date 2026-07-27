@@ -20,14 +20,21 @@
 // it globally, which is the SDK's floor). No `ws` npm dependency — keeping the
 // SDK dependency-free for both runtimes.
 
-import type { Funding } from '../types/info/core.js';
 import type {
+  AccountState,
+  Funding,
+  MarketKind,
+  SpotMarginState,
+} from '../types/info/core.js';
+import type {
+  Candle,
   L2BookParams,
   OpenOrder,
   OrderTif,
   OrderTrigger,
   TradeSide,
 } from '../types/info/reads.js';
+import type { WebData } from '../types/info/web-data.js';
 import {
   buildNativeCancelAction,
   buildNativeOrderAction,
@@ -149,14 +156,48 @@ export interface AllMids {
   mids: Record<string, string>;
 }
 
-/// `active_asset_ctx` payload — one market's mark/oracle/funding/OI, in the
-/// whole-USDC plane. `funding` is `null` for an unknown market.
-export interface ActiveAssetCtx {
-  coin: string;
+/// The metric block nested under `ActiveAssetCtx.ctx`.
+///
+/// Every price and money field is a whole-USDC decimal string — the same plane
+/// and the same builder the REST `market_info` read uses, so the two never
+/// drift. Sizes are whole units.
+export interface ActiveAssetCtxBody {
+  /// Mark price, tick-snapped.
   mark_px: string;
+  /// Latest committed oracle price, tick-snapped; `"0"` when no sample exists.
   oracle_px: string;
+  /// Present and `true` ONLY when the oracle index is stale. The market still
+  /// advertises a price, but every risk path defers on it. A healthy market
+  /// omits the key.
+  px_stale?: boolean;
+  /// Real book mid, tick-snapped. The live body OMITS the key when the book is
+  /// one-sided; the fallback snapshot for an unknown market sends `null`.
+  mid_px?: string | null;
+  /// Latest funding premium sample, 8-dp decimal string; `null` when none.
+  premium: string | null;
+  /// Rolling 24h notional volume, decimal string.
+  day_ntl_vlm: string;
+  /// Mark price 24h ago, tick-snapped; `null` when no 24h reference exists.
+  prev_day_px: string | null;
+  /// 24h price change as a decimal fraction; `null` when no reference exists.
+  change_24h: string | null;
+  /// Funding parameters; `null` for an unknown market.
   funding: Funding | null;
+  /// True position open interest, whole units as a decimal string.
   open_interest: string;
+}
+
+/// `active_asset_ctx` payload — one market's mark / oracle / premium / funding /
+/// OI / 24h ticker.
+///
+/// The metrics are NESTED under `ctx`; they are not flat on this object. The
+/// on-subscribe fallback for an unknown market sends a zeroed `ctx`, never
+/// `null`, so `ctx` is always an object.
+export interface ActiveAssetCtx {
+  /// Market symbol (e.g. `"BTC"`).
+  coin: string;
+  /// The metric block.
+  ctx: ActiveAssetCtxBody;
 }
 
 /// `active_asset_data` WS payload — a user's per-(user, coin) leverage /
@@ -278,16 +319,20 @@ export interface WsOrderUpdate {
   time: number;
 }
 
-/// One `user_fundings` channel record — a realized funding payment.
+/// One `user_fundings` channel record — a realized funding payment. Each push
+/// is an array of records.
+///
+/// The amount key is `usdc`, matching the REST `user_funding` history record,
+/// so a client can seed history from REST and merge live deltas.
 export interface WsUserFunding {
-  /// Numeric asset id the payment settled on (resolve symbols via `markets`).
-  coin: number;
+  /// Market symbol the payment settled on (e.g. `"BTC"`).
+  coin: string;
   /// Signed whole-USDC payment (`+` received / `−` paid), decimal string.
-  payment: string;
+  usdc: string;
   /// Signed position size at settlement, whole units as a decimal string.
   szi: string;
   /// Per-hour rate applied at that settlement, decimal string.
-  fundingRate: string;
+  funding_rate: string;
   /// Settlement timestamp (consensus ms).
   time: number;
 }
@@ -333,18 +378,365 @@ export interface ExplorerTx {
   time: number;
 }
 
-/// A typed inbound frame `{channel, data}`. `data` is left as `unknown` because
-/// the node currently ships string-JSON payloads whose concrete shapes are
-/// mid-flight server-side (see `ws/subscribe.rs` — empty snapshots today); the
-/// caller narrows per channel. `subscriptionResponse` and `error` are the two
-/// control frames with stable shapes.
+/// One `l2_book` / `bbo` price level.
+///
+/// The order-count key here is `n`. The REST `l2_book` read spells the same
+/// count `n_orders` (see `L2Level`). The two are different keys — do not cast
+/// one row type onto the other.
+export interface WsL2Level {
+  /// Level price, whole-USDC decimal string (tick-snapped).
+  px: string;
+  /// Summed size at the level, whole units as a decimal string.
+  sz: string;
+  /// Resting orders at the level.
+  n: number;
+}
+
+/// `l2_book` channel payload — one market's aggregated depth.
+///
+/// `levels` is a two-element tuple: `levels[0]` is the bid side (best first,
+/// descending price) and `levels[1]` the ask side (ascending). The REST
+/// `l2_book` read instead returns flat `bids` / `asks` arrays.
+export interface WsL2Book {
+  /// Market symbol, or a spot pair name (`"BTC/USDC"`).
+  coin: string;
+  /// `[bids, asks]`.
+  levels: [WsL2Level[], WsL2Level[]];
+  /// Book timestamp (consensus ms).
+  time: number;
+}
+
+/// `bbo` channel payload — top of each side.
+///
+/// `bbo` is a two-element tuple `[bid, ask]`; a side with no resting order is
+/// `null`.
+export interface WsBbo {
+  /// Market symbol (e.g. `"BTC"`).
+  coin: string;
+  /// Book timestamp (consensus ms).
+  time: number;
+  /// `[best bid, best ask]`.
+  bbo: [WsL2Level | null, WsL2Level | null];
+}
+
+/// `candles` channel payload on the GATEWAY `/ws` mount.
+///
+/// The envelope carries its OWN `snapshot` flag, separate from the frame-level
+/// `WsFrame.is_snapshot`. The gateway always sends the frame flag as `false`
+/// for this channel, so read `data.snapshot`, not the frame flag.
+export interface WsCandleFrame {
+  /// `true` = REPLACE the held history with `candles`; `false` = UPDATE or
+  /// APPEND the single bar it carries.
+  snapshot: boolean;
+  /// Bars, oldest first. One bar on a delta tick, the full recent history on a
+  /// snapshot. The bar is the REST `candle_snapshot` bar.
+  candles: Candle[];
+}
+
+/// One `candles` bar on a NODE-direct `/ws` mount.
+///
+/// A node builds its own bars and labels them `coin` / `interval`, with no
+/// quote volume. The gateway does not serve this shape — see `WsCandleFrame`.
+export interface WsNodeCandle {
+  /// Market symbol (e.g. `"BTC"`).
+  coin: string;
+  /// Interval token (`1m`/`5m`/`15m`/`1h`/`4h`/`1d`).
+  interval: string;
+  /// Bar open timestamp (ms, bucket-aligned).
+  t: number;
+  /// Bar close timestamp (ms) — the exclusive upper edge, `t + interval`.
+  T: number;
+  /// Open price, whole-USDC decimal string.
+  o: string;
+  /// High price, whole-USDC decimal string.
+  h: string;
+  /// Low price, whole-USDC decimal string.
+  l: string;
+  /// Close price, whole-USDC decimal string.
+  c: string;
+  /// Base-asset volume in the bar, decimal string.
+  v: string;
+  /// Fill count in the bar.
+  n: number;
+}
+
+/// `user_events` channel payload — the account's tagged event body.
+///
+/// Today it carries exactly one fill per frame, in the SAME record shape the
+/// `fills` channel pushes. The object is tagged so the server can add sibling
+/// event keys without breaking the `fills` key.
+export interface WsUserEvent {
+  /// The fill legs this event carries.
+  fills: WsFill[];
+}
+
+/// The `kind` tag on a `notifications` record.
+export type WsNotificationKind =
+  | 'yellow_card'
+  | 'forced_close_tier'
+  | 'tier_cleared'
+  | 'forced_close'
+  | 'backstop_residual'
+  | 'backstop_residual_cleared'
+  | 'mlp_backstop_takeover';
+
+/// One `notifications` channel record — a per-account risk / liquidation
+/// notice derived from a committed-state diff. Each push is an array.
+///
+/// `kind` tags the record. Only `kind`, `message` and `time` are on every
+/// record; the rest depend on the kind.
+export interface WsNotification {
+  /// Record kind.
+  kind: WsNotificationKind;
+  /// Human-readable notice.
+  message: string;
+  /// Record timestamp (consensus ms).
+  time: number;
+  /// Liquidation tier the account entered; `null` on `tier_cleared`. Present on
+  /// `yellow_card` / `forced_close_tier` / `tier_cleared`.
+  tier?: string | null;
+  /// Market symbol. Present on the per-market kinds.
+  coin?: string;
+  /// Position leg (`"long"` / `"short"`). Present on the per-leg kinds.
+  side?: 'long' | 'short';
+  /// Size closed by the forced close, whole units as a decimal string.
+  closed_sz?: string;
+  /// Un-fillable residual lots parked for the backstop executor.
+  lots?: string;
+  /// Signed size the backstop vault inherited (`mlp_backstop_takeover`).
+  signed_sz?: string;
+  /// Strike price of the takeover, whole-USDC decimal string.
+  px?: string;
+}
+
+/// The `kind` tag on a `ledger_updates` record.
+export type WsLedgerUpdateKind =
+  | 'usd_send'
+  | 'usd_receive'
+  | 'spot_send'
+  | 'spot_receive'
+  | 'asset_send'
+  | 'asset_receive'
+  | 'withdraw'
+  | 'system_credit'
+  | 'sub_account_transfer'
+  | 'sub_account_spot_transfer'
+  | 'vault_transfer';
+
+/// One `ledger_updates` channel record — a per-account money movement drawn
+/// from the committed block payload. Each push is an array; the on-subscribe
+/// snapshot is the recent ring, NEWEST first.
+///
+/// `kind` tags the record. Only `kind`, `amount` and `time` are on every
+/// record. `amount` is unsigned — read the direction from `kind`. This differs
+/// from the gateway `user_non_funding_ledger_updates` REST read, which
+/// normalizes to a signed `delta`.
+export interface WsLedgerUpdate {
+  /// Record kind.
+  kind: WsLedgerUpdateKind;
+  /// Whole-token amount moved, decimal string. Unsigned.
+  amount: string;
+  /// Record timestamp (consensus ms).
+  time: number;
+  /// Token symbol. Absent on the USD-plane kinds (`usd_send` / `usd_receive`).
+  coin?: string;
+  /// Recipient 0x address on a send.
+  destination?: string;
+  /// Sender 0x address on a receive.
+  from?: string;
+  /// Destination EVM chain id (`withdraw` via the `Withdraw3` action).
+  destination_chain_id?: number;
+  /// Destination chain label (`withdraw` via the MetaBridge action).
+  chain?: string;
+  /// Withdraw lane label, e.g. `"metabridge"`.
+  via?: string;
+  /// Sub-account index (the `sub_account_*` kinds).
+  sub_index?: number;
+  /// Vault id (`vault_transfer`).
+  vault_id?: number;
+  /// `true` = funds move INTO the sub-account / vault. Present on the
+  /// `sub_account_*` and `vault_transfer` kinds.
+  deposit?: boolean;
+  /// `true` = the asset moves to the perp side (`asset_send` / `asset_receive`).
+  to_perp?: boolean;
+}
+
+/// One `user_twap_slice_fills` channel record — a TWAP child slice that filled.
+///
+/// `twapId` is camelCase on the wire. That spelling is the server contract for
+/// the two TWAP channels, not a defect; keep it.
+export interface WsTwapSliceFill {
+  /// The slice's fill leg, in the same record shape the `fills` channel pushes.
+  fill: WsFill;
+  /// Parent TWAP id.
+  twapId: number;
+}
+
+/// The `state` block inside a `WsTwapHistoryRecord`. The keys `executedSz` and
+/// `reduceOnly` are camelCase on the wire — the server contract for the TWAP
+/// channels.
+export interface WsTwapHistoryState {
+  /// Parent TWAP id — the id `twap_cancel` needs.
+  twapId: number;
+  /// Market symbol (e.g. `"BTC"`).
+  coin: string;
+  /// Side token — `"B"` = buy, `"A"` = sell.
+  side: TradeSide;
+  /// Total parent size, whole units as a decimal string.
+  sz: string;
+  /// Size executed so far, whole units as a decimal string.
+  executedSz: string;
+  /// Parent duration in minutes.
+  minutes: number;
+  /// Whether the parent may only reduce an existing position.
+  reduceOnly: boolean;
+  /// Transition timestamp (consensus ms).
+  timestamp: number;
+}
+
+/// One `user_twap_history` channel record — a TWAP parent lifecycle
+/// transition. Each push is an array.
+export interface WsTwapHistoryRecord {
+  /// Transition timestamp (consensus ms).
+  time: number;
+  /// The parent's state at the transition.
+  state: WsTwapHistoryState;
+  /// The new status, wrapped one level deep.
+  status: {
+    /// Status token, e.g. `"activated"` / `"finished"` / `"terminated"`.
+    status: string;
+  };
+}
+
+/// One `markets` channel row — a market's DYNAMIC state. Each push is an array;
+/// the on-subscribe frame holds every market, later frames hold only the rows
+/// that MOVED.
+///
+/// `kind` splits the row: a `"spot"` row carries only `coin` / `kind` /
+/// `mark_px` / `mid_px` / `day_ntl_vlm` / `prev_day_px`, because the remaining
+/// fields have no spot analogue.
+///
+/// This is NOT the REST `markets` read, which returns `{perp, spot}` of STATIC
+/// market definitions.
+export interface WsMarketRow {
+  /// Market symbol, or the pair name on a spot row.
+  coin: string;
+  /// Row class.
+  kind: MarketKind;
+  /// Mark price, whole-USDC decimal string (tick-snapped).
+  mark_px: string;
+  /// Real book mid, tick-snapped. Omitted when the book is one-sided.
+  mid_px?: string;
+  /// Rolling 24h notional volume, decimal string.
+  day_ntl_vlm: string;
+  /// Mark price 24h ago; `null` when no 24h reference exists.
+  prev_day_px: string | null;
+  /// Latest committed oracle price, tick-snapped. Perp rows only.
+  oracle_px?: string;
+  /// Present and `true` only when the oracle index is stale. Perp rows only.
+  px_stale?: boolean;
+  /// Depth-aware impact prices `[bid, ask]`, whole-USDC decimal strings.
+  /// Omitted when either side is too thin. Perp rows only.
+  impact_pxs?: [string, string];
+  /// Latest funding premium sample; `null` when none. Perp rows only.
+  premium?: string | null;
+  /// Funding parameters. Perp rows only.
+  funding?: Funding;
+  /// True position open interest, whole units. Perp rows only.
+  open_interest?: string;
+  /// 24h price change as a decimal fraction; `null` when no reference exists.
+  /// Perp rows only.
+  change_24h?: string | null;
+  /// Whether the market is halted. Perp rows only.
+  halted?: boolean;
+}
+
+/// `account_state` channel payload — the SAME body the REST `account_state`
+/// read returns, including the `height` / `time` stamp.
+export type WsAccountState = AccountState;
+
+/// `web_data` channel payload — the SAME body the REST `web_data` read
+/// returns, including the `height` / `time` stamp.
+export type WsWebData = WebData;
+
+/// `spot_margin_state` channel payload — the REST `spot_margin_state` body PLUS
+/// the `height` / `time` stamp. The REST read carries no stamp.
+export type WsSpotMarginState = SpotMarginState & {
+  /// Committed block height of the snapshot.
+  height: number;
+  /// Consensus timestamp of that block (unix ms).
+  time: number;
+};
+
+/// Body type per channel — the shape of `WsFrame.data` for each channel name.
+///
+/// Use it with `isChannelFrame` to narrow an inbound frame. Channels whose
+/// frames are arrays are typed as arrays here.
+export interface WsChannelData {
+  l2_book: WsL2Book;
+  bbo: WsBbo;
+  trades: WsTrade[];
+  active_asset_ctx: ActiveAssetCtx;
+  all_mids: AllMids;
+  markets: WsMarketRow[];
+  explorer_block: ExplorerBlock[];
+  explorer_txs: ExplorerTx[];
+  /// A gateway sends `WsCandleFrame`; a bare node sends `WsNodeCandle[]`.
+  /// Narrow with `Array.isArray`.
+  candles: WsCandleFrame | WsNodeCandle[];
+  fills: WsFill[];
+  user_events: WsUserEvent;
+  order_updates: WsOrderUpdate[];
+  open_orders: WsOpenOrder[];
+  notifications: WsNotification[];
+  ledger_updates: WsLedgerUpdate[];
+  user_fundings: WsUserFunding[];
+  user_twap_slice_fills: WsTwapSliceFill[];
+  user_twap_history: WsTwapHistoryRecord[];
+  account_state: WsAccountState;
+  web_data: WsWebData;
+  spot_margin_state: WsSpotMarginState;
+  active_asset_data: ActiveAssetDataFrame;
+}
+
+/// A typed inbound frame `{channel, data}`. `data` stays `unknown` because one
+/// handler receives every channel; narrow it with `isChannelFrame`.
+/// `subscriptionResponse`, `error` and `pong` are the control frames.
 export interface WsFrame {
   channel: string;
   data: unknown;
   /// `true` marks an on-subscribe FULL snapshot; `false` (or absent) marks a
   /// post-subscribe delta. Absent reads as a delta, so an older node that does
   /// not send the flag never makes a delta look like a snapshot.
+  ///
+  /// The `candles` channel is the exception: read `data.snapshot` there.
   is_snapshot?: boolean;
+}
+
+/// A frame already narrowed to one channel, with `data` typed as that channel's
+/// body.
+export type WsChannelFrame<C extends WsChannel> = WsFrame & {
+  channel: C;
+  data: WsChannelData[C];
+};
+
+/// Narrow an inbound frame to one channel and its body type.
+///
+/// ```ts
+/// ws.onMessage((f) => {
+///   if (isChannelFrame(f, 'user_fundings')) {
+///     for (const r of f.data) console.log(r.coin, r.usdc);
+///   }
+/// });
+/// ```
+///
+/// This is a NAME check only. It trusts the server to send the documented body
+/// for the channel it labels; it does not validate the body.
+export function isChannelFrame<C extends WsChannel>(
+  frame: WsFrame,
+  channel: C,
+): frame is WsChannelFrame<C> {
+  return frame.channel === channel;
 }
 
 /// Handler invoked for every inbound channel frame.

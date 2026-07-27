@@ -254,18 +254,23 @@ note that `account_state.balances` skips an all-zero token row, which
 `spot_state` used to emit.
 
 Each frame carries an `is_snapshot` flag: `true` marks an on-subscribe full
-snapshot, `false` or absent marks a delta.
+snapshot, `false` or absent marks a delta. The `candles` channel is the
+exception — read the `snapshot` flag inside its body instead.
+
+Every channel has a body type. `isChannelFrame` narrows a frame to one channel
+and types its `data`, so the compiler checks each field you read.
 
 ```ts
-import { WsClient, type WsTrade } from '@metaflux-dex/client';
+import { WsClient, isChannelFrame } from '@metaflux-dex/client';
 
 const ws = new WsClient('ws://localhost:8080/ws');
 ws.onMessage((f) => {
-  if (f.channel === 'l2_book') handleBook(f.data);
-  if (f.channel === 'trades') {
+  // `f.data` is WsL2Book here — levels[0] is bids, levels[1] is asks.
+  if (isChannelFrame(f, 'l2_book')) handleBook(f.data.levels);
+  if (isChannelFrame(f, 'trades')) {
     // On-subscribe snapshot is a NON-EMPTY array of recent prints with
     // users: null; live pushes carry users: [taker, maker].
-    for (const t of f.data as WsTrade[]) console.log(t.coin, t.px, t.sz);
+    for (const t of f.data) console.log(t.coin, t.px, t.sz);
   }
 });
 await ws.connect();
@@ -274,14 +279,30 @@ await ws.subscribe({ type: 'l2_book', coin: 'BTC' }); // same thing, explicit fo
 await ws.subscribeExplorerTxs(); // global tx tape; rows carry the action hash
 ```
 
-Typed record shapes are exported for the data channels (`WsTrade`, `WsFill`,
-`WsOpenOrder`, `WsOrderUpdate`, `WsUserFunding`, `ExplorerBlock`, `ExplorerTx`,
-`ActiveAssetCtx`, `AllMids`). On `order_updates`, a `filled` record carries
-the cumulative `filled_sz` + `avg_px` while `order.orig_sz` is the original
-size and `order.sz` the post-fill remainder; on a MAKER record `filled_sz` is
-THIS match's size, not the cumulative amount. The inner `order` is the SAME
-canonical row the REST `open_orders` read returns. `user_fundings` records are
-`{coin, payment, szi, fundingRate, time}`.
+`WsChannelData` maps each channel name to its body type. Read it for the full
+list; the notes below cover the shapes that most often surprise people.
+
+- `user_fundings` records are `{coin, usdc, szi, funding_rate, time}`. `coin` is
+  the market SYMBOL and `usdc` is the signed payment — the SAME key the REST
+  `user_funding` history uses, so you can seed from REST and merge live deltas.
+- `active_asset_ctx` nests every metric under `ctx`: `{coin, ctx: {mark_px,
+  oracle_px, mid_px?, premium, day_ntl_vlm, prev_day_px, change_24h, funding,
+  open_interest, px_stale?}}`.
+- `l2_book` carries `{coin, levels: [bids, asks], time}` and spells the
+  per-level order count `n`. The REST `l2_book` read instead returns flat
+  `bids` / `asks` and spells that count `n_orders`.
+- `candles` on a gateway is `{snapshot, candles}` of REST `Candle` bars. A
+  node-direct mount sends a bare array of `WsNodeCandle` instead. Narrow with
+  `Array.isArray`.
+- `markets` pushes an array of `WsMarketRow` — DYNAMIC per-market state. It is
+  not the REST `markets` read, which returns static definitions.
+- The two TWAP channels keep camelCase keys (`twapId`, `executedSz`,
+  `reduceOnly`). That is the server contract, not a defect.
+- On `order_updates`, a `filled` record carries the cumulative `filled_sz` +
+  `avg_px` while `order.orig_sz` is the original size and `order.sz` the
+  post-fill remainder; on a MAKER record `filled_sz` is THIS match's size, not
+  the cumulative amount. The inner `order` is the SAME canonical row the REST
+  `open_orders` read returns.
 
 ### Power-user exports
 
