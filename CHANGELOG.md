@@ -2,7 +2,50 @@
 
 All notable changes to the TypeScript SDK are documented here.
 
-## [Unreleased]
+## [Unreleased] — staged as 0.16.0
+
+The Rust SDK ships the same wire realignment as its 0.16.0. The two SDKs stay in
+step, so this release takes the same number.
+
+### An approved agent may sign an owner-carrying action (fix)
+
+The client required every `owner` to equal the recovered signer. The node does
+not: it admits the owner AND any agent the owner approved. The old check
+therefore refused, inside the process, every agent order the chain would have
+taken — the normal case where a session key signs for its master.
+
+The client now recovers the signer and, only when it differs from `owner`, reads
+the owner's approved agents from `/info agents`. An unrelated address — a
+mistyped `owner` — still throws locally, before the action burns a nonce. Notes:
+
+- Only a positive answer is cached, keyed `(owner, signer)`. A cached refusal
+  would keep blocking an agent that the owner approved seconds ago.
+- An unreachable `/info` does NOT block the action. The node re-runs the same
+  check at admission and stays the authority; the client never guesses.
+
+A batch acts for ONE account. The node routes the whole batch under the
+top-level `owner`, or under the signer when the batch names none, and IGNORES
+the per-item `owner` fields. A leg that names another account is a caller
+mistake, and it now throws with the fix in the message. `batch_cancel` gains the
+same top-level `owner`, on the wire and in the typed digest, so an agent can
+cancel for its master under one signature.
+
+### Candles carry a `candle_type`, and fold a price series (BREAKING)
+
+`candle_snapshot` and the `candles` WS channel take `candle_type`. `mark` is the
+default and serves perp and spot; `oracle` serves perp only and answers empty
+for a spot pair. The field rides only when given, so an existing caller keeps
+byte-identical request bytes. The executed-trade candle is RETIRED: the node
+rejects `trade` and never substitutes another series.
+
+A bar folds a SAMPLED price series, not trades. `v` and `q` are always `"0"`,
+and `n` counts samples, not fills. The series is gapless: a window with no
+sample carries the previous close forward as a flat bar (`o = h = l = c`,
+`n = 0`). Do not build wick analysis on these bars — a spike between two samples
+leaves no trace. Read executions from `recent_trades` / `trades_by_time`.
+
+The WS routing key is now the triple (coin, interval, candle_type). Mark and
+oracle at one interval are two subscriptions, and both replay after a reconnect.
 
 ### One order entry point: `placeOrder` (additive)
 
