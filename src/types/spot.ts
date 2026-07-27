@@ -58,8 +58,16 @@ export interface NativeSpotCancel {
 // 1e8 planes, like a `NativeSpotOrder`. Field ORDER is load-bearing for the
 // signed bytes (see the `buildNativeSpotMargin*` / `buildNativeEarn*` builders).
 
-/// MTF-native `spot_margin_deposit` action params — post quote collateral into
-/// the `(account, pair)` margin account. Margin must be enabled for the pair.
+/**
+ * MTF-native `spot_margin_deposit` action params — post quote collateral into
+ * the `(account, pair)` margin account.
+ *
+ * @deprecated DEAD SURFACE. The node rejects `spot_margin_deposit` while
+ * cross-margin is active, which on the live chain is from genesis. Collateral is
+ * the ONE unified USDC account, so there is no per-pair bucket to fund. Fund the
+ * account instead, then use `spot_margin_open`. The type stays because
+ * signature reconstruction needs it.
+ */
 export interface NativeSpotMarginDeposit {
   /// Spot pair id (`u32`).
   pair: number;
@@ -67,8 +75,16 @@ export interface NativeSpotMarginDeposit {
   amount: string;
 }
 
-/// MTF-native `spot_margin_withdraw` action params — withdraw free collateral
-/// back to the spendable quote balance (initial-margin-gated while open).
+/**
+ * MTF-native `spot_margin_withdraw` action params — withdraw free collateral
+ * back to the spendable quote balance.
+ *
+ * @deprecated DEAD SURFACE. The node rejects `spot_margin_withdraw` while
+ * cross-margin is active, which on the live chain is from genesis. Collateral is
+ * the ONE unified USDC account, so there is no per-pair bucket to drain.
+ * Withdraw account-wide with `mb_withdraw` instead. The type stays because
+ * signature reconstruction needs it.
+ */
 export interface NativeSpotMarginWithdraw {
   /// Spot pair id (`u32`).
   pair: number;

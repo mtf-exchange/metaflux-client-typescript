@@ -47,6 +47,22 @@ export type {
   CancelChase,
 } from './trading.js';
 export type {
+  // Unified placement (one entry point over the order wire actions).
+  PerpOrderLeg,
+  SpotOrderLeg,
+  PlaceOrderLeg,
+  PlaceOrderOpts,
+  BatchOrderPlan,
+  SpotOrderPlan,
+  PlaceOrderPlan,
+  PlacedLeg,
+  BatchPlaceResult,
+  SpotSubmissionBase,
+  SpotSubmission,
+  SpotPlaceResult,
+  PlaceOrderResult,
+} from './place.js';
+export type {
   NativeSpotOrder,
   NativeSpotCancel,
   NativeSpotMarginDeposit,

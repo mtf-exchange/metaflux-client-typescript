@@ -32,6 +32,7 @@ import {
   buildNativeTwapOrderAction,
 } from './native/actions.js';
 import { nextNonce } from './native/digest.js';
+import { PlaceOrderPartialError, planPlaceOrder } from './native/place.js';
 import {
   buildTyped,
   signTypedAction,
@@ -83,6 +84,12 @@ import type {
   NativeSpotMarginOpen,
   NativeSpotMarginWithdraw,
   NativeSpotOrder,
+  PlaceOrderLeg,
+  PlaceOrderOpts,
+  PlaceOrderResult,
+  PlacedLeg,
+  SpotPlaceResult,
+  SpotSubmission,
   PriorityBid,
   RfqAccept,
   RfqQuote,
@@ -338,9 +345,13 @@ export class Client {
   /**
    * Post quote collateral into a spot-margin account via `POST /exchange`.
    *
-   * @deprecated The node REJECTS `spot_margin_deposit` once the
-   * `spot_margin_cross` fork arms (live). Use `spotMarginOpen` / `spotMarginClose`
-   * for the cross-margin flow. Retained only for pre-arm chains.
+   * @deprecated DEAD SURFACE. The node REJECTS `spot_margin_deposit` while
+   * cross-margin is active, which on the live chain is from genesis
+   * ("spot-margin is cross-collateralized against your USDC account; no separate
+   * deposit"). Collateral is the ONE unified USDC account, so there is no
+   * per-pair bucket to fund. Fund the account instead — a MetaBridge deposit —
+   * then call `spotMarginOpen` / `spotMarginClose`, which draw on it. The action
+   * stays on the wire only so old signatures stay verifiable.
    */
   async spotMarginDeposit(
     params: NativeSpotMarginDeposit,
@@ -352,9 +363,12 @@ export class Client {
   /**
    * Withdraw free collateral from a spot-margin account via `POST /exchange`.
    *
-   * @deprecated The node REJECTS `spot_margin_withdraw` once the
-   * `spot_margin_cross` fork arms (live). Use `spotMarginOpen` / `spotMarginClose`
-   * for the cross-margin flow. Retained only for pre-arm chains.
+   * @deprecated DEAD SURFACE. The node REJECTS `spot_margin_withdraw` while
+   * cross-margin is active, which on the live chain is from genesis
+   * ("spot-margin is cross-collateralized; withdraw USDC from your account
+   * directly"). Collateral is the ONE unified USDC account, so there is no
+   * per-pair bucket to drain. Withdraw account-wide with `mbWithdraw` instead.
+   * The action stays on the wire only so old signatures stay verifiable.
    */
   async spotMarginWithdraw(
     params: NativeSpotMarginWithdraw,
@@ -445,8 +459,8 @@ export class Client {
   }
 
   /// Place N orders under one signature via `POST /exchange`. Each order's
-  /// `owner` must equal the signing wallet; the batch returns the admission
-  /// envelope (not per-order statuses).
+  /// `owner` must equal the signing wallet. The node returns one `statuses`
+  /// entry PER PLACED LEG, each echoing that leg's own `cloid`.
   async batchOrder(
     batch: BatchOrder,
     opts: TradeOpts = {},
@@ -460,6 +474,62 @@ export class Client {
       owners,
       opts,
     );
+  }
+
+  /// Place one order or many through ONE entry point via `POST /exchange`.
+  ///
+  /// Tag each order with its `venue` and this method picks the wire action:
+  /// - `venue: "perp"`, ANY count → one `batch_order`. The node answers with one
+  ///   status per placed leg, so a single order and a batch read the same way.
+  ///   `opts.owner` and `opts.grouping` ride this route.
+  /// - `venue: "spot"` → one `spot_order` PER order. `batch_order` legs are perp
+  ///   `NativeOrder`s, so the wire cannot batch spot.
+  /// - MIXED perp and spot → REJECTED. Two venues have no single wire action,
+  ///   and a silent split would give the caller two independent submissions
+  ///   where they expect one.
+  ///
+  /// The result narrows on `route`. The spot route returns N `submissions` for
+  /// N independent actions — it is NOT one submission, so read every entry. A
+  /// spot action that fails stops the run and throws
+  /// [`PlaceOrderPartialError`], which carries the same per-action record.
+  ///
+  /// Every existing method still reaches its wire action directly. This one adds
+  /// no plane conversion: `limit_px` stays in the 1e8 book plane and `size`
+  /// stays in raw lots. Use [`planPlaceOrder`] to read the action bytes first.
+  async placeOrder(
+    orders: PlaceOrderLeg | readonly PlaceOrderLeg[],
+    opts: PlaceOrderOpts = {},
+  ): Promise<PlaceOrderResult> {
+    const plan = planPlaceOrder(orders, opts);
+    const tradeOpts: TradeOpts = { nonce: opts.nonce, chainId: opts.chainId };
+
+    if (plan.route === 'batch_order') {
+      const ack = await this.batchOrder(plan.batch, tradeOpts);
+      const legs: PlacedLeg[] = plan.batch.orders.map((order, index) => ({
+        index,
+        cloid: order.cloid,
+        status: ack.statuses?.[index],
+      }));
+      return { route: 'batch_order', ack, legs };
+    }
+
+    const submissions: SpotSubmission[] = plan.orders.map((order, index) => ({
+      index,
+      cloid: order.cloid,
+      state: 'not_sent',
+    }));
+    const result: SpotPlaceResult = { route: 'spot_order', submissions };
+    for (const [index, order] of plan.orders.entries()) {
+      try {
+        const ack = await this.submitSpotOrderNative(order, tradeOpts);
+        submissions[index] = { index, cloid: order.cloid, state: 'sent', ack };
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        submissions[index] = { index, cloid: order.cloid, state: 'failed', error: reason };
+        throw new PlaceOrderPartialError(result, reason);
+      }
+    }
+    return result;
   }
 
   /// Apply N cancels under one signature via `POST /exchange`. Each cancel's
@@ -1323,8 +1393,15 @@ export class Client {
     );
   }
 
-  /// Post quote collateral into a spot-margin account (`spot_margin_deposit`,
-  /// typed scheme).
+  /**
+   * Post quote collateral into a spot-margin account (`spot_margin_deposit`,
+   * typed scheme).
+   *
+   * @deprecated DEAD SURFACE — see `spotMarginDeposit`. The node rejects this
+   * action while cross-margin is active (live: from genesis). Fund the unified
+   * USDC account instead, then call `spotMarginOpen`. Kept so an old signature
+   * stays verifiable.
+   */
   async spotMarginDepositTyped(
     params: NativeSpotMarginDeposit,
     opts: { nonce?: bigint; chainId?: number } = {},
@@ -1336,8 +1413,15 @@ export class Client {
     );
   }
 
-  /// Withdraw free collateral from a spot-margin account (`spot_margin_withdraw`,
-  /// typed scheme).
+  /**
+   * Withdraw free collateral from a spot-margin account
+   * (`spot_margin_withdraw`, typed scheme).
+   *
+   * @deprecated DEAD SURFACE — see `spotMarginWithdraw`. The node rejects this
+   * action while cross-margin is active (live: from genesis). Withdraw
+   * account-wide with `mbWithdraw` instead. Kept so an old signature stays
+   * verifiable.
+   */
   async spotMarginWithdrawTyped(
     params: NativeSpotMarginWithdraw,
     opts: { nonce?: bigint; chainId?: number } = {},

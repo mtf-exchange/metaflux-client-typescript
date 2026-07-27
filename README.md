@@ -79,6 +79,53 @@ exported as `MTF_TESTNET_CHAIN_ID` / `MTF_MAINNET_CHAIN_ID`) is handled inside
 recovered signer is checked against `owner` locally before the request leaves the
 process. Cancel via `client.cancelOrderNative({ … })`.
 
+### One entry point: `placeOrder`
+
+`submitOrderNative` / `batchOrder` / `submitSpotOrderNative` each reach one wire
+action directly. `placeOrder` is a convenience over them: tag each order with its
+`venue` and it picks the action for you. The tag is a discriminated union, so a
+perp-only field on a spot order is a compile error.
+
+```ts
+// All-perp, any count -> ONE `batch_order`. The node answers with one status
+// per placed leg, each echoing that leg's own cloid.
+const perp = await client.placeOrder([
+  { venue: 'perp', owner, market: 0, side: 'bid', kind: 'limit',
+    size: 1_000, limit_px: 5_000_000_000_000, tif: 'gtc',
+    stp_mode: 'cancel_newest', reduce_only: false },
+  { venue: 'perp', owner, market: 1, side: 'ask', kind: 'limit',
+    size: 500, limit_px: 300_000_000_000, tif: 'alo',
+    stp_mode: 'cancel_newest', reduce_only: true },
+]);
+if (perp.route === 'batch_order') {
+  for (const leg of perp.legs) console.log(leg.index, leg.status);
+}
+
+// All-spot -> ONE `spot_order` action PER order. `batch_order` legs are perp
+// orders, so the wire CANNOT batch spot: these are N independent submissions
+// with N nonces, and `submissions` reports each one separately.
+const spot = await client.placeOrder([
+  { venue: 'spot', pair: pair.id, side: 'bid', size: 10,
+    limit_px: 200_000_000, tif: 'ioc', stp_mode: 'cancel_oldest' },
+]);
+if (spot.route === 'spot_order') {
+  for (const s of spot.submissions) console.log(s.index, s.state);
+}
+
+// MIXED perp and spot -> REJECTED. Two venues have no single wire action, and a
+// silent split would give you two independent submissions where you expect one.
+// A spot action that fails stops the run and throws `PlaceOrderPartialError`,
+// which carries the same per-action record — the earlier ones were sent.
+
+// Dry run: see the exact bytes that would be signed, without signing.
+import { planPlaceOrder } from '@metaflux-dex/client';
+const plan = planPlaceOrder([{ venue: 'perp', owner, market: 0, /* … */ }]);
+console.log(plan.route, plan.actionJson);
+```
+
+`placeOrder` converts nothing between number planes: `limit_px` stays on the 1e8
+book plane and `size` stays in raw lots, exactly as you pass them.
+
 Other native actions share the same signed-action envelope but are
 sender-authorized (the signer is the actor, so there is no `owner` to check):
 
@@ -145,8 +192,10 @@ on the raw-lot / 1e8 planes.
 // Supply side: a lender funds the pool (asset = the pair's quote token id).
 await client.earnDeposit({ asset: pair.quote, amount: '5000' });
 
-// Borrow side: post collateral, then open a leveraged long.
-await client.spotMarginDeposit({ pair: pair.id, amount: '100' });
+// Borrow side: open a leveraged long. Margin is CROSS-collateralized against
+// your one unified USDC account, so there is nothing to post per pair.
+// `spotMarginDeposit` / `spotMarginWithdraw` are DEAD: the node rejects both
+// while cross-margin is active, which on the live chain is from genesis.
 await client.spotMarginOpen({
   pair: pair.id,
   size: 200,

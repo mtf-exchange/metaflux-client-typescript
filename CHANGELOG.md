@@ -4,6 +4,54 @@ All notable changes to the TypeScript SDK are documented here.
 
 ## [Unreleased]
 
+### One order entry point: `placeOrder` (additive)
+
+Placing an order needed a different call per shape: `submitOrderNative` for one
+perp order, `batchOrder` for several, `submitSpotOrderNative` for spot. The
+caller had to know which wire action to reach for.
+
+`client.placeOrder(orders, opts?)` takes one order or many and routes:
+
+- all-perp, any count → ONE `batch_order`. It carries `grouping` and the
+  top-level `owner` (agent-as-vault routing), and the node returns one status
+  per placed leg.
+- all-spot → ONE `spot_order` action PER order. `batch_order` legs are perp
+  orders, so the wire cannot batch spot.
+- MIXED perp and spot → REJECTED, naming the reason. A silent split would turn
+  one submission the caller believes is atomic into two independent ones.
+
+Each order carries a `venue` tag (`"perp"` / `"spot"`). It discriminates the
+`PlaceOrderLeg` union, so a perp-only field on a spot order is a compile error
+rather than a runtime throw.
+
+The result narrows on `route` and the two routes share no payload key: the
+batch route returns `ack` + per-leg `legs`, the spot route returns per-action
+`submissions`. The spot route cannot be read as one submission. A spot action
+that fails stops the run and throws the new `PlaceOrderPartialError`, which
+carries the same per-action record so the sent actions stay visible.
+
+`planPlaceOrder(orders, opts?)` is the pure lowering — it returns the route plus
+the canonical action bytes without signing or sending, so a caller can inspect
+what reaches the chain. Those bytes are byte-identical to the per-action
+builders for the same input.
+
+Purely additive: every existing method keeps its behaviour, and `placeOrder`
+converts nothing between the 1e8 book plane and raw lots.
+
+### `spot_margin_deposit` / `spot_margin_withdraw` marked deprecated
+
+The node REJECTS both actions while cross-margin is active, which on the live
+chain is from genesis. Collateral is the one unified USDC account, so there is
+no per-pair bucket to fund or drain. Fund the account instead (a MetaBridge
+deposit), then use `spotMarginOpen` / `spotMarginClose`; withdraw account-wide
+with `mbWithdraw`.
+
+`spotMarginDeposit`, `spotMarginWithdraw`, their `*Typed` variants, the
+`NativeSpotMarginDeposit` / `NativeSpotMarginWithdraw` types and the
+`buildNativeSpotMargin*` builders now carry `@deprecated`. Nothing is removed:
+the types, builders and EIP-712 type strings stay so an old signature can still
+be reconstructed and verified. The README example no longer posts collateral.
+
 ### WS channel bodies realigned with the live node wire (BREAKING)
 
 The realignment below covered the `/info` reads. Four WS channel types still

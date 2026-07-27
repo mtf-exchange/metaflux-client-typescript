@@ -973,15 +973,18 @@ export function buildNativeMbWithdrawAction(params: MbWithdraw): string {
 // the server struct declaration order.
 // ============================================================================
 
-/// Build the canonical native `spot_margin_deposit` action JSON string.
-///
-/// RETIRED: superseded by unified cross-margin — the live node no longer keeps a
-/// per-pair isolated bucket to fund (collateral rides the shared USDC cross
-/// pool). Kept for back-compat only; the live node rejects it.
-///
-/// `{"type":"spot_margin_deposit","params":{"pair":<u32>,"amount":"<decimal>"}}`.
-/// Posts quote collateral into the `(account, pair)` margin account (margin must
-/// be enabled for the pair). SENDER-AUTHORIZED.
+/**
+ * Build the canonical native `spot_margin_deposit` action JSON string.
+ *
+ * `{"type":"spot_margin_deposit","params":{"pair":<u32>,"amount":"<decimal>"}}`.
+ * SENDER-AUTHORIZED.
+ *
+ * @deprecated DEAD SURFACE. The node rejects `spot_margin_deposit` while
+ * cross-margin is active, which on the live chain is from genesis. Collateral is
+ * the ONE unified USDC account, so there is no per-pair bucket to fund. Fund the
+ * account instead, then use `spot_margin_open`. This builder stays because
+ * signature reconstruction needs the exact bytes.
+ */
 export function buildNativeSpotMarginDepositAction(
   params: NativeSpotMarginDeposit,
 ): string {
@@ -991,15 +994,18 @@ export function buildNativeSpotMarginDepositAction(
   return `{${jsonStr('type')}:${jsonStr('spot_margin_deposit')},${jsonStr('params')}:${paramsJson}}`;
 }
 
-/// Build the canonical native `spot_margin_withdraw` action JSON string.
-///
-/// RETIRED: superseded by unified cross-margin (see `spot_margin_deposit`). Kept
-/// for back-compat only; the live node rejects it — free collateral now lives in
-/// the shared USDC cross pool.
-///
-/// `{"type":"spot_margin_withdraw","params":{"pair":<u32>,"amount":"<decimal>"}}`.
-/// Withdraws free collateral (initial-margin-gated while a position is open).
-/// SENDER-AUTHORIZED.
+/**
+ * Build the canonical native `spot_margin_withdraw` action JSON string.
+ *
+ * `{"type":"spot_margin_withdraw","params":{"pair":<u32>,"amount":"<decimal>"}}`.
+ * SENDER-AUTHORIZED.
+ *
+ * @deprecated DEAD SURFACE. The node rejects `spot_margin_withdraw` while
+ * cross-margin is active, which on the live chain is from genesis. Collateral is
+ * the ONE unified USDC account, so there is no per-pair bucket to drain.
+ * Withdraw account-wide with `mb_withdraw` instead. This builder stays because
+ * signature reconstruction needs the exact bytes.
+ */
 export function buildNativeSpotMarginWithdrawAction(
   params: NativeSpotMarginWithdraw,
 ): string {
