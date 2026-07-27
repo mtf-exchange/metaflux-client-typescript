@@ -22,10 +22,12 @@ export interface NativeSpotOrder {
   /// Base-asset size in raw lots (`u64` on the wire). Pass a `bigint`/string
   /// above 2^53, or use `szToWire(human, sz_decimals)`.
   size: U64Input;
-  /// Limit price in the 1e8 plane (`u64` on the wire); must be `> 0` in v0.
+  /// Limit price in the 1e8 plane (`u64` on the wire). `0` means a MARKET
+  /// order, which requires `tif: "ioc"`.
   /// Pass a `bigint`/string above 2^53, or use `pxToWire(humanPrice)`.
   limit_px: U64Input;
-  /// Time-in-force. v0 requires `"ioc"` (defaulted by the builder).
+  /// Time-in-force. `ioc` drops the residual; `gtc` and `alo` REST it with
+  /// escrow. Defaulted to `"ioc"` by the builder.
   tif: NativeTif;
   /// Self-trade-prevention mode.
   stp_mode: NativeStpMode;

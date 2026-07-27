@@ -330,9 +330,11 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
     );
   });
 
-  it('spot_order v0 rejects non-ioc tif and a non-positive limit_px', async () => {
+  it('spot_order accepts a resting gtc and a market ioc, and rejects a resting market', async () => {
     const { buildNativeSpotOrderAction } = await import('../src/native/index.js');
-    expect(() =>
+    // The node rests a gtc/alo residual with escrow, so the builder must not
+    // block it — spot market making depends on this.
+    expect(
       buildNativeSpotOrderAction({
         pair: 1,
         side: 'bid',
@@ -341,14 +343,26 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
         tif: 'gtc',
         stp_mode: 'cancel_oldest',
       }),
-    ).toThrow();
-    expect(() =>
+    ).toContain('"tif":"gtc"');
+    // limit_px 0 is a MARKET order; ioc is fine.
+    expect(
       buildNativeSpotOrderAction({
         pair: 1,
         side: 'bid',
         size: 1,
         limit_px: 0,
         tif: 'ioc',
+        stp_mode: 'cancel_oldest',
+      }),
+    ).toContain('"limit_px":0');
+    // A resting market order has no price for its residual — the node rejects it.
+    expect(() =>
+      buildNativeSpotOrderAction({
+        pair: 1,
+        side: 'bid',
+        size: 1,
+        limit_px: 0,
+        tif: 'gtc',
         stp_mode: 'cancel_oldest',
       }),
     ).toThrow();

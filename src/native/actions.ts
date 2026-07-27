@@ -194,22 +194,22 @@ export function buildNativeSetPositionModeAction(
 
 /// Build the canonical native `spot_order` action JSON string (spot CLOB).
 ///
-/// Field order mirrors the server `NativeSpotOrder` exactly. `tif` defaults to
-/// `"ioc"` because v0 accepts ONLY IOC limit orders (`tif:"ioc"` + `limit_px > 0`);
-/// the node rejects Gtc / Alo and a zero (market) price. Sender-authorized (no
-/// `owner`); the returned string is BOTH signed and sent.
+/// Field order mirrors the server `NativeSpotOrder` exactly. All three
+/// time-in-force values work: an `ioc` residual is dropped, while a `gtc` or
+/// `alo` residual RESTS with escrow and counts against the per-account resting
+/// cap. A `limit_px` of `0` is a MARKET order, which the node accepts only with
+/// `tif:"ioc"` — a resting residual would otherwise sit at price 0. `tif`
+/// defaults to `"ioc"`. Sender-authorized (no `owner`); the returned string is
+/// BOTH signed and sent.
 export function buildNativeSpotOrderAction(order: NativeSpotOrder): string {
   validateMarket(order.pair);
   validateU64(order.size, 'size');
   validateU64(order.limit_px, 'limit_px');
-  // v0 constraint: IOC limit only, strictly-positive price. The node enforces
-  // both; we fail loud here so a misconfigured order never reaches the wire.
   const tif = order.tif ?? 'ioc';
-  if (tif !== 'ioc') {
-    throw new RangeError('spot_order v0 requires tif="ioc" (Gtc/Alo rejected)');
-  }
-  if (toU64(order.limit_px, 'limit_px') <= 0n) {
-    throw new RangeError('spot_order v0 requires limit_px > 0 (market px rejected)');
+  // The node rejects a resting market order because its residual has no price.
+  // Fail here so the order never burns a round-trip.
+  if (toU64(order.limit_px, 'limit_px') <= 0n && tif !== 'ioc') {
+    throw new RangeError('spot_order: a market order (limit_px 0) requires tif="ioc"');
   }
   const parts: string[] = [
     `${jsonStr('pair')}:${order.pair}`,
