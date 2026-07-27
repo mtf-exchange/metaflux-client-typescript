@@ -52,6 +52,7 @@ export type {
   FundingSample,
   PredictedFunding,
   Candle,
+  CandleType,
   CandleSnapshot,
   BlockInfo,
   Agents,

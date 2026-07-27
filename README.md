@@ -45,8 +45,15 @@ console.log(btc.margin_tiers);
 const book = await client.info.l2Book('BTC');
 const trades = await client.info.tradesByTime('BTC', Date.now() - 3_600_000);
 const funding = await client.info.predictedFundings();
+// Price bars. The 5th argument picks the series: 'mark' (the default, perp and
+// spot) or 'oracle' (perp only). The executed-trade candle is RETIRED — a bar
+// folds a PRICE series, so v/q are always "0" and n is a sample count.
 const bars = await client.info.candleSnapshot('BTC', '1m'); // { candles: [...] }
+const oracleBars = await client.info.candleSnapshot(
+  'BTC', '1m', undefined, undefined, 'oracle',
+);
 console.log(book.bids.length, trades.trades.length, funding.length, bars.candles.length);
+console.log(oracleBars.candles.length);
 
 const acct = await client.info.accountState(
   '0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025',
@@ -56,7 +63,7 @@ console.log(acct.account_value, acct.clearinghouse_state['']?.positions);
 
 // ---- Signed order — POST /exchange (MTF-native signed action) ----
 const ack = await client.submitOrderNative({
-  owner: '0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025', // must equal the signer
+  owner: '0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025', // the signer, or its master
   market: 0, // BTC perp (asset id)
   side: 'bid', // 'bid' = buy, 'ask' = sell
   kind: 'limit',
@@ -75,9 +82,26 @@ console.log(ack.statuses?.[0]);
 The signing flow (EIP-712 over the canonical action bytes, nonce auto-assigned,
 `chainId` defaults to `MTF_CHAIN_ID` = MTF testnet `114514`; mainnet is `8964`,
 exported as `MTF_TESTNET_CHAIN_ID` / `MTF_MAINNET_CHAIN_ID`) is handled inside
-`submitOrderNative`. The
-recovered signer is checked against `owner` locally before the request leaves the
-process. Cancel via `client.cancelOrderNative({ … })`.
+`submitOrderNative`. Cancel via `client.cancelOrderNative({ … })`.
+
+#### Signing as an approved agent
+
+`owner` names the account the order rests under. The signing key may be that
+account, or any **agent** the account approved with `approveAgent` — the same two
+signers the node admits. Agent signing is the normal case: a session key signs
+for its master.
+
+Before the request leaves the process, the client recovers the signer and, when
+it differs from `owner`, reads the owner's approved agents from `/info`. An
+unrelated address — a mistyped `owner` — throws locally instead of 401ing on the
+chain. The result is cached per `(owner, signer)`, so a run of orders costs one
+extra read. An unreachable `/info` does not block the order: the node re-runs the
+check and is the authority.
+
+A batch acts for ONE account. Set `batch.owner` (or `opts.owner` on
+`placeOrder`) to act as an agent, and give every leg that same `owner` — the node
+ignores the per-leg `owner` fields and would otherwise rest the whole batch under
+the signer.
 
 ### One entry point: `placeOrder`
 
@@ -225,15 +249,14 @@ await client.earnWithdraw({ asset: pair.quote, shares: '1234.5' });
 ### More native actions
 
 The Client exposes the rest of the MTF-native signed-action surface, all via the
-same `{ action, nonce, signature }` → `POST /exchange` envelope. **Owner-checked**
-actions carry an actor field (`leader` / `user` / `taker` / `owner` / `sender` /
-`submitter`) that must equal the signing wallet (checked locally before the
-request leaves the process); **sender-authorized** actions have no such field —
-the recovered signer is the actor.
+same `{ action, nonce, signature }` → `POST /exchange` envelope. An
+**owner-carrying** action names the account it acts for; the signing wallet must
+be that account or one of its approved agents, and the client checks that before
+the request leaves the process. A **sender-authorized** action has no such field
+— the recovered signer is the actor.
 
-All of these are **sender-authorized** (the recovered signer is the actor) except
-`submitOrderNative` / `cancelOrderNative`, and `batchOrder` / `batchCancel` whose
-inner orders / cancels each carry an `owner` the client checks against the signer.
+`submitOrderNative` / `cancelOrderNative` / `batchOrder` / `batchCancel` are
+owner-carrying. All the others below are sender-authorized.
 
 - **Order management**: `cancelByCloid`, `modify`, `batchModify`, `batchOrder` /
   `batchCancel`, `scheduleCancel`, `cancelAllOrders`.
@@ -351,9 +374,11 @@ list; the notes below cover the shapes that most often surprise people.
 - `l2_book` carries `{coin, levels: [bids, asks], time}` and spells the
   per-level order count `n`. The REST `l2_book` read instead returns flat
   `bids` / `asks` and spells that count `n_orders`.
-- `candles` on a gateway is `{snapshot, candles}` of REST `Candle` bars. A
-  node-direct mount sends a bare array of `WsNodeCandle` instead. Narrow with
-  `Array.isArray`.
+- `candles` on a gateway is `{snapshot, candles}` of REST `Candle` bars — a
+  PRICE series, selected by the subscription's `candle_type` (`mark` default,
+  or `oracle`). A node-direct mount instead sends FILL-derived `WsNodeCandle`s:
+  an array on subscribe, then one bare object per commit. Test for the `candles`
+  key first, then for the array.
 - `markets` pushes an array of `WsMarketRow` — DYNAMIC per-market state. It is
   not the REST `markets` read, which returns static definitions.
 - The two TWAP channels keep camelCase keys (`twapId`, `executedSz`,

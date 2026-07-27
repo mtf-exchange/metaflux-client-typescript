@@ -128,6 +128,35 @@ describe('WsClient wire protocol', () => {
     ws.close();
   });
 
+  // `candle_type` is part of the server routing key, so mark and oracle at one
+  // interval are two subscriptions. A key that dropped it would replay only one
+  // of them after a reconnect.
+  it('keeps the two candle series as independent subscriptions', async () => {
+    const ws = new WsClient('wss://x/ws', {
+      autoReconnect: true,
+      initialBackoffMs: 1,
+      maxBackoffMs: 1,
+    });
+    const p = ws.connect();
+    const first = MockSocket.instances[0]!;
+    first.open();
+    await p;
+    await ws.subscribeCandles('ETH', '1m', 'mark');
+    await ws.subscribeCandles('ETH', '1m', 'oracle');
+
+    first.close();
+    await new Promise((r) => setTimeout(r, 10));
+    const second = MockSocket.instances[MockSocket.instances.length - 1]!;
+    second.open();
+    expect(second.sent).toContain(
+      '{"method":"subscribe","subscription":{"type":"candles","coin":"ETH","interval":"1m","candle_type":"mark"}}',
+    );
+    expect(second.sent).toContain(
+      '{"method":"subscribe","subscription":{"type":"candles","coin":"ETH","interval":"1m","candle_type":"oracle"}}',
+    );
+    ws.close();
+  });
+
   it('dispatches inbound channel frames to handlers', async () => {
     const ws = new WsClient('wss://x/ws', { autoReconnect: false });
     const p = ws.connect();
@@ -247,6 +276,12 @@ describe('WsClient wire protocol', () => {
     await ws.subscribeCandles('ETH', '5m');
     expect(sock.sent).toContain(
       '{"method":"subscribe","subscription":{"type":"candles","coin":"ETH","interval":"5m"}}',
+    );
+    // `candle_type` rides only when asked; absent takes the node's `mark`
+    // default, so the frame stays byte-identical for existing callers.
+    await ws.subscribeCandles('ETH', '5m', 'oracle');
+    expect(sock.sent).toContain(
+      '{"method":"subscribe","subscription":{"type":"candles","coin":"ETH","interval":"5m","candle_type":"oracle"}}',
     );
     await ws.subscribeAllMids();
     expect(sock.sent).toContain(

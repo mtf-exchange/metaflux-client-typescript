@@ -255,9 +255,10 @@ export function buildNativeSpotCancelAction(cancel: NativeSpotCancel): string {
 
 // ============================================================================
 // Real node /exchange write actions. Each hand-builds canonical snake_case JSON
-// (the same string is signed and POSTed). All are sender-authorized (no `owner`
-// field) except the inner orders/cancels of batch_order / batch_cancel, which
-// carry an `owner` the client checks against the recovered signer.
+// (the same string is signed and POSTed). An action that carries an `owner` acts
+// for that account, and the signer must be the account or one of its approved
+// agents. A batch carries its `owner` at the TOP level: the node ignores the
+// per-item `owner` fields and routes the whole batch under one account.
 // ============================================================================
 
 /// Build the inner `{...}` body of one perp order (the value under `order` in
@@ -386,10 +387,20 @@ export function buildNativeBatchOrderAction(params: BatchOrder): string {
   return wrapParams('batch_order', `{${parts.join(',')}}`);
 }
 
-/// `batch_cancel` — N cancels under one signature.
+/// `batch_cancel` — N cancels under one signature. A params-level `owner` names
+/// the account the whole batch acts for (the signer must be an approved agent of
+/// it) and is bound into the typed digest; absent, the batch acts for the signing
+/// wallet and the bytes stay identical to an owner-less client. The `owner` is
+/// emitted first, mirroring the server `NativeBatchCancel` field order.
 export function buildNativeBatchCancelAction(params: BatchCancel): string {
   const arr = params.cancels.map(buildCancelBody).join(',');
-  return wrapParams('batch_cancel', `{${jsonStr('cancels')}:[${arr}]}`);
+  const parts: string[] = [];
+  if (params.owner !== undefined) {
+    validateAddress(params.owner, 'owner');
+    parts.push(`${jsonStr('owner')}:${jsonStr(params.owner)}`);
+  }
+  parts.push(`${jsonStr('cancels')}:[${arr}]`);
+  return wrapParams('batch_cancel', `{${parts.join(',')}}`);
 }
 
 /// `schedule_cancel` — cancel-all of the sender's open orders at a future block.

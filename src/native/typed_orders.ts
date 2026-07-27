@@ -189,10 +189,10 @@ const PARAMS_OWNER_ACTIONS: ReadonlySet<string> = new Set([
   'cancel_chase',
 ]);
 
-/// The agent-resolved `owner` a spot payload carries INSIDE its own wire body
-/// (`NativeSpotOrder.owner` / `NativeSpotCancel.owner`). The node reads that
-/// field from the POSTed bytes to pick its digest variant, so the client digest
-/// must bind the same value.
+/// The agent-resolved `owner` a payload carries INSIDE its own wire body
+/// (`NativeSpotOrder.owner` / `NativeSpotCancel.owner` / `BatchCancel.owner`).
+/// The node reads that field from the POSTed bytes to pick its digest variant,
+/// so the client digest must bind the same value.
 function bodyOwner(
   actionType: string,
   payload: TypedOrderPayload,
@@ -202,6 +202,9 @@ function bodyOwner(
   }
   if (actionType === 'spot_cancel') {
     return (payload.cancel as NativeSpotCancel | undefined)?.owner;
+  }
+  if (actionType === 'batch_cancel') {
+    return (payload.params as BatchCancel | undefined)?.owner;
   }
   return undefined;
 }

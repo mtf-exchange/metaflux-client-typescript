@@ -42,8 +42,9 @@ export interface PlaceOrderOpts {
   /// EIP-712 domain chain id. Defaults to `MTF_CHAIN_ID` (testnet 114514).
   chainId?: number;
   /// Agent-resolved owner (`0x`-hex) — an approved agent places AS that owner.
-  /// The perp route puts it on the `batch_order` top level. The spot route
-  /// applies it to every leg that omits its own `owner`; a leg that sets a
+  /// The perp route puts it on the `batch_order` top level, and every perp leg
+  /// must name that same owner, because one batch acts for one account. The spot
+  /// route applies it to every leg that omits its own `owner`; a leg that sets a
   /// DIFFERENT owner is REJECTED, because one call cannot sign two owners for
   /// the same leg.
   owner?: string;

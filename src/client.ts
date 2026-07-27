@@ -192,6 +192,8 @@ export class Client {
   /// Cached gateway-issued JWT (`/auth`). The session is established
   /// lazily on the first authenticated call.
   private jwt: string | undefined;
+  /// Confirmed agent approvals, keyed `${owner}:${signer}` in lower case.
+  private readonly agentApprovals = new Set<string>();
   /// MTF-native read API (`POST /info`). Read-only; no key required.
   readonly info: InfoApi;
 
@@ -231,9 +233,10 @@ export class Client {
   ///    node reconstructs it from the parsed `action` fields) and signed.
   /// 3. The action string is POSTed inside `{action, nonce, signature}`.
   ///
-  /// `order.owner` MUST equal the signing wallet's address; we recover the
-  /// signer locally and reject a mismatch before hitting the network (the
-  /// server enforces the same).
+  /// `order.owner` names the account the order rests under. The signing wallet
+  /// must be that account OR one of its approved agents — the same rule the node
+  /// applies. The client recovers the signer, reads the owner's approved agents
+  /// from `/info`, and rejects an unrelated address before hitting the network.
   ///
   /// `nonce` is the per-owner replay nonce bound into the digest. Defaults to
   /// `Date.now()` (unix-ms) — supply an explicit monotonically-increasing
@@ -246,11 +249,12 @@ export class Client {
     opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
     const actionJson = buildNativeOrderAction(order);
-    return this.postTypedOrderOwnerChecked(
+    return this.postTypedOrderAuthorized(
       'submit_order',
       { order },
       actionJson,
-      [order.owner],
+      order.owner,
+      [],
       opts,
     );
   }
@@ -264,18 +268,20 @@ export class Client {
   /// set — the typed digest binds `oid`, so a cloid-only cancel has no typed
   /// form and throws (the node is typed-only; there is no opaque fallback).
   ///
-  /// `cancel.owner` MUST equal the signing wallet; we recover the signer
-  /// locally and reject a mismatch before hitting the network.
+  /// `cancel.owner` names the account whose order is cancelled. The signing
+  /// wallet must be that account OR one of its approved agents — the same rule
+  /// the node applies.
   async cancelOrderNative(
     cancel: NativeCancel,
     opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
     const actionJson = buildNativeCancelAction(cancel);
-    return this.postTypedOrderOwnerChecked(
+    return this.postTypedOrderAuthorized(
       'cancel_order',
       { cancel },
       actionJson,
-      [cancel.owner],
+      cancel.owner,
+      [],
       opts,
     );
   }
@@ -461,20 +467,23 @@ export class Client {
     );
   }
 
-  /// Place N orders under one signature via `POST /exchange`. Each order's
-  /// `owner` must equal the signing wallet. The node returns one `statuses`
-  /// entry PER PLACED LEG, each echoing that leg's own `cloid`.
+  /// Place N orders under one signature via `POST /exchange`. The node returns
+  /// one `statuses` entry PER PLACED LEG, each echoing that leg's own `cloid`.
+  ///
+  /// One batch acts for ONE account: `batch.owner`, or the signing wallet when
+  /// `batch.owner` is absent. Set `batch.owner` to trade as an approved agent of
+  /// another account. Every leg's `owner` must name that same account.
   async batchOrder(
     batch: BatchOrder,
     opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
     const actionJson = buildNativeBatchOrderAction(batch);
-    const owners = batch.orders.map((o) => o.owner);
-    return this.postTypedOrderOwnerChecked(
+    return this.postTypedOrderAuthorized(
       'batch_order',
       { params: batch },
       actionJson,
-      owners,
+      batch.owner,
+      batch.orders.map((o) => o.owner),
       opts,
     );
   }
@@ -537,19 +546,22 @@ export class Client {
     return result;
   }
 
-  /// Apply N cancels under one signature via `POST /exchange`. Each cancel's
-  /// `owner` must equal the signing wallet.
+  /// Apply N cancels under one signature via `POST /exchange`.
+  ///
+  /// One batch acts for ONE account: `batch.owner`, or the signing wallet when
+  /// `batch.owner` is absent. Set `batch.owner` to cancel as an approved agent of
+  /// another account. Every cancel's `owner` must name that same account.
   async batchCancel(
     batch: BatchCancel,
     opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
     const actionJson = buildNativeBatchCancelAction(batch);
-    const owners = batch.cancels.map((c) => c.owner);
-    return this.postTypedOrderOwnerChecked(
+    return this.postTypedOrderAuthorized(
       'batch_cancel',
       { params: batch },
       actionJson,
-      owners,
+      batch.owner,
+      batch.cancels.map((c) => c.owner),
       opts,
     );
   }
@@ -1091,7 +1103,7 @@ export class Client {
   /// the typed `/exchange`. `actionJson` is the canonical action bytes (built by
   /// the `./native/actions.js` builders); `payload` carries the order / cancel /
   /// params body the typed digest is computed over. SENDER-AUTHORIZED (no owner
-  /// cross-check); use [`postTypedOrderOwnerChecked`] when an owner must match.
+  /// cross-check); use [`postTypedOrderAuthorized`] when the action names an owner.
   private async postTypedOrder(
     actionType: string,
     payload: TypedOrderPayload,
@@ -1133,13 +1145,19 @@ export class Client {
     return this.postTypedOrder(actionType, payload, actionJson, opts);
   }
 
-  /// Like [`postTypedOrder`] but cross-checks every `owner` against the recovered
-  /// signer before POSTing (the order / cancel / batch paths carry an `owner`).
-  private async postTypedOrderOwnerChecked(
+  /// Like [`postTypedOrder`] but authorizes the ACTING ACCOUNT before it POSTs.
+  ///
+  /// `actor` is the account the node routes the action under: the `owner` the
+  /// action claims, or the signer when the action claims none. `legOwners` are
+  /// the per-item `owner` fields of a batch, which the node IGNORES — it routes
+  /// the whole batch under the one actor — so a leg that names another account
+  /// is a caller mistake and throws here.
+  private async postTypedOrderAuthorized(
     actionType: string,
     payload: TypedOrderPayload,
     actionJson: string,
-    owners: string[],
+    actor: string | undefined,
+    legOwners: readonly string[],
     opts: TradeOpts,
   ): Promise<NativeExchangeAck> {
     if (this.privateKey === undefined) {
@@ -1159,16 +1177,54 @@ export class Client {
       this.expiresAfterMs,
     );
     const signer = await recoverTypedOrderSigner(signed, actionType, payload, opts.chainId);
-    for (const owner of owners) {
-      if (signer.toLowerCase() !== owner.toLowerCase()) {
-        throw new Error(`order/cancel owner ${owner} != recovered signer ${signer}`);
+    const account = actor ?? signer;
+    await this.assertMayActFor(signer, account);
+    legOwners.forEach((legOwner, index) => {
+      if (legOwner.toLowerCase() !== account.toLowerCase()) {
+        throw new Error(
+          `${actionType} item ${index} owner ${legOwner} is not the acting account ` +
+            `${account}: the node routes every item of one batch under one account. ` +
+            'Set the batch-level `owner` to act for another account.',
+        );
       }
-    }
+    });
     return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
       method: 'POST',
       rawJson: typedOrderRequestBody(signed),
       bearer: this.jwt,
     });
+  }
+
+  /// Confirm the signer may act for `owner`, and throw a named error when it
+  /// may not.
+  ///
+  /// The chain admits two signers for an owner-carrying action: the owner
+  /// itself, and any agent the owner approved. This reads the SAME committed
+  /// `/info` `agents` snapshot the node reads at admission, so the client is
+  /// never stricter than the chain. A mistyped owner has not approved this
+  /// signer, so it still throws here, before the action reaches the wire.
+  ///
+  /// Only a positive answer is cached: a stale negative would keep blocking an
+  /// agent that the owner approved seconds ago. An unreachable `/info` does not
+  /// block the action — the node re-runs the check and is the authority.
+  private async assertMayActFor(signer: string, owner: string): Promise<void> {
+    const signerKey = signer.toLowerCase();
+    const ownerKey = owner.toLowerCase();
+    if (signerKey === ownerKey) return;
+    const pair = `${ownerKey}:${signerKey}`;
+    if (this.agentApprovals.has(pair)) return;
+    const approved = await this.info
+      .agents(owner)
+      .then(({ agents }) => agents.some((a) => a.agent.toLowerCase() === signerKey))
+      .catch(() => undefined);
+    if (approved === false) {
+      throw new Error(
+        `signer ${signer} may not act for owner ${owner}: it is neither that ` +
+          'account nor one of its approved agents. Check the owner address, or ' +
+          'approve this key with approveAgent.',
+      );
+    }
+    if (approved === true) this.agentApprovals.add(pair);
   }
 
   // ============================================================================
