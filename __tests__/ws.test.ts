@@ -540,7 +540,11 @@ describe('WS channel body decode', () => {
         '"v":"3.5","n":12,"q":"87517.5"}]},"is_snapshot":false}',
     );
     if (!isChannelFrame(gw, 'candles')) throw new Error('narrow failed');
-    if (Array.isArray(gw.data)) throw new Error('expected the gateway envelope');
+    // `Array.isArray` alone leaves the node single-bar delta in the union, so
+    // test for the envelope's own `candles` key.
+    if (Array.isArray(gw.data) || !('candles' in gw.data)) {
+      throw new Error('expected the gateway envelope');
+    }
     // The envelope carries its OWN snapshot flag; the frame flag stays false.
     expect(gw.data.snapshot).toBe(true);
     expect(gw.is_snapshot).toBe(false);
