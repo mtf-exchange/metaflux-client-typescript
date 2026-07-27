@@ -303,9 +303,11 @@ export class Client {
 
   /// Submit an SE-0 spot CLOB order via `POST /exchange`.
   ///
-  /// v0 is IOC-limit only: `tif` defaults to `"ioc"` and `limit_px` must be
-  /// `> 0` (the builder + node both enforce it). Sender-authorized: the signer
-  /// is the trader, so there is no `owner` field and no local owner check.
+  /// `tif` defaults to `"ioc"`; `gtc` and `alo` rest the residual with escrow.
+  /// With `order.owner` set, the signing key must be an APPROVED AGENT of that
+  /// owner and the node routes the order under the owner. Absent, the signer
+  /// trades for itself. Either way the signer is not cross-checked locally — an
+  /// agent key is not the owner.
   async submitSpotOrderNative(
     order: NativeSpotOrder,
     opts: TradeOpts = {},
@@ -320,8 +322,9 @@ export class Client {
 
   /// Cancel a resting SE-0 spot order via `POST /exchange`.
   ///
-  /// Cancels by `(pair, oid)`; the node cancels spot orders by `oid`. Sender-
-  /// authorized, same envelope as the other native actions.
+  /// Cancels by `(pair, oid)`; the node cancels spot orders by `oid`. With
+  /// `cancel.owner` set, the signing key must be an APPROVED AGENT of that owner
+  /// and the node cancels the owner's order. Absent, the signer cancels its own.
   async cancelSpotOrderNative(
     cancel: NativeSpotCancel,
     opts: TradeOpts = {},
@@ -481,9 +484,11 @@ export class Client {
   /// Tag each order with its `venue` and this method picks the wire action:
   /// - `venue: "perp"`, ANY count → one `batch_order`. The node answers with one
   ///   status per placed leg, so a single order and a batch read the same way.
-  ///   `opts.owner` and `opts.grouping` ride this route.
+  ///   `opts.grouping` rides this route only.
   /// - `venue: "spot"` → one `spot_order` PER order. `batch_order` legs are perp
   ///   `NativeOrder`s, so the wire cannot batch spot.
+  ///
+  /// `opts.owner` rides BOTH routes — an approved agent places AS that owner.
   /// - MIXED perp and spot → REJECTED. Two venues have no single wire action,
   ///   and a silent split would give the caller two independent submissions
   ///   where they expect one.

@@ -633,6 +633,81 @@ describe.skipIf(!wasmBuilt)(
       );
     });
 
+    // The node reads `owner` out of the POSTed spot body to pick its digest
+    // variant. A client that binds the owner only at the digest level, or only in
+    // the body, signs a different digest than the node rebuilds.
+    it('a spot body owner binds the SAME digest as the digest-level owner', async () => {
+      const { buildTypedOrder, typedOrderDigest } = await import(
+        '../src/native/typed_orders.js'
+      );
+      const cases: { actionType: string; plain: TypedOrderPayload; owned: TypedOrderPayload }[] = [
+        {
+          actionType: 'spot_order',
+          plain: {
+            order: {
+              pair: 3,
+              side: 'bid',
+              size: 50,
+              limit_px: 100_000_000,
+              tif: 'ioc',
+              stp_mode: 'cancel_oldest',
+              cloid: RUST_CLOID,
+            } as NativeSpotOrder,
+          },
+          owned: {
+            order: {
+              owner: OWNER_BIND,
+              pair: 3,
+              side: 'bid',
+              size: 50,
+              limit_px: 100_000_000,
+              tif: 'ioc',
+              stp_mode: 'cancel_oldest',
+              cloid: RUST_CLOID,
+            } as NativeSpotOrder,
+          },
+        },
+        {
+          actionType: 'spot_cancel',
+          plain: { cancel: { pair: 3, oid: 99 } as NativeSpotCancel },
+          owned: { cancel: { owner: OWNER_BIND, pair: 3, oid: 99 } as NativeSpotCancel },
+        },
+      ];
+      for (const c of cases) {
+        const viaBody = await buildTypedOrder(c.actionType, c.owned, '', 1n, CHAIN_ID);
+        expect(viaBody.withOwner, `${c.actionType} body withOwner`).toBe(true);
+        expect(viaBody.owner, `${c.actionType} body owner`).toBe(OWNER_BIND);
+        const viaArg = await buildTypedOrder(
+          c.actionType,
+          c.plain,
+          '',
+          1n,
+          CHAIN_ID,
+          OWNER_BIND,
+        );
+        expect(toHex(await typedOrderDigest(viaBody)), `${c.actionType} digest`).toBe(
+          toHex(await typedOrderDigest(viaArg)),
+        );
+        // Absent owner keeps the pre-change digest.
+        const plain = await buildTypedOrder(c.actionType, c.plain, '', 1n, CHAIN_ID);
+        expect(plain.withOwner, `${c.actionType} plain withOwner`).toBe(false);
+        expect(
+          toHex(await typedOrderDigest(plain)),
+          `${c.actionType} plain digest`,
+        ).not.toBe(toHex(await typedOrderDigest(viaBody)));
+      }
+    });
+
+    it('REFUSES a spot body owner that differs from the digest-level owner', async () => {
+      const { buildTypedOrder } = await import('../src/native/typed_orders.js');
+      const payload: TypedOrderPayload = {
+        cancel: { owner: OWNER_BIND, pair: 3, oid: 99 } as NativeSpotCancel,
+      };
+      await expect(
+        buildTypedOrder('spot_cancel', payload, '', 1n, CHAIN_ID, addr(0x11)),
+      ).rejects.toThrow(/must carry the same owner/);
+    });
+
     it('sign with a bound owner → recover round-trips to the signer (modify)', async () => {
       const { signTypedOrder, recoverTypedOrderSigner } = await import(
         '../src/native/typed_orders.js'

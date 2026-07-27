@@ -151,9 +151,15 @@ describe('planPlaceOrder refusals', () => {
     expect(() => planPlaceOrder([bogus])).toThrow(/venue must be/);
   });
 
-  it('refuses owner on the spot route — the spot wire cannot carry it', () => {
-    expect(() => planPlaceOrder([spotLeg()], { owner: VAULT })).toThrow(
-      /owner is a batch_order field/,
+  it('refuses a spot leg whose owner differs from opts.owner', () => {
+    expect(() => planPlaceOrder([spotLeg({ owner: OWNER })], { owner: VAULT })).toThrow(
+      /differs from opts.owner/,
+    );
+  });
+
+  it('refuses an invalid spot owner address', () => {
+    expect(() => planPlaceOrder([spotLeg({ owner: '0xnothex' })])).toThrow(
+      /owner must be a 0x-prefixed 20-byte hex address/,
     );
   });
 
@@ -236,6 +242,31 @@ describe('planPlaceOrder action bytes are byte-identical to the builders', () =>
       '{"type":"spot_order","order":{"pair":7,"side":"ask","size":250,"limit_px":100000000,' +
         '"tif":"ioc","stp_mode":"cancel_newest"}}',
     );
+  });
+
+  it('pins the spot_order field order with opts.owner (owner first)', () => {
+    const plan = planPlaceOrder([spotLeg()], { owner: VAULT });
+    if (plan.route !== 'spot_order') throw new Error('wrong route');
+    expect(plan.orders[0]?.owner).toBe(VAULT);
+    expect(plan.actionJson[0]).toBe(
+      '{"type":"spot_order","order":{"owner":"0x00000000000000000000000000000000000000aa",' +
+        '"pair":7,"side":"ask","size":250,"limit_px":100000000,"tif":"ioc",' +
+        '"stp_mode":"cancel_newest"}}',
+    );
+  });
+
+  it('applies opts.owner to EVERY spot leg', () => {
+    const plan = planPlaceOrder([spotLeg(), spotLeg({ pair: 8 })], { owner: VAULT });
+    if (plan.route !== 'spot_order') throw new Error('wrong route');
+    for (const json of plan.actionJson) {
+      expect(json).toContain(`"order":{"owner":"${VAULT}"`);
+    }
+  });
+
+  it('a per-leg owner == opts.owner produces the same bytes', () => {
+    const viaOpts = planPlaceOrder([spotLeg()], { owner: VAULT });
+    const viaLeg = planPlaceOrder([spotLeg({ owner: VAULT })]);
+    expect(viaOpts.actionJson).toStrictEqual(viaLeg.actionJson);
   });
 
   it('drops the venue tag from the signed bytes', () => {

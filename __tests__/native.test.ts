@@ -368,6 +368,69 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
     ).toThrow();
   });
 
+  // An approved agent places AS its owner. `owner` leads the order body, matching
+  // the server `NativeSpotOrder` declaration order — a wrong position changes the
+  // signed bytes and the node 401s.
+  it('spot_order puts owner FIRST and stays byte-identical without it', async () => {
+    const { buildNativeSpotOrderAction } = await import('../src/native/index.js');
+    const order = {
+      pair: 200,
+      side: 'bid',
+      size: 10,
+      limit_px: 200_000_000,
+      tif: 'ioc',
+      stp_mode: 'cancel_oldest',
+    } as const;
+    expect(
+      buildNativeSpotOrderAction({
+        owner: '0x00000000000000000000000000000000000000aa',
+        ...order,
+      }),
+    ).toBe(
+      '{"type":"spot_order","order":{"owner":"0x00000000000000000000000000000000000000aa",' +
+        '"pair":200,"side":"bid","size":10,"limit_px":200000000,"tif":"ioc","stp_mode":"cancel_oldest"}}',
+    );
+    // Absent owner: the pre-change bytes, verbatim.
+    expect(buildNativeSpotOrderAction(order)).toBe(
+      '{"type":"spot_order","order":{"pair":200,"side":"bid","size":10,"limit_px":200000000,"tif":"ioc","stp_mode":"cancel_oldest"}}',
+    );
+  });
+
+  it('spot_order keeps owner before pair and cloid last', async () => {
+    const { buildNativeSpotOrderAction } = await import('../src/native/index.js');
+    expect(
+      buildNativeSpotOrderAction({
+        owner: '0x00000000000000000000000000000000000000aa',
+        pair: 200,
+        side: 'ask',
+        size: 5,
+        limit_px: 100_000_000,
+        tif: 'ioc',
+        stp_mode: 'cancel_newest',
+        cloid: '0xabababababababababababababababab',
+      }),
+    ).toBe(
+      '{"type":"spot_order","order":{"owner":"0x00000000000000000000000000000000000000aa",' +
+        '"pair":200,"side":"ask","size":5,"limit_px":100000000,"tif":"ioc",' +
+        '"stp_mode":"cancel_newest","cloid":"0xabababababababababababababababab"}}',
+    );
+  });
+
+  it('spot_order refuses an invalid owner address', async () => {
+    const { buildNativeSpotOrderAction } = await import('../src/native/index.js');
+    expect(() =>
+      buildNativeSpotOrderAction({
+        owner: '0xdeadbeef',
+        pair: 200,
+        side: 'bid',
+        size: 10,
+        limit_px: 200_000_000,
+        tif: 'ioc',
+        stp_mode: 'cancel_oldest',
+      }),
+    ).toThrow(/owner must be a 0x-prefixed 20-byte hex address/);
+  });
+
   it('spot_order sign → recover round-trips to the signer', async () => {
     const { buildNativeSpotOrderAction, signNativeAction, recoverNativeSigner } =
       await import('../src/native/index.js');
@@ -400,6 +463,30 @@ describe.skipIf(!wasmBuilt)('MTF-native signed-action digest', () => {
     expect(buildNativeSpotCancelAction({ pair: 200, oid: 7 })).toBe(
       '{"type":"spot_cancel","cancel":{"pair":200,"oid":7}}',
     );
+  });
+
+  it('spot_cancel puts owner FIRST and stays byte-identical without it', async () => {
+    const { buildNativeSpotCancelAction } = await import('../src/native/index.js');
+    expect(
+      buildNativeSpotCancelAction({
+        owner: '0x00000000000000000000000000000000000000aa',
+        pair: 200,
+        oid: 7,
+      }),
+    ).toBe(
+      '{"type":"spot_cancel","cancel":{"owner":"0x00000000000000000000000000000000000000aa",' +
+        '"pair":200,"oid":7}}',
+    );
+    expect(buildNativeSpotCancelAction({ pair: 200, oid: 7 })).toBe(
+      '{"type":"spot_cancel","cancel":{"pair":200,"oid":7}}',
+    );
+  });
+
+  it('spot_cancel refuses an invalid owner address', async () => {
+    const { buildNativeSpotCancelAction } = await import('../src/native/index.js');
+    expect(() =>
+      buildNativeSpotCancelAction({ owner: '0x00aa', pair: 200, oid: 7 }),
+    ).toThrow(/owner must be a 0x-prefixed 20-byte hex address/);
   });
 
   it('spot_cancel sign → recover round-trips + body embeds verbatim', async () => {

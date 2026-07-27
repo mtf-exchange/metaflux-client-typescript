@@ -51,6 +51,9 @@ export class PlaceOrderPartialError extends Error {
 ///   splitting the request silently would turn one submission the caller
 ///   believes is atomic into two independent ones.
 ///
+/// `opts.owner` rides BOTH routes: the perp route puts it on the `batch_order`
+/// top level, the spot route on every leg that omits its own `owner`.
+///
 /// The plan is a pure lowering. It does NOT convert numbers between planes:
 /// `limit_px` stays in the 1e8 book plane and `size` stays in raw lots, exactly
 /// as the caller supplied them.
@@ -96,11 +99,6 @@ export function planPlaceOrder(
     };
   }
 
-  if (opts.owner !== undefined) {
-    throw new RangeError(
-      'placeOrder: owner is a batch_order field; the spot_order wire cannot carry it',
-    );
-  }
   if (opts.grouping !== undefined) {
     throw new RangeError(
       'placeOrder: grouping is a batch_order field; the spot_order wire cannot carry it',
@@ -115,11 +113,26 @@ export function planPlaceOrder(
     );
   }
 
+  const requestOwner = opts.owner;
+  const owned =
+    requestOwner === undefined ? spot : spot.map((o) => withOwner(o, requestOwner));
   return {
     route: 'spot_order',
-    orders: spot,
-    actionJson: spot.map(buildNativeSpotOrderAction),
+    orders: owned,
+    actionJson: owned.map(buildNativeSpotOrderAction),
   };
+}
+
+/// Apply the request-level `owner` to one spot leg. A leg that already names a
+/// DIFFERENT owner is refused — one call cannot sign two owners for one leg.
+function withOwner(order: NativeSpotOrder, owner: string): NativeSpotOrder {
+  if (order.owner === undefined) return { ...order, owner };
+  if (order.owner.toLowerCase() !== owner.toLowerCase()) {
+    throw new RangeError(
+      `placeOrder: order owner ${order.owner} differs from opts.owner ${owner}`,
+    );
+  }
+  return order;
 }
 
 function stripVenue<T extends { venue: string }>(leg: T): Omit<T, 'venue'> {

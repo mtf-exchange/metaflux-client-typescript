@@ -104,10 +104,15 @@ if (perp.route === 'batch_order') {
 // All-spot -> ONE `spot_order` action PER order. `batch_order` legs are perp
 // orders, so the wire CANNOT batch spot: these are N independent submissions
 // with N nonces, and `submissions` reports each one separately.
-const spot = await client.placeOrder([
-  { venue: 'spot', pair: pair.id, side: 'bid', size: 10,
-    limit_px: 200_000_000, tif: 'ioc', stp_mode: 'cancel_oldest' },
-]);
+// `opts.owner` rides BOTH routes: the perp route puts it on the batch_order top
+// level, the spot route on every leg that omits its own `owner`.
+const spot = await client.placeOrder(
+  [
+    { venue: 'spot', pair: pair.id, side: 'bid', size: 10,
+      limit_px: 200_000_000, tif: 'ioc', stp_mode: 'cancel_oldest' },
+  ],
+  { owner },
+);
 if (spot.route === 'spot_order') {
   for (const s of spot.submissions) console.log(s.index, s.state);
 }
@@ -139,11 +144,16 @@ await client.setPositionMode({ hedge: true });
 
 ### Spot trading
 
-The spot CLOB (v0 = IOC limit only; `limit_px` must be > 0 on the 1e8 price
-plane) is a separate book from the perp engine, keyed by a numeric **pair id**.
-Discover pairs with `client.info.spotMeta()`, trade with
-`submitSpotOrderNative` / `cancelSpotOrderNative`, and read balances back with
-`client.info.spotClearinghouseState(address)`:
+The spot CLOB is a separate book from the perp engine, keyed by a numeric **pair
+id**. Prices ride the 1e8 plane. All three time-in-force values work: `ioc` drops
+the residual, `gtc` and `alo` rest it with escrow. Discover pairs with
+`client.info.spotMeta()`, trade with `submitSpotOrderNative` /
+`cancelSpotOrderNative`, and read balances back with
+`client.info.spotClearinghouseState(address)`.
+
+Both spot actions take an optional `owner`. Set it and an **approved agent** of
+that account places or cancels AS the owner; leave it off and the signer trades
+for itself:
 
 ```ts
 // 1. Discover pairs. `name` is derived as "{base}/{quote}" from the token
@@ -152,7 +162,8 @@ const spotMeta = await client.info.spotMeta();
 const pair = spotMeta.pairs.find((p) => p.name === 'BTC/USDC')!;
 // spotMeta.tokens carries per-token decimals (sz_decimals / wei_decimals).
 
-// 2. Place an IOC limit spot order (signed, POST /exchange).
+// 2. Place an IOC limit spot order (signed, POST /exchange). Add
+//    `owner: '0x…'` to place it as an account this key is an approved agent of.
 const spotAck = await client.submitSpotOrderNative({
   pair: pair.id,
   side: 'bid',

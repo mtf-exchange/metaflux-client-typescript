@@ -199,8 +199,9 @@ export function buildNativeSetPositionModeAction(
 /// `alo` residual RESTS with escrow and counts against the per-account resting
 /// cap. A `limit_px` of `0` is a MARKET order, which the node accepts only with
 /// `tif:"ioc"` — a resting residual would otherwise sit at price 0. `tif`
-/// defaults to `"ioc"`. Sender-authorized (no `owner`); the returned string is
-/// BOTH signed and sent.
+/// defaults to `"ioc"`. With `owner` present an APPROVED agent places the order
+/// AS that owner; absent, the signer trades for itself and the bytes stay
+/// identical to an owner-less client. The returned string is BOTH signed and sent.
 export function buildNativeSpotOrderAction(order: NativeSpotOrder): string {
   validateMarket(order.pair);
   validateU64(order.size, 'size');
@@ -211,14 +212,19 @@ export function buildNativeSpotOrderAction(order: NativeSpotOrder): string {
   if (toU64(order.limit_px, 'limit_px') <= 0n && tif !== 'ioc') {
     throw new RangeError('spot_order: a market order (limit_px 0) requires tif="ioc"');
   }
-  const parts: string[] = [
+  const parts: string[] = [];
+  if (order.owner !== undefined) {
+    validateAddress(order.owner, 'owner');
+    parts.push(`${jsonStr('owner')}:${jsonStr(order.owner)}`);
+  }
+  parts.push(
     `${jsonStr('pair')}:${order.pair}`,
     `${jsonStr('side')}:${jsonStr(order.side)}`,
     `${jsonStr('size')}:${toU64(order.size, 'size')}`,
     `${jsonStr('limit_px')}:${toU64(order.limit_px, 'limit_px')}`,
     `${jsonStr('tif')}:${jsonStr(tif)}`,
     `${jsonStr('stp_mode')}:${jsonStr(order.stp_mode)}`,
-  ];
+  );
   if (order.cloid !== undefined) {
     validateCloid(order.cloid);
     parts.push(`${jsonStr('cloid')}:${jsonStr(order.cloid)}`);
@@ -231,11 +237,19 @@ export function buildNativeSpotOrderAction(order: NativeSpotOrder): string {
 ///
 /// `{"type":"spot_cancel","cancel":{"pair":<u32>,"oid":<u64>}}`. The node
 /// cancels a resting spot order by `oid`, so `oid` is REQUIRED. Field order
-/// mirrors the server `NativeSpotCancel`; the returned string is signed and sent.
+/// mirrors the server `NativeSpotCancel`. With `owner` present an APPROVED agent
+/// cancels AS that owner; absent, the signer cancels its own order and the bytes
+/// stay identical to an owner-less client. The returned string is signed and sent.
 export function buildNativeSpotCancelAction(cancel: NativeSpotCancel): string {
   validateMarket(cancel.pair);
   validateU64(cancel.oid, 'oid');
-  const cancelJson = `{${jsonStr('pair')}:${cancel.pair},${jsonStr('oid')}:${cancel.oid}}`;
+  const parts: string[] = [];
+  if (cancel.owner !== undefined) {
+    validateAddress(cancel.owner, 'owner');
+    parts.push(`${jsonStr('owner')}:${jsonStr(cancel.owner)}`);
+  }
+  parts.push(`${jsonStr('pair')}:${cancel.pair}`, `${jsonStr('oid')}:${cancel.oid}`);
+  const cancelJson = `{${parts.join(',')}}`;
   return `{${jsonStr('type')}:${jsonStr('spot_cancel')},${jsonStr('cancel')}:${cancelJson}}`;
 }
 
