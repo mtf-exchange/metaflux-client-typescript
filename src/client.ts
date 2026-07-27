@@ -32,6 +32,7 @@ import {
   buildNativeTwapOrderAction,
 } from './native/actions.js';
 import { nextNonce } from './native/digest.js';
+import { PlaceOrderPartialError, planPlaceOrder } from './native/place.js';
 import {
   buildTyped,
   signTypedAction,
@@ -83,6 +84,12 @@ import type {
   NativeSpotMarginOpen,
   NativeSpotMarginWithdraw,
   NativeSpotOrder,
+  PlaceOrderLeg,
+  PlaceOrderOpts,
+  PlaceOrderResult,
+  PlacedLeg,
+  SpotPlaceResult,
+  SpotSubmission,
   PriorityBid,
   RfqAccept,
   RfqQuote,
@@ -185,6 +192,8 @@ export class Client {
   /// Cached gateway-issued JWT (`/auth`). The session is established
   /// lazily on the first authenticated call.
   private jwt: string | undefined;
+  /// Confirmed agent approvals, keyed `${owner}:${signer}` in lower case.
+  private readonly agentApprovals = new Set<string>();
   /// MTF-native read API (`POST /info`). Read-only; no key required.
   readonly info: InfoApi;
 
@@ -224,9 +233,10 @@ export class Client {
   ///    node reconstructs it from the parsed `action` fields) and signed.
   /// 3. The action string is POSTed inside `{action, nonce, signature}`.
   ///
-  /// `order.owner` MUST equal the signing wallet's address; we recover the
-  /// signer locally and reject a mismatch before hitting the network (the
-  /// server enforces the same).
+  /// `order.owner` names the account the order rests under. The signing wallet
+  /// must be that account OR one of its approved agents — the same rule the node
+  /// applies. The client recovers the signer, reads the owner's approved agents
+  /// from `/info`, and rejects an unrelated address before hitting the network.
   ///
   /// `nonce` is the per-owner replay nonce bound into the digest. Defaults to
   /// `Date.now()` (unix-ms) — supply an explicit monotonically-increasing
@@ -239,11 +249,12 @@ export class Client {
     opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
     const actionJson = buildNativeOrderAction(order);
-    return this.postTypedOrderOwnerChecked(
+    return this.postTypedOrderAuthorized(
       'submit_order',
       { order },
       actionJson,
-      [order.owner],
+      order.owner,
+      [],
       opts,
     );
   }
@@ -257,18 +268,20 @@ export class Client {
   /// set — the typed digest binds `oid`, so a cloid-only cancel has no typed
   /// form and throws (the node is typed-only; there is no opaque fallback).
   ///
-  /// `cancel.owner` MUST equal the signing wallet; we recover the signer
-  /// locally and reject a mismatch before hitting the network.
+  /// `cancel.owner` names the account whose order is cancelled. The signing
+  /// wallet must be that account OR one of its approved agents — the same rule
+  /// the node applies.
   async cancelOrderNative(
     cancel: NativeCancel,
     opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
     const actionJson = buildNativeCancelAction(cancel);
-    return this.postTypedOrderOwnerChecked(
+    return this.postTypedOrderAuthorized(
       'cancel_order',
       { cancel },
       actionJson,
-      [cancel.owner],
+      cancel.owner,
+      [],
       opts,
     );
   }
@@ -296,9 +309,11 @@ export class Client {
 
   /// Submit an SE-0 spot CLOB order via `POST /exchange`.
   ///
-  /// v0 is IOC-limit only: `tif` defaults to `"ioc"` and `limit_px` must be
-  /// `> 0` (the builder + node both enforce it). Sender-authorized: the signer
-  /// is the trader, so there is no `owner` field and no local owner check.
+  /// `tif` defaults to `"ioc"`; `gtc` and `alo` rest the residual with escrow.
+  /// With `order.owner` set, the signing key must be an APPROVED AGENT of that
+  /// owner and the node routes the order under the owner. Absent, the signer
+  /// trades for itself. Either way the signer is not cross-checked locally — an
+  /// agent key is not the owner.
   async submitSpotOrderNative(
     order: NativeSpotOrder,
     opts: TradeOpts = {},
@@ -313,8 +328,9 @@ export class Client {
 
   /// Cancel a resting SE-0 spot order via `POST /exchange`.
   ///
-  /// Cancels by `(pair, oid)`; the node cancels spot orders by `oid`. Sender-
-  /// authorized, same envelope as the other native actions.
+  /// Cancels by `(pair, oid)`; the node cancels spot orders by `oid`. With
+  /// `cancel.owner` set, the signing key must be an APPROVED AGENT of that owner
+  /// and the node cancels the owner's order. Absent, the signer cancels its own.
   async cancelSpotOrderNative(
     cancel: NativeSpotCancel,
     opts: TradeOpts = {},
@@ -338,9 +354,13 @@ export class Client {
   /**
    * Post quote collateral into a spot-margin account via `POST /exchange`.
    *
-   * @deprecated The node REJECTS `spot_margin_deposit` once the
-   * `spot_margin_cross` fork arms (live). Use `spotMarginOpen` / `spotMarginClose`
-   * for the cross-margin flow. Retained only for pre-arm chains.
+   * @deprecated DEAD SURFACE. The node REJECTS `spot_margin_deposit` while
+   * cross-margin is active, which on the live chain is from genesis
+   * ("spot-margin is cross-collateralized against your USDC account; no separate
+   * deposit"). Collateral is the ONE unified USDC account, so there is no
+   * per-pair bucket to fund. Fund the account instead — a MetaBridge deposit —
+   * then call `spotMarginOpen` / `spotMarginClose`, which draw on it. The action
+   * stays on the wire only so old signatures stay verifiable.
    */
   async spotMarginDeposit(
     params: NativeSpotMarginDeposit,
@@ -352,9 +372,12 @@ export class Client {
   /**
    * Withdraw free collateral from a spot-margin account via `POST /exchange`.
    *
-   * @deprecated The node REJECTS `spot_margin_withdraw` once the
-   * `spot_margin_cross` fork arms (live). Use `spotMarginOpen` / `spotMarginClose`
-   * for the cross-margin flow. Retained only for pre-arm chains.
+   * @deprecated DEAD SURFACE. The node REJECTS `spot_margin_withdraw` while
+   * cross-margin is active, which on the live chain is from genesis
+   * ("spot-margin is cross-collateralized; withdraw USDC from your account
+   * directly"). Collateral is the ONE unified USDC account, so there is no
+   * per-pair bucket to drain. Withdraw account-wide with `mbWithdraw` instead.
+   * The action stays on the wire only so old signatures stay verifiable.
    */
   async spotMarginWithdraw(
     params: NativeSpotMarginWithdraw,
@@ -444,37 +467,101 @@ export class Client {
     );
   }
 
-  /// Place N orders under one signature via `POST /exchange`. Each order's
-  /// `owner` must equal the signing wallet; the batch returns the admission
-  /// envelope (not per-order statuses).
+  /// Place N orders under one signature via `POST /exchange`. The node returns
+  /// one `statuses` entry PER PLACED LEG, each echoing that leg's own `cloid`.
+  ///
+  /// One batch acts for ONE account: `batch.owner`, or the signing wallet when
+  /// `batch.owner` is absent. Set `batch.owner` to trade as an approved agent of
+  /// another account. Every leg's `owner` must name that same account.
   async batchOrder(
     batch: BatchOrder,
     opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
     const actionJson = buildNativeBatchOrderAction(batch);
-    const owners = batch.orders.map((o) => o.owner);
-    return this.postTypedOrderOwnerChecked(
+    return this.postTypedOrderAuthorized(
       'batch_order',
       { params: batch },
       actionJson,
-      owners,
+      batch.owner,
+      batch.orders.map((o) => o.owner),
       opts,
     );
   }
 
-  /// Apply N cancels under one signature via `POST /exchange`. Each cancel's
-  /// `owner` must equal the signing wallet.
+  /// Place one order or many through ONE entry point via `POST /exchange`.
+  ///
+  /// Tag each order with its `venue` and this method picks the wire action:
+  /// - `venue: "perp"`, ANY count → one `batch_order`. The node answers with one
+  ///   status per placed leg, so a single order and a batch read the same way.
+  ///   `opts.grouping` rides this route only.
+  /// - `venue: "spot"` → one `spot_order` PER order. `batch_order` legs are perp
+  ///   `NativeOrder`s, so the wire cannot batch spot.
+  ///
+  /// `opts.owner` rides BOTH routes — an approved agent places AS that owner.
+  /// - MIXED perp and spot → REJECTED. Two venues have no single wire action,
+  ///   and a silent split would give the caller two independent submissions
+  ///   where they expect one.
+  ///
+  /// The result narrows on `route`. The spot route returns N `submissions` for
+  /// N independent actions — it is NOT one submission, so read every entry. A
+  /// spot action that fails stops the run and throws
+  /// [`PlaceOrderPartialError`], which carries the same per-action record.
+  ///
+  /// Every existing method still reaches its wire action directly. This one adds
+  /// no plane conversion: `limit_px` stays in the 1e8 book plane and `size`
+  /// stays in raw lots. Use [`planPlaceOrder`] to read the action bytes first.
+  async placeOrder(
+    orders: PlaceOrderLeg | readonly PlaceOrderLeg[],
+    opts: PlaceOrderOpts = {},
+  ): Promise<PlaceOrderResult> {
+    const plan = planPlaceOrder(orders, opts);
+    const tradeOpts: TradeOpts = { nonce: opts.nonce, chainId: opts.chainId };
+
+    if (plan.route === 'batch_order') {
+      const ack = await this.batchOrder(plan.batch, tradeOpts);
+      const legs: PlacedLeg[] = plan.batch.orders.map((order, index) => ({
+        index,
+        cloid: order.cloid,
+        status: ack.statuses?.[index],
+      }));
+      return { route: 'batch_order', ack, legs };
+    }
+
+    const submissions: SpotSubmission[] = plan.orders.map((order, index) => ({
+      index,
+      cloid: order.cloid,
+      state: 'not_sent',
+    }));
+    const result: SpotPlaceResult = { route: 'spot_order', submissions };
+    for (const [index, order] of plan.orders.entries()) {
+      try {
+        const ack = await this.submitSpotOrderNative(order, tradeOpts);
+        submissions[index] = { index, cloid: order.cloid, state: 'sent', ack };
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        submissions[index] = { index, cloid: order.cloid, state: 'failed', error: reason };
+        throw new PlaceOrderPartialError(result, reason);
+      }
+    }
+    return result;
+  }
+
+  /// Apply N cancels under one signature via `POST /exchange`.
+  ///
+  /// One batch acts for ONE account: `batch.owner`, or the signing wallet when
+  /// `batch.owner` is absent. Set `batch.owner` to cancel as an approved agent of
+  /// another account. Every cancel's `owner` must name that same account.
   async batchCancel(
     batch: BatchCancel,
     opts: TradeOpts = {},
   ): Promise<NativeExchangeAck> {
     const actionJson = buildNativeBatchCancelAction(batch);
-    const owners = batch.cancels.map((c) => c.owner);
-    return this.postTypedOrderOwnerChecked(
+    return this.postTypedOrderAuthorized(
       'batch_cancel',
       { params: batch },
       actionJson,
-      owners,
+      batch.owner,
+      batch.cancels.map((c) => c.owner),
       opts,
     );
   }
@@ -1016,7 +1103,7 @@ export class Client {
   /// the typed `/exchange`. `actionJson` is the canonical action bytes (built by
   /// the `./native/actions.js` builders); `payload` carries the order / cancel /
   /// params body the typed digest is computed over. SENDER-AUTHORIZED (no owner
-  /// cross-check); use [`postTypedOrderOwnerChecked`] when an owner must match.
+  /// cross-check); use [`postTypedOrderAuthorized`] when the action names an owner.
   private async postTypedOrder(
     actionType: string,
     payload: TypedOrderPayload,
@@ -1058,13 +1145,19 @@ export class Client {
     return this.postTypedOrder(actionType, payload, actionJson, opts);
   }
 
-  /// Like [`postTypedOrder`] but cross-checks every `owner` against the recovered
-  /// signer before POSTing (the order / cancel / batch paths carry an `owner`).
-  private async postTypedOrderOwnerChecked(
+  /// Like [`postTypedOrder`] but authorizes the ACTING ACCOUNT before it POSTs.
+  ///
+  /// `actor` is the account the node routes the action under: the `owner` the
+  /// action claims, or the signer when the action claims none. `legOwners` are
+  /// the per-item `owner` fields of a batch, which the node IGNORES — it routes
+  /// the whole batch under the one actor — so a leg that names another account
+  /// is a caller mistake and throws here.
+  private async postTypedOrderAuthorized(
     actionType: string,
     payload: TypedOrderPayload,
     actionJson: string,
-    owners: string[],
+    actor: string | undefined,
+    legOwners: readonly string[],
     opts: TradeOpts,
   ): Promise<NativeExchangeAck> {
     if (this.privateKey === undefined) {
@@ -1084,16 +1177,54 @@ export class Client {
       this.expiresAfterMs,
     );
     const signer = await recoverTypedOrderSigner(signed, actionType, payload, opts.chainId);
-    for (const owner of owners) {
-      if (signer.toLowerCase() !== owner.toLowerCase()) {
-        throw new Error(`order/cancel owner ${owner} != recovered signer ${signer}`);
+    const account = actor ?? signer;
+    await this.assertMayActFor(signer, account);
+    legOwners.forEach((legOwner, index) => {
+      if (legOwner.toLowerCase() !== account.toLowerCase()) {
+        throw new Error(
+          `${actionType} item ${index} owner ${legOwner} is not the acting account ` +
+            `${account}: the node routes every item of one batch under one account. ` +
+            'Set the batch-level `owner` to act for another account.',
+        );
       }
-    }
+    });
     return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
       method: 'POST',
       rawJson: typedOrderRequestBody(signed),
       bearer: this.jwt,
     });
+  }
+
+  /// Confirm the signer may act for `owner`, and throw a named error when it
+  /// may not.
+  ///
+  /// The chain admits two signers for an owner-carrying action: the owner
+  /// itself, and any agent the owner approved. This reads the SAME committed
+  /// `/info` `agents` snapshot the node reads at admission, so the client is
+  /// never stricter than the chain. A mistyped owner has not approved this
+  /// signer, so it still throws here, before the action reaches the wire.
+  ///
+  /// Only a positive answer is cached: a stale negative would keep blocking an
+  /// agent that the owner approved seconds ago. An unreachable `/info` does not
+  /// block the action — the node re-runs the check and is the authority.
+  private async assertMayActFor(signer: string, owner: string): Promise<void> {
+    const signerKey = signer.toLowerCase();
+    const ownerKey = owner.toLowerCase();
+    if (signerKey === ownerKey) return;
+    const pair = `${ownerKey}:${signerKey}`;
+    if (this.agentApprovals.has(pair)) return;
+    const approved = await this.info
+      .agents(owner)
+      .then(({ agents }) => agents.some((a) => a.agent.toLowerCase() === signerKey))
+      .catch(() => undefined);
+    if (approved === false) {
+      throw new Error(
+        `signer ${signer} may not act for owner ${owner}: it is neither that ` +
+          'account nor one of its approved agents. Check the owner address, or ' +
+          'approve this key with approveAgent.',
+      );
+    }
+    if (approved === true) this.agentApprovals.add(pair);
   }
 
   // ============================================================================
@@ -1323,8 +1454,15 @@ export class Client {
     );
   }
 
-  /// Post quote collateral into a spot-margin account (`spot_margin_deposit`,
-  /// typed scheme).
+  /**
+   * Post quote collateral into a spot-margin account (`spot_margin_deposit`,
+   * typed scheme).
+   *
+   * @deprecated DEAD SURFACE — see `spotMarginDeposit`. The node rejects this
+   * action while cross-margin is active (live: from genesis). Fund the unified
+   * USDC account instead, then call `spotMarginOpen`. Kept so an old signature
+   * stays verifiable.
+   */
   async spotMarginDepositTyped(
     params: NativeSpotMarginDeposit,
     opts: { nonce?: bigint; chainId?: number } = {},
@@ -1336,8 +1474,15 @@ export class Client {
     );
   }
 
-  /// Withdraw free collateral from a spot-margin account (`spot_margin_withdraw`,
-  /// typed scheme).
+  /**
+   * Withdraw free collateral from a spot-margin account
+   * (`spot_margin_withdraw`, typed scheme).
+   *
+   * @deprecated DEAD SURFACE — see `spotMarginWithdraw`. The node rejects this
+   * action while cross-margin is active (live: from genesis). Withdraw
+   * account-wide with `mbWithdraw` instead. Kept so an old signature stays
+   * verifiable.
+   */
   async spotMarginWithdrawTyped(
     params: NativeSpotMarginWithdraw,
     opts: { nonce?: bigint; chainId?: number } = {},

@@ -189,6 +189,45 @@ const PARAMS_OWNER_ACTIONS: ReadonlySet<string> = new Set([
   'cancel_chase',
 ]);
 
+/// The agent-resolved `owner` a payload carries INSIDE its own wire body
+/// (`NativeSpotOrder.owner` / `NativeSpotCancel.owner` / `BatchCancel.owner`).
+/// The node reads that field from the POSTed bytes to pick its digest variant,
+/// so the client digest must bind the same value.
+function bodyOwner(
+  actionType: string,
+  payload: TypedOrderPayload,
+): string | undefined {
+  if (actionType === 'spot_order') {
+    return (payload.order as NativeSpotOrder | undefined)?.owner;
+  }
+  if (actionType === 'spot_cancel') {
+    return (payload.cancel as NativeSpotCancel | undefined)?.owner;
+  }
+  if (actionType === 'batch_cancel') {
+    return (payload.params as BatchCancel | undefined)?.owner;
+  }
+  return undefined;
+}
+
+/// Pick the one `owner` the digest binds. A spot payload may carry it in its wire
+/// body; every owner-supporting action may take it as a digest-level argument.
+/// Two DIFFERENT values would sign one owner and send another, so that throws.
+function resolveOwner(
+  actionType: string,
+  payload: TypedOrderPayload,
+  owner: string | undefined,
+): string | undefined {
+  const inBody = bodyOwner(actionType, payload);
+  if (inBody === undefined) return owner;
+  if (owner !== undefined && owner.toLowerCase() !== inBody.toLowerCase()) {
+    throw new RangeError(
+      `${actionType}: owner ${owner} differs from the wire body owner ${inBody}; ` +
+        'the digest and the sent bytes must carry the same owner',
+    );
+  }
+  return inBody;
+}
+
 /// The set of snake_case `action.type` tags the trading-set typed scheme covers.
 export const TYPED_ORDER_ACTION_TYPES: readonly string[] = Object.freeze(
   Object.keys(ENCODE_TYPES),
@@ -733,9 +772,10 @@ export interface BuiltTypedOrder {
   /// owner-carrying `batch_order` (its `BatchOrder.owner`) AND for any of the
   /// seven owner-supporting actions signed with a bound `owner`. False otherwise.
   readonly withOwner: boolean;
-  /// The digest-level agent-resolved owner bound for the seven owner-supporting
-  /// actions. `undefined` for an owner-less digest and for `batch_order` (whose
-  /// owner rides in `BatchOrder.owner`, not this field).
+  /// The agent-resolved owner bound for the seven owner-supporting actions —
+  /// from the digest-level argument, or from the wire body for `spot_order` /
+  /// `spot_cancel`. `undefined` for an owner-less digest and for `batch_order`
+  /// (whose owner rides in `BatchOrder.owner`, not this field).
   readonly owner?: string;
   /// OPTIONAL top-level action-expiry (unix-ms). `0n` = never expires, digest
   /// BYTE-IDENTICAL to the pre-existing form. Non-zero folds `,uint64 expiresAfter`
@@ -764,10 +804,11 @@ export async function buildTypedOrder(
   if (expiresAfter < 0n) throw new RangeError('expiresAfter must be non-negative');
   if (expiresAfter >= 1n << 64n) throw new RangeError('expiresAfter overflows u64');
   const chainTag = metafluxChainTag(chainId);
-  const words = await encodeOrderData(actionType, payload, chainTag, nonce, owner);
+  const bound = resolveOwner(actionType, payload, owner);
+  const words = await encodeOrderData(actionType, payload, chainTag, nonce, bound);
   // The digest-level `owner` binds only for the seven owner-supporting actions;
   // `batch_order` reports `withOwner` off its in-struct `BatchOrder.owner`.
-  const ownerBound = owner !== undefined && OWNER_SUPPORTING_ACTIONS.has(actionType);
+  const ownerBound = bound !== undefined && OWNER_SUPPORTING_ACTIONS.has(actionType);
   const withOwner =
     ownerBound ||
     (PARAMS_OWNER_ACTIONS.has(actionType) &&
@@ -780,7 +821,7 @@ export async function buildTypedOrder(
     actionJson,
     words,
     withOwner,
-    owner: ownerBound ? owner : undefined,
+    owner: ownerBound ? bound : undefined,
     expiresAfter,
   };
 }

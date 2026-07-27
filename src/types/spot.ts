@@ -8,13 +8,17 @@ import type { NativeSide, NativeStpMode, NativeTif } from './trading.js';
 import type { U64Input } from '../native/digest.js';
 
 /// MTF-native `spot_order` action shape (SE-0 spot CLOB) — byte-for-byte mirror
-/// of the server `NativeSpotOrder`. Sender-authorized (the signer is the trader,
-/// no `owner`); spot has no positions, so there is no `reduce_only` /
-/// `position_side`. v0 accepts ONLY `tif:"ioc"` with `limit_px > 0` — Gtc / Alo
-/// and a zero (market) price are rejected by the node.
+/// of the server `NativeSpotOrder`. Spot has no positions, so there is no
+/// `reduce_only` / `position_side`. All three time-in-force values work: `ioc`
+/// drops the residual, `gtc` and `alo` rest it with escrow.
 ///
 /// Field ORDER is load-bearing for the signed bytes (see `buildNativeSpotOrderAction`).
 export interface NativeSpotOrder {
+  /// Optional agent-resolved owner (`0x`-hex). With `owner` set, an APPROVED
+  /// agent of that account places the order AS the owner; absent, the signer
+  /// trades for itself. A present `owner` also enters the EIP-712 digest, so it
+  /// must match the bytes that are signed.
+  owner?: string;
   /// Spot pair id (`u32`); maps identity → asset id.
   pair: number;
   /// Side: `"bid"` (buy) or `"ask"` (sell).
@@ -40,6 +44,10 @@ export interface NativeSpotOrder {
 /// `NativeSpotCancel`. Cancels a resting spot order by `oid` (the node cancels
 /// by `oid`; there is no cancel-by-cloid on this path).
 export interface NativeSpotCancel {
+  /// Optional agent-resolved owner (`0x`-hex). With `owner` set, an APPROVED
+  /// agent of that account cancels AS the owner; absent, the signer cancels its
+  /// own order. A present `owner` also enters the EIP-712 digest.
+  owner?: string;
   /// Spot pair id (`u32`).
   pair: number;
   /// Server order id (`u64`) to cancel. REQUIRED.
@@ -58,8 +66,16 @@ export interface NativeSpotCancel {
 // 1e8 planes, like a `NativeSpotOrder`. Field ORDER is load-bearing for the
 // signed bytes (see the `buildNativeSpotMargin*` / `buildNativeEarn*` builders).
 
-/// MTF-native `spot_margin_deposit` action params — post quote collateral into
-/// the `(account, pair)` margin account. Margin must be enabled for the pair.
+/**
+ * MTF-native `spot_margin_deposit` action params — post quote collateral into
+ * the `(account, pair)` margin account.
+ *
+ * @deprecated DEAD SURFACE. The node rejects `spot_margin_deposit` while
+ * cross-margin is active, which on the live chain is from genesis. Collateral is
+ * the ONE unified USDC account, so there is no per-pair bucket to fund. Fund the
+ * account instead, then use `spot_margin_open`. The type stays because
+ * signature reconstruction needs it.
+ */
 export interface NativeSpotMarginDeposit {
   /// Spot pair id (`u32`).
   pair: number;
@@ -67,8 +83,16 @@ export interface NativeSpotMarginDeposit {
   amount: string;
 }
 
-/// MTF-native `spot_margin_withdraw` action params — withdraw free collateral
-/// back to the spendable quote balance (initial-margin-gated while open).
+/**
+ * MTF-native `spot_margin_withdraw` action params — withdraw free collateral
+ * back to the spendable quote balance.
+ *
+ * @deprecated DEAD SURFACE. The node rejects `spot_margin_withdraw` while
+ * cross-margin is active, which on the live chain is from genesis. Collateral is
+ * the ONE unified USDC account, so there is no per-pair bucket to drain.
+ * Withdraw account-wide with `mb_withdraw` instead. The type stays because
+ * signature reconstruction needs it.
+ */
 export interface NativeSpotMarginWithdraw {
   /// Spot pair id (`u32`).
   pair: number;

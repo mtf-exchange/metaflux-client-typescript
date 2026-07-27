@@ -45,8 +45,15 @@ console.log(btc.margin_tiers);
 const book = await client.info.l2Book('BTC');
 const trades = await client.info.tradesByTime('BTC', Date.now() - 3_600_000);
 const funding = await client.info.predictedFundings();
+// Price bars. The 5th argument picks the series: 'mark' (the default, perp and
+// spot) or 'oracle' (perp only). The executed-trade candle is RETIRED — a bar
+// folds a PRICE series, so v/q are always "0" and n is a sample count.
 const bars = await client.info.candleSnapshot('BTC', '1m'); // { candles: [...] }
+const oracleBars = await client.info.candleSnapshot(
+  'BTC', '1m', undefined, undefined, 'oracle',
+);
 console.log(book.bids.length, trades.trades.length, funding.length, bars.candles.length);
+console.log(oracleBars.candles.length);
 
 const acct = await client.info.accountState(
   '0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025',
@@ -56,7 +63,7 @@ console.log(acct.account_value, acct.clearinghouse_state['']?.positions);
 
 // ---- Signed order — POST /exchange (MTF-native signed action) ----
 const ack = await client.submitOrderNative({
-  owner: '0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025', // must equal the signer
+  owner: '0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025', // the signer, or its master
   market: 0, // BTC perp (asset id)
   side: 'bid', // 'bid' = buy, 'ask' = sell
   kind: 'limit',
@@ -75,9 +82,78 @@ console.log(ack.statuses?.[0]);
 The signing flow (EIP-712 over the canonical action bytes, nonce auto-assigned,
 `chainId` defaults to `MTF_CHAIN_ID` = MTF testnet `114514`; mainnet is `8964`,
 exported as `MTF_TESTNET_CHAIN_ID` / `MTF_MAINNET_CHAIN_ID`) is handled inside
-`submitOrderNative`. The
-recovered signer is checked against `owner` locally before the request leaves the
-process. Cancel via `client.cancelOrderNative({ … })`.
+`submitOrderNative`. Cancel via `client.cancelOrderNative({ … })`.
+
+#### Signing as an approved agent
+
+`owner` names the account the order rests under. The signing key may be that
+account, or any **agent** the account approved with `approveAgent` — the same two
+signers the node admits. Agent signing is the normal case: a session key signs
+for its master.
+
+Before the request leaves the process, the client recovers the signer and, when
+it differs from `owner`, reads the owner's approved agents from `/info`. An
+unrelated address — a mistyped `owner` — throws locally instead of 401ing on the
+chain. The result is cached per `(owner, signer)`, so a run of orders costs one
+extra read. An unreachable `/info` does not block the order: the node re-runs the
+check and is the authority.
+
+A batch acts for ONE account. Set `batch.owner` (or `opts.owner` on
+`placeOrder`) to act as an agent, and give every leg that same `owner` — the node
+ignores the per-leg `owner` fields and would otherwise rest the whole batch under
+the signer.
+
+### One entry point: `placeOrder`
+
+`submitOrderNative` / `batchOrder` / `submitSpotOrderNative` each reach one wire
+action directly. `placeOrder` is a convenience over them: tag each order with its
+`venue` and it picks the action for you. The tag is a discriminated union, so a
+perp-only field on a spot order is a compile error.
+
+```ts
+// All-perp, any count -> ONE `batch_order`. The node answers with one status
+// per placed leg, each echoing that leg's own cloid.
+const perp = await client.placeOrder([
+  { venue: 'perp', owner, market: 0, side: 'bid', kind: 'limit',
+    size: 1_000, limit_px: 5_000_000_000_000, tif: 'gtc',
+    stp_mode: 'cancel_newest', reduce_only: false },
+  { venue: 'perp', owner, market: 1, side: 'ask', kind: 'limit',
+    size: 500, limit_px: 300_000_000_000, tif: 'alo',
+    stp_mode: 'cancel_newest', reduce_only: true },
+]);
+if (perp.route === 'batch_order') {
+  for (const leg of perp.legs) console.log(leg.index, leg.status);
+}
+
+// All-spot -> ONE `spot_order` action PER order. `batch_order` legs are perp
+// orders, so the wire CANNOT batch spot: these are N independent submissions
+// with N nonces, and `submissions` reports each one separately.
+// `opts.owner` rides BOTH routes: the perp route puts it on the batch_order top
+// level, the spot route on every leg that omits its own `owner`.
+const spot = await client.placeOrder(
+  [
+    { venue: 'spot', pair: pair.id, side: 'bid', size: 10,
+      limit_px: 200_000_000, tif: 'ioc', stp_mode: 'cancel_oldest' },
+  ],
+  { owner },
+);
+if (spot.route === 'spot_order') {
+  for (const s of spot.submissions) console.log(s.index, s.state);
+}
+
+// MIXED perp and spot -> REJECTED. Two venues have no single wire action, and a
+// silent split would give you two independent submissions where you expect one.
+// A spot action that fails stops the run and throws `PlaceOrderPartialError`,
+// which carries the same per-action record — the earlier ones were sent.
+
+// Dry run: see the exact bytes that would be signed, without signing.
+import { planPlaceOrder } from '@metaflux-dex/client';
+const plan = planPlaceOrder([{ venue: 'perp', owner, market: 0, /* … */ }]);
+console.log(plan.route, plan.actionJson);
+```
+
+`placeOrder` converts nothing between number planes: `limit_px` stays on the 1e8
+book plane and `size` stays in raw lots, exactly as you pass them.
 
 Other native actions share the same signed-action envelope but are
 sender-authorized (the signer is the actor, so there is no `owner` to check):
@@ -92,11 +168,16 @@ await client.setPositionMode({ hedge: true });
 
 ### Spot trading
 
-The spot CLOB (v0 = IOC limit only; `limit_px` must be > 0 on the 1e8 price
-plane) is a separate book from the perp engine, keyed by a numeric **pair id**.
-Discover pairs with `client.info.spotMeta()`, trade with
-`submitSpotOrderNative` / `cancelSpotOrderNative`, and read balances back with
-`client.info.spotClearinghouseState(address)`:
+The spot CLOB is a separate book from the perp engine, keyed by a numeric **pair
+id**. Prices ride the 1e8 plane. All three time-in-force values work: `ioc` drops
+the residual, `gtc` and `alo` rest it with escrow. Discover pairs with
+`client.info.spotMeta()`, trade with `submitSpotOrderNative` /
+`cancelSpotOrderNative`, and read balances back with
+`client.info.spotClearinghouseState(address)`.
+
+Both spot actions take an optional `owner`. Set it and an **approved agent** of
+that account places or cancels AS the owner; leave it off and the signer trades
+for itself:
 
 ```ts
 // 1. Discover pairs. `name` is derived as "{base}/{quote}" from the token
@@ -105,7 +186,8 @@ const spotMeta = await client.info.spotMeta();
 const pair = spotMeta.pairs.find((p) => p.name === 'BTC/USDC')!;
 // spotMeta.tokens carries per-token decimals (sz_decimals / wei_decimals).
 
-// 2. Place an IOC limit spot order (signed, POST /exchange).
+// 2. Place an IOC limit spot order (signed, POST /exchange). Add
+//    `owner: '0x…'` to place it as an account this key is an approved agent of.
 const spotAck = await client.submitSpotOrderNative({
   pair: pair.id,
   side: 'bid',
@@ -145,8 +227,10 @@ on the raw-lot / 1e8 planes.
 // Supply side: a lender funds the pool (asset = the pair's quote token id).
 await client.earnDeposit({ asset: pair.quote, amount: '5000' });
 
-// Borrow side: post collateral, then open a leveraged long.
-await client.spotMarginDeposit({ pair: pair.id, amount: '100' });
+// Borrow side: open a leveraged long. Margin is CROSS-collateralized against
+// your one unified USDC account, so there is nothing to post per pair.
+// `spotMarginDeposit` / `spotMarginWithdraw` are DEAD: the node rejects both
+// while cross-margin is active, which on the live chain is from genesis.
 await client.spotMarginOpen({
   pair: pair.id,
   size: 200,
@@ -165,15 +249,14 @@ await client.earnWithdraw({ asset: pair.quote, shares: '1234.5' });
 ### More native actions
 
 The Client exposes the rest of the MTF-native signed-action surface, all via the
-same `{ action, nonce, signature }` → `POST /exchange` envelope. **Owner-checked**
-actions carry an actor field (`leader` / `user` / `taker` / `owner` / `sender` /
-`submitter`) that must equal the signing wallet (checked locally before the
-request leaves the process); **sender-authorized** actions have no such field —
-the recovered signer is the actor.
+same `{ action, nonce, signature }` → `POST /exchange` envelope. An
+**owner-carrying** action names the account it acts for; the signing wallet must
+be that account or one of its approved agents, and the client checks that before
+the request leaves the process. A **sender-authorized** action has no such field
+— the recovered signer is the actor.
 
-All of these are **sender-authorized** (the recovered signer is the actor) except
-`submitOrderNative` / `cancelOrderNative`, and `batchOrder` / `batchCancel` whose
-inner orders / cancels each carry an `owner` the client checks against the signer.
+`submitOrderNative` / `cancelOrderNative` / `batchOrder` / `batchCancel` are
+owner-carrying. All the others below are sender-authorized.
 
 - **Order management**: `cancelByCloid`, `modify`, `batchModify`, `batchOrder` /
   `batchCancel`, `scheduleCancel`, `cancelAllOrders`.
@@ -291,9 +374,11 @@ list; the notes below cover the shapes that most often surprise people.
 - `l2_book` carries `{coin, levels: [bids, asks], time}` and spells the
   per-level order count `n`. The REST `l2_book` read instead returns flat
   `bids` / `asks` and spells that count `n_orders`.
-- `candles` on a gateway is `{snapshot, candles}` of REST `Candle` bars. A
-  node-direct mount sends a bare array of `WsNodeCandle` instead. Narrow with
-  `Array.isArray`.
+- `candles` on a gateway is `{snapshot, candles}` of REST `Candle` bars — a
+  PRICE series, selected by the subscription's `candle_type` (`mark` default,
+  or `oracle`). A node-direct mount instead sends FILL-derived `WsNodeCandle`s:
+  an array on subscribe, then one bare object per commit. Test for the `candles`
+  key first, then for the array.
 - `markets` pushes an array of `WsMarketRow` — DYNAMIC per-market state. It is
   not the REST `markets` read, which returns static definitions.
 - The two TWAP channels keep camelCase keys (`twapId`, `executedSz`,

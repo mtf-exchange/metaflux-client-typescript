@@ -420,6 +420,9 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
     ],
   },
   // ---- spot margin (3) ----
+  // DEAD SURFACE: the node rejects `spot_margin_deposit` / `spot_margin_withdraw`
+  // while cross-margin is active (live: from genesis). Their type strings stay so
+  // an old signature can still be reconstructed and verified.
   spot_margin_deposit: {
     pascal: 'SpotMarginDeposit',
     wireType: 'spot_margin_deposit',

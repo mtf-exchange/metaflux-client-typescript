@@ -394,6 +394,35 @@ describe('InfoApi request shapes', () => {
     });
   });
 
+  // `candle_type` picks the price series. Omitting it takes the node's `mark`
+  // default, so the request bytes stay identical for a caller that never asks.
+  it('candleSnapshot OMITS candle_type unless asked', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { candles: [] };
+    await api.candleSnapshot('BTC', '1m');
+    expect(JSON.parse(captured!.body)).not.toHaveProperty('candle_type');
+  });
+
+  it('candleSnapshot sends candle_type when given', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { candles: [] };
+    await api.candleSnapshot('BTC', '1m', undefined, undefined, 'oracle');
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'candle_snapshot',
+      coin: 'BTC',
+      interval: '1m',
+      candle_type: 'oracle',
+    });
+    await api.candleSnapshot('BTC', '1m', 1_700_000_000_000, undefined, 'mark');
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'candle_snapshot',
+      coin: 'BTC',
+      interval: '1m',
+      start_time: 1_700_000_000_000,
+      candle_type: 'mark',
+    });
+  });
+
   it('candleSnapshot includes start_time/end_time ONLY when provided', async () => {
     const api = new InfoApi(BASE);
     nextData = { candles: [] };
@@ -414,7 +443,10 @@ describe('InfoApi request shapes', () => {
     });
   });
 
-  it('candleSnapshot decodes the compact bar shape', async () => {
+  // A bar folds a PRICE series, not executions: `v` / `q` are always "0" and
+  // `n` counts samples. Pinning the fixture stops the retired trade-candle
+  // shape creeping back in.
+  it('candleSnapshot decodes the compact PRICE bar shape', async () => {
     const api = new InfoApi(BASE);
     nextData = {
       candles: [
@@ -427,9 +459,9 @@ describe('InfoApi request shapes', () => {
           c: '67042.50',
           h: '67080.00',
           l: '66990.00',
-          v: '12.5',
-          q: '837843.75',
-          n: 37,
+          v: '0',
+          q: '0',
+          n: 12,
         },
       ],
     };
@@ -441,9 +473,9 @@ describe('InfoApi request shapes', () => {
     expect(bar.c).toBe('67042.50');
     // OHLC / volumes are decimal strings; times + count are JSON numbers.
     expect(typeof bar.o).toBe('string');
-    expect(typeof bar.v).toBe('string');
-    expect(typeof bar.q).toBe('string');
-    expect(typeof bar.n).toBe('number');
+    expect(bar.v).toBe('0');
+    expect(bar.q).toBe('0');
+    expect(bar.n).toBe(12);
     expect(bar.t).toBe(1_700_000_040_000);
   });
 

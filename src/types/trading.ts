@@ -107,9 +107,9 @@ export interface SignedOrder {
 /// raw `action` bytes, so the client must emit keys in this exact order and
 /// the same bytes it signed (see `buildNativeOrderAction`).
 export interface NativeOrder {
-  /// `0x`-hex 20-byte owner. MUST equal the signing wallet's address; the
-  /// server authenticates via the recovered signer and requires it to equal
-  /// `owner` (or an approved agent of it).
+  /// `0x`-hex 20-byte account the order rests under. The signing wallet must be
+  /// that account OR one of its approved agents — the node authenticates the
+  /// recovered signer against both.
   owner: string;
   /// Target market id (`u32`).
   market: number;
@@ -187,7 +187,8 @@ export interface NativeSetPositionMode {
 /// verifies the signature over the raw `action` bytes (see
 /// `buildNativeCancelAction`).
 export interface NativeCancel {
-  /// `0x`-hex 20-byte owner. MUST equal the signing wallet's address.
+  /// `0x`-hex 20-byte account whose order is cancelled. The signing wallet must
+  /// be that account OR one of its approved agents.
   owner: string;
   /// Target market id (`u32`).
   market: number;
@@ -275,9 +276,16 @@ export interface BatchOrder {
   grouping?: OrderGrouping;
 }
 
-/// `batch_cancel` action payload — N cancels under one signature. Each cancel's
-/// `owner` must equal the signing wallet and must carry an `oid`.
+/// `batch_cancel` action payload — N cancels under one signature. Each cancel
+/// must carry an `oid`.
 export interface BatchCancel {
+  /// `0x`-hex 20-byte account the whole batch acts for. Optional: when present it
+  /// is bound into the typed digest at position 2 (the owner-carrying variant)
+  /// and the node cancels that account's orders — the signer must be an approved
+  /// agent of it. When omitted, the digest keeps the owner-less form and the
+  /// batch acts for the signing wallet. The node IGNORES the per-cancel `owner`
+  /// fields: one batch acts for one account.
+  owner?: string;
   /// Cancels to apply, in order.
   cancels: NativeCancel[];
 }

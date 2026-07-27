@@ -9,6 +9,12 @@
 
 export { Client, type ClientOpts, type TradeOpts } from './client.js';
 export { MetaFluxApiError } from './rest/http.js';
+export {
+  // Unified order placement — plan a request onto the wire without signing it,
+  // and the error the spot route throws when it stops part-way.
+  planPlaceOrder,
+  PlaceOrderPartialError,
+} from './native/place.js';
 export { requestFaucet, type FaucetResponse } from './faucet.js';
 export {
   // MTF-native signed-action signing core. Exported so power users can build /
@@ -190,6 +196,7 @@ export type {
   FundingSample,
   PredictedFunding,
   Candle,
+  CandleType,
   CandleSnapshot,
   BlockInfo,
   Agents,
@@ -342,6 +349,20 @@ export type {
   NativeEarnWithdraw,
   NativeSignedAction,
   NativeExchangeAck,
+  // Unified placement (one entry point over the order wire actions).
+  PerpOrderLeg,
+  SpotOrderLeg,
+  PlaceOrderLeg,
+  PlaceOrderOpts,
+  BatchOrderPlan,
+  SpotOrderPlan,
+  PlaceOrderPlan,
+  PlacedLeg,
+  BatchPlaceResult,
+  SpotSubmissionBase,
+  SpotSubmission,
+  SpotPlaceResult,
+  PlaceOrderResult,
   // Order-management actions.
   OrderGrouping,
   Modify,

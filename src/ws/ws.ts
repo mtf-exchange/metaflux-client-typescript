@@ -28,6 +28,7 @@ import type {
 } from '../types/info/core.js';
 import type {
   Candle,
+  CandleType,
   L2BookParams,
   OpenOrder,
   OrderTif,
@@ -127,8 +128,12 @@ export const WS_CHANNELS: readonly WsChannel[] = [
 ///                  `user_twap_history`, `account_state`, `web_data`,
 ///                  `spot_margin_state`, `active_asset_data`); the 0x address.
 ///   - `interval` — `candles` only (`1m`/`5m`/`15m`/`1h`/`4h`/`1d`)
+///   - `candle_type` — `candles` only (`mark` / `oracle`)
 /// Global channels (`all_mids`, `markets`, `explorer_block`, `explorer_txs`)
 /// take none.
+///
+/// `candles` routes on all three of `coin`, `interval` and `candle_type`, so
+/// `mark` and `oracle` at one interval are independent subscriptions.
 export interface WsSubscription {
   type: WsChannel;
   /// Market symbol (`"BTC"`); a decimal asset-id string is also accepted. For
@@ -139,6 +144,11 @@ export interface WsSubscription {
   user?: string;
   /// Bar interval token (`candles` only).
   interval?: string;
+  /// Price series (`candles` on the GATEWAY mount only): `mark` (the DEFAULT,
+  /// perp and spot) or `oracle` (perp only). The ack echoes the applied value.
+  /// The retired `trade` series is rejected, never substituted. Sent verbatim,
+  /// so the key MUST stay snake_case.
+  candle_type?: CandleType;
   /// `l2_book` only — HL-style depth grouping: significant figures 2..=5. The
   /// object is serialized verbatim into the subscribe frame, so these MUST stay
   /// snake_case (the gateway's native `/ws` parser reads only snake_case).
@@ -419,7 +429,9 @@ export interface WsBbo {
   bbo: [WsL2Level | null, WsL2Level | null];
 }
 
-/// `candles` channel payload on the GATEWAY `/ws` mount.
+/// `candles` channel payload on the GATEWAY `/ws` mount. The bars fold a PRICE
+/// series — the `mark` or `oracle` series the subscription's `candle_type`
+/// selects — so they carry no volume and no trade count.
 ///
 /// The envelope carries its OWN `snapshot` flag, separate from the frame-level
 /// `WsFrame.is_snapshot`. The gateway always sends the frame flag as `false`
@@ -435,8 +447,10 @@ export interface WsCandleFrame {
 
 /// One `candles` bar on a NODE-direct `/ws` mount.
 ///
-/// A node builds its own bars and labels them `coin` / `interval`, with no
-/// quote volume. The gateway does not serve this shape — see `WsCandleFrame`.
+/// A node builds its own bars from FILLS and labels them `coin` / `interval`,
+/// with no quote volume. It routes on `(coin, interval)` alone and ignores
+/// `candle_type` — the price series lives on the gateway mount only. The gateway
+/// does not serve this shape — see `WsCandleFrame`.
 export interface WsNodeCandle {
   /// Market symbol (e.g. `"BTC"`).
   coin: string;
@@ -789,6 +803,7 @@ export interface WsSigner {
 function subKey(s: WsSubscription): string {
   return (
     `${s.type}:${s.coin ?? ''}:${s.user ?? ''}:${s.interval ?? ''}` +
+    `:${s.candle_type ?? ''}` +
     `:${s.n_sig_figs ?? ''}:${s.mantissa ?? ''}:${s.n_levels ?? ''}`
   );
 }
@@ -945,9 +960,16 @@ export class WsClient {
     return this.subscribe({ type: 'active_asset_ctx', coin });
   }
 
-  /// Subscribe to OHLCV candles for a market + interval token.
-  async subscribeCandles(coin: string, interval: string): Promise<void> {
-    return this.subscribe({ type: 'candles', coin, interval });
+  /// Subscribe to price bars for a market + interval token. `candleType` picks
+  /// the series and defaults to `mark`; it is sent ONLY when provided.
+  async subscribeCandles(
+    coin: string,
+    interval: string,
+    candleType?: CandleType,
+  ): Promise<void> {
+    const sub: WsSubscription = { type: 'candles', coin, interval };
+    if (candleType !== undefined) sub.candle_type = candleType;
+    return this.subscribe(sub);
   }
 
   /// Subscribe to the global all-market mids stream.

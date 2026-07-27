@@ -263,11 +263,25 @@ export interface PredictedFunding {
   next_funding_ts: number;
 }
 
-/// One OHLCV bar from the `candle_snapshot` read.
+/// The price series a candle folds — the `candle_type` request field.
+///
+/// `"mark"` is the DEFAULT and serves perp and spot markets. `"oracle"` serves
+/// perp markets only; a spot pair always answers empty. The executed-trade
+/// candle is RETIRED: `"trade"` is rejected like any other unknown token, never
+/// served as the other series.
+export type CandleType = 'mark' | 'oracle';
+
+/// One price bar from the `candle_snapshot` read.
 ///
 /// Compact keys: `t`/`T` bar open/close epoch-ms, `s` symbol, `i` interval
-/// token, `o`/`c`/`h`/`l` whole-USDC decimal strings, `v` base volume, `q`
-/// quote (USD) volume, `n` fill count.
+/// token, `o`/`c`/`h`/`l` whole-USDC decimal strings, `v`/`q` always `"0"`,
+/// `n` sample count.
+///
+/// The bar folds a SAMPLED price series, not the continuous price path, and it
+/// folds no trades. `o`/`c` are the first and last sample of the window;
+/// `h`/`l` are the extremes OF THE SAMPLES. A spike between two samples leaves
+/// no trace. Do not build wick analysis or a "did the price touch X?" test on
+/// these bars.
 ///
 /// The gateway `candles` WS channel carries this SAME bar, wrapped in the
 /// `WsCandleFrame` envelope. A node-direct `/ws` mount carries a DIFFERENT bar
@@ -289,24 +303,30 @@ export interface Candle {
   h: string;
   /// Low price, whole-USDC decimal string.
   l: string;
-  /// Base-asset volume in the bar, decimal string (coin size, not notional).
+  /// Always `"0"`. A price bar folds no trades, so it carries no base-asset
+  /// volume. Read executions from `recent_trades` / `trades_by_time`.
   v: string;
-  /// Quote / USD (notional) volume in the bar, decimal string.
+  /// Always `"0"`. A price bar folds no trades, so it carries no quote volume.
   q: string;
-  /// Fill count in the bar.
+  /// Sample count — how many price samples the bar folded. NOT a trade count.
+  /// `0` on a carry-forward bar.
   n: number;
 }
 
-/// `candle_snapshot` — historical OHLCV bars for `(coin, interval)`. The REST
-/// companion to the live `candles` WS channel; bars come oldest-first, the
-/// newest element is the still-forming bar.
+/// `candle_snapshot` — historical price bars for `(coin, interval, candle_type)`.
+/// The REST companion to the live `candles` WS channel; bars come oldest-first,
+/// the newest element is the still-forming bar.
+///
+/// The series is GAPLESS: a window with no sample carries the previous close
+/// forward as a flat bar (`o = h = l = c`, `n = 0`). A bar needs no trade,
+/// because a price exists at all times.
 ///
 /// GATEWAY-served, not node: candles are derived display data — query the
 /// gateway `/info`; a bare node returns `unknown info type: candle_snapshot`.
-/// `{candles: []}` is the honest-empty answer for an unsupported interval or
-/// a market with no indexed trades.
+/// `{candles: []}` is the honest-empty answer for a market with no history in
+/// that series — for example a spot pair asked for `oracle`.
 export interface CandleSnapshot {
-  /// OHLCV bars, oldest first.
+  /// Price bars, oldest first.
   candles: Candle[];
 }
 

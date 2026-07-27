@@ -199,8 +199,9 @@ export function buildNativeSetPositionModeAction(
 /// `alo` residual RESTS with escrow and counts against the per-account resting
 /// cap. A `limit_px` of `0` is a MARKET order, which the node accepts only with
 /// `tif:"ioc"` — a resting residual would otherwise sit at price 0. `tif`
-/// defaults to `"ioc"`. Sender-authorized (no `owner`); the returned string is
-/// BOTH signed and sent.
+/// defaults to `"ioc"`. With `owner` present an APPROVED agent places the order
+/// AS that owner; absent, the signer trades for itself and the bytes stay
+/// identical to an owner-less client. The returned string is BOTH signed and sent.
 export function buildNativeSpotOrderAction(order: NativeSpotOrder): string {
   validateMarket(order.pair);
   validateU64(order.size, 'size');
@@ -211,14 +212,19 @@ export function buildNativeSpotOrderAction(order: NativeSpotOrder): string {
   if (toU64(order.limit_px, 'limit_px') <= 0n && tif !== 'ioc') {
     throw new RangeError('spot_order: a market order (limit_px 0) requires tif="ioc"');
   }
-  const parts: string[] = [
+  const parts: string[] = [];
+  if (order.owner !== undefined) {
+    validateAddress(order.owner, 'owner');
+    parts.push(`${jsonStr('owner')}:${jsonStr(order.owner)}`);
+  }
+  parts.push(
     `${jsonStr('pair')}:${order.pair}`,
     `${jsonStr('side')}:${jsonStr(order.side)}`,
     `${jsonStr('size')}:${toU64(order.size, 'size')}`,
     `${jsonStr('limit_px')}:${toU64(order.limit_px, 'limit_px')}`,
     `${jsonStr('tif')}:${jsonStr(tif)}`,
     `${jsonStr('stp_mode')}:${jsonStr(order.stp_mode)}`,
-  ];
+  );
   if (order.cloid !== undefined) {
     validateCloid(order.cloid);
     parts.push(`${jsonStr('cloid')}:${jsonStr(order.cloid)}`);
@@ -231,19 +237,28 @@ export function buildNativeSpotOrderAction(order: NativeSpotOrder): string {
 ///
 /// `{"type":"spot_cancel","cancel":{"pair":<u32>,"oid":<u64>}}`. The node
 /// cancels a resting spot order by `oid`, so `oid` is REQUIRED. Field order
-/// mirrors the server `NativeSpotCancel`; the returned string is signed and sent.
+/// mirrors the server `NativeSpotCancel`. With `owner` present an APPROVED agent
+/// cancels AS that owner; absent, the signer cancels its own order and the bytes
+/// stay identical to an owner-less client. The returned string is signed and sent.
 export function buildNativeSpotCancelAction(cancel: NativeSpotCancel): string {
   validateMarket(cancel.pair);
   validateU64(cancel.oid, 'oid');
-  const cancelJson = `{${jsonStr('pair')}:${cancel.pair},${jsonStr('oid')}:${cancel.oid}}`;
+  const parts: string[] = [];
+  if (cancel.owner !== undefined) {
+    validateAddress(cancel.owner, 'owner');
+    parts.push(`${jsonStr('owner')}:${jsonStr(cancel.owner)}`);
+  }
+  parts.push(`${jsonStr('pair')}:${cancel.pair}`, `${jsonStr('oid')}:${cancel.oid}`);
+  const cancelJson = `{${parts.join(',')}}`;
   return `{${jsonStr('type')}:${jsonStr('spot_cancel')},${jsonStr('cancel')}:${cancelJson}}`;
 }
 
 // ============================================================================
 // Real node /exchange write actions. Each hand-builds canonical snake_case JSON
-// (the same string is signed and POSTed). All are sender-authorized (no `owner`
-// field) except the inner orders/cancels of batch_order / batch_cancel, which
-// carry an `owner` the client checks against the recovered signer.
+// (the same string is signed and POSTed). An action that carries an `owner` acts
+// for that account, and the signer must be the account or one of its approved
+// agents. A batch carries its `owner` at the TOP level: the node ignores the
+// per-item `owner` fields and routes the whole batch under one account.
 // ============================================================================
 
 /// Build the inner `{...}` body of one perp order (the value under `order` in
@@ -372,10 +387,20 @@ export function buildNativeBatchOrderAction(params: BatchOrder): string {
   return wrapParams('batch_order', `{${parts.join(',')}}`);
 }
 
-/// `batch_cancel` — N cancels under one signature.
+/// `batch_cancel` — N cancels under one signature. A params-level `owner` names
+/// the account the whole batch acts for (the signer must be an approved agent of
+/// it) and is bound into the typed digest; absent, the batch acts for the signing
+/// wallet and the bytes stay identical to an owner-less client. The `owner` is
+/// emitted first, mirroring the server `NativeBatchCancel` field order.
 export function buildNativeBatchCancelAction(params: BatchCancel): string {
   const arr = params.cancels.map(buildCancelBody).join(',');
-  return wrapParams('batch_cancel', `{${jsonStr('cancels')}:[${arr}]}`);
+  const parts: string[] = [];
+  if (params.owner !== undefined) {
+    validateAddress(params.owner, 'owner');
+    parts.push(`${jsonStr('owner')}:${jsonStr(params.owner)}`);
+  }
+  parts.push(`${jsonStr('cancels')}:[${arr}]`);
+  return wrapParams('batch_cancel', `{${parts.join(',')}}`);
 }
 
 /// `schedule_cancel` — cancel-all of the sender's open orders at a future block.
@@ -973,15 +998,18 @@ export function buildNativeMbWithdrawAction(params: MbWithdraw): string {
 // the server struct declaration order.
 // ============================================================================
 
-/// Build the canonical native `spot_margin_deposit` action JSON string.
-///
-/// RETIRED: superseded by unified cross-margin — the live node no longer keeps a
-/// per-pair isolated bucket to fund (collateral rides the shared USDC cross
-/// pool). Kept for back-compat only; the live node rejects it.
-///
-/// `{"type":"spot_margin_deposit","params":{"pair":<u32>,"amount":"<decimal>"}}`.
-/// Posts quote collateral into the `(account, pair)` margin account (margin must
-/// be enabled for the pair). SENDER-AUTHORIZED.
+/**
+ * Build the canonical native `spot_margin_deposit` action JSON string.
+ *
+ * `{"type":"spot_margin_deposit","params":{"pair":<u32>,"amount":"<decimal>"}}`.
+ * SENDER-AUTHORIZED.
+ *
+ * @deprecated DEAD SURFACE. The node rejects `spot_margin_deposit` while
+ * cross-margin is active, which on the live chain is from genesis. Collateral is
+ * the ONE unified USDC account, so there is no per-pair bucket to fund. Fund the
+ * account instead, then use `spot_margin_open`. This builder stays because
+ * signature reconstruction needs the exact bytes.
+ */
 export function buildNativeSpotMarginDepositAction(
   params: NativeSpotMarginDeposit,
 ): string {
@@ -991,15 +1019,18 @@ export function buildNativeSpotMarginDepositAction(
   return `{${jsonStr('type')}:${jsonStr('spot_margin_deposit')},${jsonStr('params')}:${paramsJson}}`;
 }
 
-/// Build the canonical native `spot_margin_withdraw` action JSON string.
-///
-/// RETIRED: superseded by unified cross-margin (see `spot_margin_deposit`). Kept
-/// for back-compat only; the live node rejects it — free collateral now lives in
-/// the shared USDC cross pool.
-///
-/// `{"type":"spot_margin_withdraw","params":{"pair":<u32>,"amount":"<decimal>"}}`.
-/// Withdraws free collateral (initial-margin-gated while a position is open).
-/// SENDER-AUTHORIZED.
+/**
+ * Build the canonical native `spot_margin_withdraw` action JSON string.
+ *
+ * `{"type":"spot_margin_withdraw","params":{"pair":<u32>,"amount":"<decimal>"}}`.
+ * SENDER-AUTHORIZED.
+ *
+ * @deprecated DEAD SURFACE. The node rejects `spot_margin_withdraw` while
+ * cross-margin is active, which on the live chain is from genesis. Collateral is
+ * the ONE unified USDC account, so there is no per-pair bucket to drain.
+ * Withdraw account-wide with `mb_withdraw` instead. This builder stays because
+ * signature reconstruction needs the exact bytes.
+ */
 export function buildNativeSpotMarginWithdrawAction(
   params: NativeSpotMarginWithdraw,
 ): string {

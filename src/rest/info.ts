@@ -30,6 +30,7 @@ import type {
   Agents,
   BlockInfo,
   CandleSnapshot,
+  CandleType,
   DelegatorSummary,
   EarnState,
   EncodeAction,
@@ -269,15 +270,21 @@ export class InfoApi {
     return this.post<PredictedFunding[]>({ type: 'predicted_fundings' });
   }
 
-  /// `candle_snapshot` — historical OHLCV bars for `(coin, interval)` over an
-  /// optional window. The single candle query on this surface, and the REST
-  /// companion to the live `candles` WS channel.
+  /// `candle_snapshot` — historical price bars for `(coin, interval,
+  /// candleType)` over an optional window. The single candle query on this
+  /// surface, and the REST companion to the live `candles` WS channel.
   ///
   /// `coin` is the market symbol (`"BTC"`); `interval` is one of
   /// `1m`/`5m`/`15m`/`1h`/`4h`/`1d`. `startTime` / `endTime` are unix-ms
   /// filters on bar open, sent as `start_time` / `end_time` ONLY when
   /// provided. Bars come oldest-first (compact keys, `o`/`c`/`h`/`l`
   /// whole-USDC decimal strings); the newest element is the still-forming bar.
+  ///
+  /// `candleType` picks the price series: `"mark"` (the DEFAULT, perp and spot)
+  /// or `"oracle"` (perp only). It is sent as `candle_type` ONLY when provided,
+  /// so an omitted value takes the node's `mark` default. The executed-trade
+  /// candle is RETIRED — the node rejects `trade` and never substitutes the
+  /// other series.
   ///
   /// GATEWAY-served, not node: must hit `api.<net>.mtf.exchange/info`; a
   /// bare node returns `unknown info type: candle_snapshot`.
@@ -286,6 +293,7 @@ export class InfoApi {
     interval: string,
     startTime?: number,
     endTime?: number,
+    candleType?: CandleType,
   ): Promise<CandleSnapshot> {
     const body: { type: string; [k: string]: unknown } = {
       type: 'candle_snapshot',
@@ -294,6 +302,7 @@ export class InfoApi {
     };
     if (startTime !== undefined) body.start_time = startTime;
     if (endTime !== undefined) body.end_time = endTime;
+    if (candleType !== undefined) body.candle_type = candleType;
     return this.post<CandleSnapshot>(body);
   }
 
