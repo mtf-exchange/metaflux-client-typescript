@@ -52,6 +52,7 @@ import { WsClient, type WsConfig } from './ws/ws.js';
 import type {
   AgentSetAbstraction,
   ApproveAgent,
+  ApproveBrokerFee,
   ApproveBuilderFee,
   BatchCancel,
   BatchModify,
@@ -800,16 +801,28 @@ export class Client {
     );
   }
 
-  /// Approve a builder fee ceiling (`max_bps`; `0` revokes) via `POST /exchange`.
+  /// Approve a broker fee ceiling (`max_bps`; `0` revokes) via `POST /exchange`.
+  ///
+  /// The POSTed tag is `approve_broker_fee`. The EIP-712 type string stays
+  /// `ApproveBuilderFee`, which is consensus-frozen, so the two names differ on
+  /// purpose.
+  async approveBrokerFee(
+    params: ApproveBrokerFee,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'approve_broker_fee',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Old name for `approveBrokerFee`.
   async approveBuilderFee(
     params: ApproveBuilderFee,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
-    return this.submitTyped(
-      'approve_builder_fee',
-      params as unknown as Record<string, unknown>,
-      opts,
-    );
+    return this.approveBrokerFee(params, opts);
   }
 
   /// Convert the account to an M-of-N multisig via `POST /exchange`.

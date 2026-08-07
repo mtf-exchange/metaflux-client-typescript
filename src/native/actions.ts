@@ -26,6 +26,7 @@ import {
 import type {
   AgentSetAbstraction,
   ApproveAgent,
+  ApproveBrokerFee,
   ApproveBuilderFee,
   BatchCancel,
   BatchModify,
@@ -755,16 +756,24 @@ export function buildNativeApproveAgentAction(params: ApproveAgent): string {
   return wrapParams('approve_agent', `{${parts.join(',')}}`);
 }
 
-/// `approve_builder_fee` — approve a builder up to `max_bps` (`0` revokes).
-export function buildNativeApproveBuilderFeeAction(
-  params: ApproveBuilderFee,
+/// `approve_broker_fee` — approve a broker up to `max_bps` (`0` revokes).
+/// The wire key stays `builder`; only the action tag moved.
+export function buildNativeApproveBrokerFeeAction(
+  params: ApproveBrokerFee,
 ): string {
   validateAddress(params.builder, 'builder');
   validateU16(params.max_bps, 'max_bps');
   return wrapParams(
-    'approve_builder_fee',
+    'approve_broker_fee',
     `{${jsonStr('builder')}:${jsonStr(params.builder)},${jsonStr('max_bps')}:${params.max_bps}}`,
   );
+}
+
+/// Old name for `buildNativeApproveBrokerFeeAction`.
+export function buildNativeApproveBuilderFeeAction(
+  params: ApproveBuilderFee,
+): string {
+  return buildNativeApproveBrokerFeeAction(params);
 }
 
 /// `convert_to_multi_sig_user` — convert the account to an M-of-N multisig.

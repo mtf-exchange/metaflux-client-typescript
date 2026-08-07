@@ -240,9 +240,19 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
     wireType: 'set_referrer',
     fields: [f('referrer', 'address', 'referrer')],
   },
+  // `pascal` stays `ApproveBuilderFee`: the EIP-712 type string is
+  // consensus-frozen, so only the wire tag moves to the broker name.
+  approve_broker_fee: {
+    pascal: 'ApproveBuilderFee',
+    wireType: 'approve_broker_fee',
+    fields: [
+      f('builder', 'address', 'builder'),
+      f('maxFeeBps', 'uint16', 'max_bps'),
+    ],
+  },
   approve_builder_fee: {
     pascal: 'ApproveBuilderFee',
-    wireType: 'approve_builder_fee',
+    wireType: 'approve_broker_fee',
     fields: [
       f('builder', 'address', 'builder'),
       f('maxFeeBps', 'uint16', 'max_bps'),

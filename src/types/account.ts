@@ -60,14 +60,17 @@ export interface ApproveAgent {
   expires_at_ms?: number;
 }
 
-/// `approve_builder_fee` — approve a builder to charge up to `max_bps` on this
-/// account's orders. `max_bps = 0` revokes.
+/// `approve_broker_fee` — approve a broker to charge up to `max_bps` on this
+/// account's orders. `max_bps = 0` revokes. The wire key stays `builder`.
 export interface ApproveBuilderFee {
-  /// `0x`-hex 20-byte builder address.
+  /// `0x`-hex 20-byte broker address.
   builder: string;
   /// Maximum approved fee in basis points (`u16`).
   max_bps: number;
 }
+
+/// Canonical name for `ApproveBuilderFee`.
+export type ApproveBrokerFee = ApproveBuilderFee;
 
 /// `convert_to_multi_sig_user` — convert the account to an M-of-N multisig.
 export interface ConvertToMultiSigUser {

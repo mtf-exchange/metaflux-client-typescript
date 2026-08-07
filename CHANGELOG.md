@@ -7,6 +7,22 @@ All notable changes to the TypeScript SDK are documented here.
 The Rust SDK ships the same wire realignment as its 0.16.0. The two SDKs stay in
 step, so this release takes the same number.
 
+### The approve-fee action tag moves to `approve_broker_fee`
+
+`POST /exchange` now takes `approve_broker_fee`. The node accepts BOTH names, so
+an old client keeps working; this SDK emits the new one. `approveBrokerFee` and
+`buildNativeApproveBrokerFeeAction` are the canonical names. `approveBuilderFee`
+and `buildNativeApproveBuilderFeeAction` stay as old names and now emit the new
+tag. `ApproveBrokerFee` is an alias of `ApproveBuilderFee`.
+
+**Deploy the node before you upgrade.** A node binary that predates the alias
+rejects the new tag.
+
+The EIP-712 type string stays
+`MetaFluxTransaction:ApproveBuilderFee(string metafluxChain,address builder,uint16 maxFeeBps,uint64 nonce)`.
+It is consensus-frozen: one changed byte breaks verification of every historical
+signature. The wire tag and the signing string therefore differ on purpose.
+
 ### An approved agent may sign an owner-carrying action (fix)
 
 The client required every `owner` to equal the recovered signer. The node does

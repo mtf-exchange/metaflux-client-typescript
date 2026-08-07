@@ -264,7 +264,8 @@ owner-carrying. All the others below are sender-authorized.
 - **Leverage & margin**: `updateLeverage`, `updateIsolatedMargin`,
   `topUpIsolatedOnlyMargin`, `userPortfolioMargin` (portfolio-margin enroll).
 - **Account & agents**: `setDisplayName`, `setReferrer`, `approveAgent`,
-  `approveBuilderFee`, `convertToMultiSigUser`, `userSetAbstraction`,
+  `approveBrokerFee` (old name `approveBuilderFee`), `convertToMultiSigUser`,
+  `userSetAbstraction`,
   `agentSetAbstraction`, `priorityBid`.
 - **Staking**: `tokenDelegate`, `claimRewards`, `linkStakingUser`.
 - **Vaults**: `createVault`, `vaultTransfer`, `vaultModify`, `vaultWithdraw`.

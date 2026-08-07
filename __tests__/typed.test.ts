@@ -79,6 +79,13 @@ const VECTORS: Vector[] = [
     nonce: 3n,
     digest: 'ca2b79bb54279dcb4b213e3a46e900fff14178a6d3708623ea04a6797e19ef72',
   },
+  // Same pin under the canonical key: the tag moved, the digest did not.
+  {
+    actionType: 'approve_broker_fee',
+    payload: { builder: addr(0xc3), max_bps: 25 },
+    nonce: 3n,
+    digest: 'ca2b79bb54279dcb4b213e3a46e900fff14178a6d3708623ea04a6797e19ef72',
+  },
   {
     actionType: 'set_display_name',
     payload: { display_name: 'alice' },
@@ -342,7 +349,8 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
 
   it('reproduces all 38 contract KAT digests byte-for-byte (chain 114514)', async () => {
     const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
-    expect(VECTORS.length).toBe(38);
+    // 39 vectors, 38 actions: the two approve-fee keys share one digest pin.
+    expect(VECTORS.length).toBe(39);
     for (const v of VECTORS) {
       const built = buildTyped(v.actionType, v.payload, v.nonce, CHAIN_ID);
       const digest = await typedActionDigest(built);
@@ -528,6 +536,28 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(JSON.parse(signed.actionJson)).toEqual(parsed.action);
   });
 
+  it('both approve-fee keys emit the broker tag and the SAME digest', async () => {
+    const { buildTyped, typedActionDigest, encodeType } = await import(
+      '../src/native/typed.js'
+    );
+    const payload = { builder: addr(0xc3), max_bps: 25 };
+    const broker = buildTyped('approve_broker_fee', payload, 3n, CHAIN_ID);
+    const builder = buildTyped('approve_builder_fee', payload, 3n, CHAIN_ID);
+
+    for (const built of [broker, builder]) {
+      const action = JSON.parse(built.actionJson) as { type: string };
+      expect(action.type).toBe('approve_broker_fee');
+    }
+    expect(builder.actionJson).toBe(broker.actionJson);
+    expect(toHex(await typedActionDigest(builder))).toBe(
+      toHex(await typedActionDigest(broker)),
+    );
+    // The EIP-712 type string is consensus-frozen and does NOT follow the tag.
+    expect(encodeType('approve_broker_fee')).toBe(
+      'MetaFluxTransaction:ApproveBuilderFee(string metafluxChain,address builder,uint16 maxFeeBps,uint64 nonce)',
+    );
+  });
+
   it('digest is sensitive to nonce and chainId', async () => {
     const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
     const base = await typedActionDigest(
@@ -545,7 +575,11 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
 
   it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 47 reachable actions', async () => {
     const { isTypedAction, TYPED_ACTION_TYPES } = await import('../src/native/typed.js');
-    expect(TYPED_ACTION_TYPES.length).toBe(47);
+    // 48 keys, 47 actions: `approve_builder_fee` is the old key for
+    // `approve_broker_fee` and shares its spec.
+    expect(TYPED_ACTION_TYPES.length).toBe(48);
+    expect(isTypedAction('approve_broker_fee')).toBe(true);
+    expect(isTypedAction('approve_builder_fee')).toBe(true);
     // The multi-sig acting wrapper (user + inner blob + roster signatures).
     expect(isTypedAction('multi_sig')).toBe(true);
     expect(isTypedAction('approve_agent')).toBe(true);

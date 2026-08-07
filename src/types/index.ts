@@ -80,6 +80,7 @@ export type {
   SetDisplayName,
   SetReferrer,
   ApproveAgent,
+  ApproveBrokerFee,
   ApproveBuilderFee,
   ConvertToMultiSigUser,
   UserSetAbstraction,
