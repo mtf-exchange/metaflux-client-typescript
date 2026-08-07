@@ -103,18 +103,27 @@ export interface SpotClearinghouseState {
 export interface ExchangeStatus {
   /// Spot trading globally disabled.
   spot_disabled: boolean;
-  /// Post-only window end (consensus ms); `0` = none.
-  post_only_until_time: number;
-  /// Post-only window end (height); `0` = none.
-  post_only_until_height: number;
-  /// Scheduled upgrade-halt height, or `null` if none.
-  scheduled_freeze_height: number | null;
+  /// A post-only window is in force — new orders must be maker-only.
+  post_only: boolean;
   /// `true` once any MIP-3 market/pair spec is registered.
   mip3_enabled: boolean;
-  /// Whether the chain is currently upgrade-frozen.
+  /// A pending upgrade halt. It does NOT say when: the height that dated it is
+  /// operator detail and is no longer published here.
   frozen: boolean;
-  /// Whether startup replay has completed (reads are live).
-  replay_complete: boolean;
+  /// Consensus block time, ms — the "as of" for every field above.
+  timestamp: number;
+
+  /// @deprecated Removed from the public status. Present only while an older
+  /// gateway is still deployed; read `post_only` instead.
+  post_only_until_time?: number;
+  /// @deprecated Removed from the public status. Read `post_only` instead.
+  post_only_until_height?: number;
+  /// @deprecated Removed from the public status. An older gateway also computes
+  /// `frozen` with a stale comparison that reads `true` forever once any
+  /// upgrade completes — do not trust either field against an old deployment.
+  scheduled_freeze_height?: number | null;
+  /// @deprecated Removed from the public status.
+  replay_complete?: boolean;
 }
 
 /// One account flagged for liquidation.

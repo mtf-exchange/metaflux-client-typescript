@@ -207,6 +207,26 @@ export interface UserFill {
   /// Transaction hash of the originating order (`0x`-hex); empty string when
   /// there is no signed taker action (maker legs / system fills).
   hash: string;
+  /// Why this leg executed when the party did NOT cross by its own order:
+  /// `'forced_close_partial'` / `'forced_close_full'` (the liquidation ladder),
+  /// `'forced_close_isolated'`, `'trigger'`, or `'twap'`.
+  ///
+  /// Absent on an ordinary fill and on EVERY maker leg — a counterparty that
+  /// was merely hit is not itself forced.
+  cause?: string;
+  /// The account whose position was closed. Present on a forced-close leg, on
+  /// BOTH sides of the print, so a taker can see whose liquidation it took on.
+  liquidated_user?: string;
+  /// The mark the liquidation ladder priced from when it classified — NOT the
+  /// fill price. Present with `liquidated_user`.
+  mark_px?: string;
+  /// The broker that routed the order. Taker leg only.
+  broker?: string;
+  /// The broker carve charged on this fill, whole-USDC decimal string. `'0'` is
+  /// legal — a zero-rate broker is still attributed.
+  broker_fee?: string;
+  /// The parent TWAP this slice belongs to. Present when `cause` is `'twap'`.
+  twap_id?: number;
 }
 
 /// `user_fills` — account-scoped fill history, keyed by `address`. Newest
@@ -269,13 +289,21 @@ export interface PredictedFunding {
 /// perp markets only; a spot pair always answers empty. The executed-trade
 /// candle is RETIRED: `"trade"` is rejected like any other unknown token, never
 /// served as the other series.
-export type CandleType = 'mark' | 'oracle';
+/// The candle series selector.
+///
+/// A PRICE series (`mark`, `oracle`) has a bar in every window its samples
+/// cover. The `trade` series is SPARSE: a window with no fill has NO bar, never
+/// a carried-forward one — do not gap-fill it.
+///
+/// `v` and `n` also differ. A price bar reports `v` as `"0"` and `n` as a
+/// SAMPLE count; a trade bar reports real volume and a real trade count.
+export type CandleType = 'mark' | 'oracle' | 'trade';
 
-/// One price bar from the `candle_snapshot` read.
+/// One bar from the `candle_snapshot` read.
 ///
 /// Compact keys: `t`/`T` bar open/close epoch-ms, `s` symbol, `i` interval
-/// token, `o`/`c`/`h`/`l` whole-USDC decimal strings, `v`/`q` always `"0"`,
-/// `n` sample count.
+/// token, `o`/`c`/`h`/`l` whole-USDC decimal strings, `v`/`q` and `n` — see
+/// [`CandleType`] for what those three mean per series.
 ///
 /// The bar folds a SAMPLED price series, not the continuous price path, and it
 /// folds no trades. `o`/`c` are the first and last sample of the window;

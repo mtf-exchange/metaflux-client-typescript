@@ -313,6 +313,33 @@ const VECTORS: Vector[] = [
 ];
 
 describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
+  /// PRESENCE selects the type string, not emptiness. An EMPTY payload and a
+  /// chain id of `0` are both present, so both must choose V2 — a transfer
+  /// signed under the wrong string is rejected on arrival. An envelope with
+  /// NEITHER key must keep the original string, so an existing caller is
+  /// unaffected.
+  it('core_evm_transfer picks its type string by field PRESENCE', async () => {
+    const { buildTyped, primaryType } = await import('../src/native/typed.js');
+    const base = { amount: '1', to_evm: true, destination: addr(0xce), asset: 0 };
+    const plain = buildTyped('core_evm_transfer', { ...base }, 1n);
+    expect(primaryType(plain.actionType)).toBe(
+      'MetaFluxTransaction:CoreEvmTransfer',
+    );
+
+    for (const [label, extra] of [
+      ['an EMPTY payload is still present', { data: [] }],
+      ['a chain id of 0 is still present', { destination_chain_id: 0 }],
+      ['a real payload', { data: [1, 2, 3] }],
+    ] as const) {
+      const v2 = buildTyped('core_evm_transfer', { ...base, ...extra }, 1n);
+      expect(primaryType(v2.actionType), label).toBe(
+        'MetaFluxTransaction:CoreEvmTransferV2',
+      );
+      // The WIRE action is unchanged — only the signed type string moves.
+      expect(JSON.parse(v2.actionJson).type, label).toBe('core_evm_transfer');
+    }
+  });
+
   it('reproduces all 38 contract KAT digests byte-for-byte (chain 114514)', async () => {
     const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
     expect(VECTORS.length).toBe(38);

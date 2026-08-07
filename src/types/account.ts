@@ -168,4 +168,20 @@ export interface CoreEvmTransfer {
   /// MTF asset id to move (omit / `0` = USDC). Part of the signed digest, so a
   /// relay can't redirect the transfer to a different spot token.
   asset?: number;
+  /// EVM calldata run against `destination` AFTER the credit lands, as a real
+  /// transaction with its own receipt.
+  ///
+  /// A reverting payload NEVER unwinds the credit: Core was debited, the EVM
+  /// was credited, and the call is additional. Read its receipt.
+  ///
+  /// **Presence selects the signing type.** Including this key — even as an
+  /// empty array — signs under `CoreEvmTransferV2`.
+  data?: number[];
+  /// Delivery chain. `0` or the local EVM chain id only; anything else is
+  /// rejected, because cross-chain delivery is not built. The field exists so
+  /// the capability has a signed slot.
+  ///
+  /// **Presence selects the signing type.** Including this key — even as `0` —
+  /// signs under `CoreEvmTransferV2`.
+  destination_chain_id?: number;
 }

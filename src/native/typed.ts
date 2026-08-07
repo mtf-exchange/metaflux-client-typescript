@@ -477,6 +477,21 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('asset', 'uint32', 'asset'),
     ],
   },
+  // The payload-carrying form of the SAME wire action. It is never named by a
+  // caller: `resolveTypedKey` picks it when the params carry `data` or
+  // `destination_chain_id`. Both entries send `core_evm_transfer` on the wire.
+  core_evm_transfer_v2: {
+    pascal: 'CoreEvmTransferV2',
+    wireType: 'core_evm_transfer',
+    fields: [
+      f('amount', 'string-decimal', 'amount'),
+      f('toEvm', 'bool', 'to_evm'),
+      f('destination', 'address', 'destination'),
+      f('asset', 'uint32', 'asset'),
+      f('destinationChainId', 'uint32', 'destination_chain_id'),
+      f('data', 'bytes', 'data'),
+    ],
+  },
   // ---- account / sub-account / staking / abstraction / priority / encrypted ----
   // (formerly un-mapped on the typed-only `/exchange` — now reachable.)
   //
@@ -632,13 +647,43 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
 };
 
 /// The set of snake_case `action.type` tags the typed scheme covers.
+/// Spec keys a caller must NEVER name. They are variants of another action's
+/// type string, selected from the params, and they carry that action's
+/// `wireType` — listing them would advertise an action the server has no name
+/// for.
+const INTERNAL_SPEC_KEYS: ReadonlySet<string> = new Set(['core_evm_transfer_v2']);
+
 export const TYPED_ACTION_TYPES: readonly string[] = Object.freeze(
-  Object.values(TYPED_SPECS).map((s) => s.wireType),
+  Object.entries(TYPED_SPECS)
+    .filter(([k]) => !INTERNAL_SPEC_KEYS.has(k))
+    .map(([, v]) => v.wireType),
 );
 
 /// Whether the given snake_case action type is one of the typed actions.
 export function isTypedAction(actionType: string): boolean {
-  return Object.prototype.hasOwnProperty.call(TYPED_SPECS, actionType);
+  return (
+    !INTERNAL_SPEC_KEYS.has(actionType) &&
+    Object.prototype.hasOwnProperty.call(TYPED_SPECS, actionType)
+  );
+}
+
+/// Map a caller's action type onto the spec key its PARAMS select.
+///
+/// Only `core_evm_transfer` is polymorphic. PRESENCE is the selector, not
+/// emptiness: an empty `data` and a `destination_chain_id` of `0` both choose
+/// the V2 type string. An envelope with neither key digests byte-identically to
+/// one built before those fields existed, so an existing caller is unaffected.
+function resolveTypedKey(
+  actionType: string,
+  params: Readonly<Record<string, unknown>>,
+): string {
+  if (
+    actionType === 'core_evm_transfer' &&
+    (params.data !== undefined || params.destination_chain_id !== undefined)
+  ) {
+    return 'core_evm_transfer_v2';
+  }
+  return actionType;
 }
 
 function requireSpec(actionType: string): TypedSpec {
@@ -1063,6 +1108,19 @@ export function buildTyped(
   if (nonce >= 1n << 64n) throw new RangeError('nonce overflows u64');
   if (expiresAfter < 0n) throw new RangeError('expiresAfter must be non-negative');
   if (expiresAfter >= 1n << 64n) throw new RangeError('expiresAfter overflows u64');
+  // The params can select a different type string for the same wire action, so
+  // the key is resolved ONCE here. `BuiltTyped.actionType` then carries the
+  // resolved key, which is what every later lookup reads.
+  actionType = resolveTypedKey(actionType, payload);
+  if (actionType === 'core_evm_transfer_v2') {
+    // Presence of EITHER key selects V2, but V2 signs BOTH. The absent one
+    // encodes as its default, matching the server's `unwrap_or_default`.
+    payload = {
+      ...payload,
+      data: payload.data ?? [],
+      destination_chain_id: payload.destination_chain_id ?? 0,
+    };
+  }
   const spec = requireSpec(actionType);
   const chainTag = metafluxChainTag(chainId);
   // The agent-resolved `owner` binds only for owner-supporting actions (operator
