@@ -51,6 +51,21 @@ export {
   type SnappedOrder,
 } from './native/scale.js';
 export {
+  // TWAP planning: "sell this much, over this long" -> the wire fields
+  // `slice_count` / `delay_ms` / `total_size`. The wire carries neither a
+  // duration nor a USD amount, so the derivation is client-side. The node
+  // clamps `delay_ms` UP to a governed floor SILENTLY, which makes the run
+  // longer than the requested duration — the plan reports the real run time in
+  // `effectiveDurationMs` and the clamp in `clampedToMinDelay`.
+  twapFromDuration,
+  usdToWireSize,
+  DEFAULT_TWAP_MIN_DELAY_MS,
+  DEFAULT_TWAP_TARGET_SLICE_MS,
+  DEFAULT_TWAP_MAX_SLICES,
+  type TwapDurationRequest,
+  type TwapPlan,
+} from './native/twap_plan.js';
+export {
   // EIP-712 typed-action signing (the structured wallet-signing path). Exported
   // so wallet integrations can build the `eth_signTypedData_v4` payload and sign
   // out-of-band, and power users can sign with a local key directly.
