@@ -282,12 +282,16 @@ export interface MarketInfo {
   fba_enabled: boolean;
   /// Open interest, whole units as a decimal string.
   open_interest: string;
-  /// Whether opening new positions is disabled.
-  disable_open: boolean;
-  /// Whether closing positions is disabled.
-  disable_close: boolean;
-  /// Whether the market is halted.
-  halted: boolean;
+  /// Whether opening a position is PERMITTED.
+  ///
+  /// Replaces `disable_open`, and the meaning is INVERTED: `open: true` allows
+  /// opening, where `disable_open: true` blocked it. Read the new name; a
+  /// leftover `disable_open` on a market row is `undefined`, which is falsy,
+  /// so the old test silently reports "allowed" for a market that is closed.
+  open: boolean;
+  /// Whether closing a position is PERMITTED. Replaces `disable_close`, with
+  /// the same inversion.
+  close: boolean;
   /// Whether the market is strict-isolated-only.
   strict_isolated: boolean;
   /// The registered underlying token block, when the perp has one. OMITTED

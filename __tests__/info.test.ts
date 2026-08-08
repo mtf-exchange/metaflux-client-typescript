@@ -670,9 +670,8 @@ describe('InfoApi deployed-gateway read shapes', () => {
       mark_source: 'oracle_median',
       fba_enabled: false,
       open_interest: '0.02346',
-      disable_open: false,
-      disable_close: false,
-      halted: false,
+      open: true,
+      close: true,
       strict_isolated: false,
     };
     const m = await api.marketInfo('BTC');
