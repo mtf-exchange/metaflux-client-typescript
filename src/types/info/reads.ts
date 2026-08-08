@@ -252,6 +252,95 @@ export interface UserFillsByTime {
   fills: UserFill[];
 }
 
+/// One CLOSED position lifecycle inside a `UserPositionHistory`.
+///
+/// A position that is still OPEN is never in this history — read the live
+/// position from `account_state.clearinghouse_state`. The archive emits a row
+/// only once the lifecycle closes.
+///
+/// DERIVED, never stored: `realized_pnl = closed_pnl − fee_paid` and
+/// `net_pnl = realized_pnl + funding_paid`. `closed_pnl` is the chain's own
+/// lot-matched number — it is NOT `(avg_close_px − avg_entry_px) × closed_sz`
+/// and must not be checked that way.
+///
+/// THE THREE COMPLETENESS FLAGS ARE THE HONESTY MECHANISM. The archive can be
+/// cut by a recorded gap or by the retention floor, and a cut row still has to
+/// be served. Each flag says whether that side of the life is whole:
+///   * `entry_complete: false` ⇒ the open side is partial, and `max_sz` /
+///     `avg_entry_px` come back `null` rather than wrong.
+///   * `close_complete: false` ⇒ every close-side number covers part of the
+///     life. It follows `entry_complete`: the cut that hid the open can hide a
+///     close too.
+///   * `funding_complete: false` ⇒ `funding_paid` is UNKNOWN, not zero. The row
+///     still reads `"0"`, and `net_pnl` then equals `realized_pnl` and excludes
+///     funding.
+///
+/// Test the flag before trusting the number. A degraded row is served on
+/// purpose, not by mistake.
+export interface PositionHistoryRow {
+  /// Market symbol (`"BTC"`) or spot pair name. The gateway resolves the
+  /// archive's numeric market id to this symbol.
+  coin: string;
+  /// Position direction over the life.
+  side: 'long' | 'short';
+  /// Largest size the position ever held, decimal string on the size plane.
+  /// `null` exactly when `entry_complete` is `false`.
+  max_sz: string | null;
+  /// Size closed over the life, decimal string on the size plane.
+  closed_sz: string;
+  /// Weighted average entry price, whole-USDC decimal string. `null` exactly
+  /// when `entry_complete` is `false`.
+  avg_entry_px: string | null;
+  /// Weighted average close price, whole-USDC decimal string; `null` when the
+  /// archive holds no priced close side.
+  avg_close_px: string | null;
+  /// Lot-matched realized PnL before fees, whole-USDC decimal string.
+  closed_pnl: string;
+  /// Fees paid over the life, whole-USDC decimal string.
+  fee_paid: string;
+  /// `closed_pnl − fee_paid`, whole-USDC decimal string.
+  realized_pnl: string;
+  /// Funding paid over the life, whole-USDC decimal string. `"0"` with
+  /// `funding_complete: false` means UNKNOWN, not "no funding was paid".
+  funding_paid: string;
+  /// `realized_pnl + funding_paid`, whole-USDC decimal string.
+  net_pnl: string;
+  /// Consensus ms the position opened.
+  opened_at: number;
+  /// Consensus ms the position closed.
+  closed_at: number;
+  /// Committed height the position opened at.
+  open_block: number;
+  /// Committed height the position closed at.
+  close_block: number;
+  /// Whether the open side covers the whole life.
+  entry_complete: boolean;
+  /// Whether the close side covers the whole life.
+  close_complete: boolean;
+  /// Whether `funding_paid` covers the whole life.
+  funding_complete: boolean;
+}
+
+/// `user_position_history` / `user_position_history_by_time` — one row per
+/// CLOSED position lifecycle, keyed by `address`.
+///
+/// The envelope is the SAME shape `user_fills` uses: the echoed address and the
+/// rows, nothing else. Neither variant echoes the request window (unlike
+/// `UserFillsByTime`), and neither carries an account-wide coverage or
+/// completeness object — the per-row flags on `PositionHistoryRow` are the only
+/// completeness report.
+///
+/// `user_position_history` pages newest-first. `_by_time` reads oldest-first
+/// inside an inclusive `[start_time, end_time]` window over `closed_at`; a
+/// lifecycle is a point event at its close, so a position OPENED before the
+/// window but CLOSED inside it IS returned.
+export interface UserPositionHistory {
+  /// Resolved account address (0x).
+  address: string;
+  /// Closed position lifecycles.
+  positions: PositionHistoryRow[];
+}
+
 /// One funding sample inside a `FundingHistory`.
 export interface FundingSample {
   /// Sample timestamp (consensus ms).

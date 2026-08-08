@@ -4,7 +4,12 @@
 // names are the exact snake_case keys the node emits inside `{type, data}.data`.
 // Money magnitudes that can exceed 2^53 are typed `string`.
 
-import type { MarketInfo, TokenBalance, TokenEvmContract } from './core.js';
+import type {
+  MarketDynamic,
+  MarketStatic,
+  TokenBalance,
+  TokenEvmContract,
+} from './core.js';
 
 /// One spot pair inside `SpotMeta` (also `markets.spot.pairs`).
 export interface SpotPair {
@@ -24,6 +29,10 @@ export interface SpotPair {
   min_notional: string;
   /// Whether the pair is active for trading.
   active: boolean;
+  /// Size precision of the pair's BASE token: a spot order `size` is
+  /// `whole_units × 10^sz_decimals`. Load-bearing — do not derive it from the
+  /// quote token or from a perp of the same symbol.
+  sz_decimals: number;
   /// Pair mark price, decimal string.
   mark_px: string;
   /// Order-book mid price, decimal string; `null` when one-sided.
@@ -69,18 +78,47 @@ export interface SpotMeta {
   tokens: SpotToken[];
 }
 
-/// `markets` — the full market universe: every perp market plus the spot
-/// pair/token registry, in one read.
+/// `markets` — the DYNAMIC market universe: live price / funding / OI for every
+/// perp, plus the spot pair/token registry.
+///
+/// The perp rows are `MarketDynamic`, NOT `MarketInfo`. This read serves no
+/// precision grid, no leverage ladder and no trade-control flag; read
+/// `marketsMeta()` for those and merge by `coin`. The `spot` sub-object is
+/// identical in both reads.
 export interface Markets {
-  /// Registered perp markets.
-  perp: MarketInfo[];
+  /// Registered perp markets, dynamic half only.
+  perp: MarketDynamic[];
   /// Spot universe (same object as the `spot_meta` read).
   spot: SpotMeta;
 }
 
-/// One spot balance inside `SpotClearinghouseState`. The same `{asset, name,
-/// total, hold}` row `account_state.balances` carries.
-export type SpotBalance = TokenBalance;
+/// `markets_meta` — the STATIC market universe: precision grids, leverage
+/// ladders and trade-control flags, plus the same spot registry `markets`
+/// serves. Long-cacheable.
+export interface MarketsMeta {
+  /// Registered perp markets, static half only.
+  perp: MarketStatic[];
+  /// Spot universe (same object as the `markets` read).
+  spot: SpotMeta;
+}
+
+/// One spot balance inside `SpotClearinghouseState`.
+///
+/// The `{asset, name, total, hold}` row `account_state.balances` carries, plus
+/// the spot cost basis — which `account_state` does NOT serve.
+export interface SpotBalance extends TokenBalance {
+  /// Weighted-average acquisition cost, whole USDC PER WHOLE TOKEN. A price,
+  /// not a total: `(mark_px - avg_entry_px) * total` is the unrealized spot
+  /// PnL. `total` includes the part held behind resting orders, so multiply by
+  /// the quantity you mean rather than one the server picked for you.
+  ///
+  /// `null` means UNKNOWN, never zero. The chain rolls the basis on spot BUYS
+  /// only — a sell keeps the standing per-unit average, and a deposit (bridge
+  /// credit, Core⇄EVM credit, spot transfer, governance adjustment) writes no
+  /// basis at all. A holding that arrived by any of those paths has no entry,
+  /// and the wire says `null` rather than a plausible wrong number.
+  avg_entry_px?: string | null;
+}
 
 /// `spot_clearinghouse_state` — per-account spot token balances. With
 /// `account_state` this replaces the removed `web_data2` composite.

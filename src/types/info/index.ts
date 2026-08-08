@@ -14,6 +14,8 @@ export type {
   MarginMode,
   Abstraction,
   MarketInfo,
+  MarketStatic,
+  MarketDynamic,
   MarketKind,
   MarginTier,
   TokenEvmContract,
@@ -47,6 +49,8 @@ export type {
   TradeRecord,
   UserFills,
   UserFillsByTime,
+  UserPositionHistory,
+  PositionHistoryRow,
   UserFill,
   FundingHistory,
   FundingSample,
@@ -74,6 +78,7 @@ export type {
 } from './reads.js';
 export type {
   Markets,
+  MarketsMeta,
   SpotMeta,
   SpotPair,
   SpotToken,

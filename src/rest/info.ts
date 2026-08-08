@@ -45,6 +45,7 @@ import type {
   Liquidatable,
   MarketInfo,
   Markets,
+  MarketsMeta,
   MaxBuilderFee,
   MaxMarketOrderNtls,
   Mip3ActiveBids,
@@ -68,6 +69,7 @@ import type {
   UserFunding,
   UserLedgerUpdates,
   UserNonFundingLedgerUpdates,
+  UserPositionHistory,
   UserRateLimit,
   UserRole,
   UserToMultiSigSigners,
@@ -127,9 +129,14 @@ export class InfoApi {
     return this.post<MarketInfo>({ type: 'market_info', coin });
   }
 
-  /// `markets` — the full market universe: `{perp: MarketInfo[], spot:
-  /// SpotMeta}`. Perp records are keyed by `coin` and carry the inline
-  /// `margin_tiers` ladder.
+  /// `markets` — the DYNAMIC market universe: `{perp: MarketDynamic[], spot:
+  /// SpotMeta}`. Perp records are keyed by `coin` and carry live price /
+  /// funding / open interest / the 24h ticker.
+  ///
+  /// This read serves NO precision grid, NO leverage ladder and NO
+  /// trade-control flag. Reading `sz_decimals`, `tick_size`, `open` or `close`
+  /// off one of these rows yields `undefined`; call `marketsMeta()` and merge
+  /// by `coin`, or call `marketInfo()` for the union on one market.
   async markets(): Promise<Markets> {
     return this.post<Markets>({ type: 'markets' });
   }
@@ -149,8 +156,8 @@ export class InfoApi {
   /// spot `tokens[]` rows carry `total_supply` and an object `evm_contract`.
   /// This is also the source of the spot universe returned by `spotMeta()`
   /// (the standalone `spot_meta` /info type was removed server-side).
-  async marketsMeta(): Promise<Markets> {
-    return this.post<Markets>({ type: 'markets_meta' });
+  async marketsMeta(): Promise<MarketsMeta> {
+    return this.post<MarketsMeta>({ type: 'markets_meta' });
   }
 
   /// `vault_state` — per-vault snapshot keyed by vault `address` (0x hex).
@@ -255,6 +262,45 @@ export class InfoApi {
     if (startTime !== undefined) body.start_time = startTime;
     if (endTime !== undefined) body.end_time = endTime;
     return this.post<UserFillsByTime>(body);
+  }
+
+  /// `user_position_history` — one row per CLOSED position lifecycle, keyed by
+  /// `address` (0x). Newest first; optional `limit` caps the page.
+  ///
+  /// A position still OPEN is never returned — read the live position from
+  /// `accountState()`. Check each row's `entry_complete` / `close_complete` /
+  /// `funding_complete` before trusting its numbers: a degraded row is served
+  /// on purpose, with `max_sz` / `avg_entry_px` null rather than wrong.
+  async userPositionHistory(
+    address: string,
+    limit?: number,
+  ): Promise<UserPositionHistory> {
+    const body: { type: string; [k: string]: unknown } = {
+      type: 'user_position_history',
+      address,
+    };
+    if (limit !== undefined) body.limit = limit;
+    return this.post<UserPositionHistory>(body);
+  }
+
+  /// `user_position_history_by_time` — closed position lifecycles inside an
+  /// inclusive `[startTime, endTime]` window (unix ms; an omitted bound is
+  /// open). Oldest first.
+  ///
+  /// The window filters on `closed_at`, so a position OPENED before the window
+  /// but CLOSED inside it IS returned. The reply does NOT echo the window.
+  async userPositionHistoryByTime(
+    address: string,
+    startTime?: number,
+    endTime?: number,
+  ): Promise<UserPositionHistory> {
+    const body: { type: string; [k: string]: unknown } = {
+      type: 'user_position_history_by_time',
+      address,
+    };
+    if (startTime !== undefined) body.start_time = startTime;
+    if (endTime !== undefined) body.end_time = endTime;
+    return this.post<UserPositionHistory>(body);
   }
 
   /// `funding_history` — market-scoped funding samples, keyed by `coin`.

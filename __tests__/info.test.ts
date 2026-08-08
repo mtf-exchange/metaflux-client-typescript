@@ -139,16 +139,47 @@ describe('InfoApi request shapes', () => {
     expect(typeof res.open_interest).toBe('string');
   });
 
-  it('markets returns the {perp, spot} universe object', async () => {
+  it('markets returns the DYNAMIC {perp, spot} universe object', async () => {
     const api = new InfoApi(BASE);
+    // The row chain 114514 served on 2026-08-08. It carries NO precision grid,
+    // NO leverage ladder and NO trade-control flag -- those live on
+    // `markets_meta`. Typing this row as the union made `open` / `sz_decimals`
+    // read `undefined` while the type promised a value.
     nextData = {
-      perp: [{ coin: 'BTC', asset_id: 0 }],
+      perp: [
+        {
+          change_24h: '0.01186283',
+          coin: 'BTC',
+          day_ntl_vlm: '0',
+          funding: {
+            cap_per_hr: '400',
+            interval_ms: 3600000,
+            next_payment_ts: 1786165200000,
+            rate_per_hr: '-3',
+          },
+          halted: false,
+          impact_pxs: ['64998', '65030.7'],
+          kind: 'perp',
+          mark_px: '65013.3',
+          mid_px: '65014.4',
+          open_interest: '0.7895',
+          oracle_px: '65033.7',
+          premium: '-0.00029993',
+          prev_day_px: '64251.1',
+        },
+      ],
       spot: { pairs: [], tokens: [] },
     };
     const res = await api.markets();
     expect(JSON.parse(captured!.body)).toEqual({ type: 'markets' });
     expect(Array.isArray(res.perp)).toBe(true);
     expect(res.perp[0]?.coin).toBe('BTC');
+    expect(res.perp[0]?.mark_px).toBe('65013.3');
+    expect(res.perp[0]?.halted).toBe(false);
+    expect(res.perp[0]?.impact_pxs).toEqual(['64998', '65030.7']);
+    // A healthy market omits both markers; neither may read as a value.
+    expect(res.perp[0]?.px_stale).toBeUndefined();
+    expect(res.perp[0]?.day_ntl_vlm_lower_bound_from).toBeUndefined();
     expect(res.spot.pairs).toEqual([]);
   });
 
@@ -354,6 +385,71 @@ describe('InfoApi request shapes', () => {
     });
   });
 
+  it('userPositionHistory returns the fills-style {address, positions} envelope', async () => {
+    const api = new InfoApi(BASE);
+    // The degraded row chain 114514 served on 2026-08-08. There is NO
+    // account-wide `coverage` object: the per-row flags are the whole report.
+    nextData = {
+      address: ADDR,
+      positions: [
+        {
+          avg_close_px: '74.75000000',
+          avg_entry_px: null,
+          close_block: 6_831_775,
+          close_complete: false,
+          closed_at: 1_786_162_051_867,
+          closed_pnl: '0.8960000000',
+          closed_sz: '0.80',
+          coin: 'SOL',
+          entry_complete: false,
+          fee_paid: '0.001794',
+          funding_complete: false,
+          funding_paid: '0',
+          max_sz: null,
+          net_pnl: '0.8942060000',
+          open_block: 6_831_775,
+          opened_at: 1_786_162_051_867,
+          realized_pnl: '0.8942060000',
+          side: 'long',
+        },
+      ],
+    };
+    const res = await api.userPositionHistory(ADDR, 2);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'user_position_history',
+      address: ADDR,
+      limit: 2,
+    });
+    const p = res.positions[0]!;
+    expect(p.coin).toBe('SOL');
+    expect(p.side).toBe('long');
+    expect(p.closed_sz).toBe('0.80');
+    // A degraded row reports itself and nulls what it cannot stand behind.
+    expect(p.entry_complete).toBe(false);
+    expect(p.avg_entry_px).toBeNull();
+    expect(p.max_sz).toBeNull();
+    // funding_paid reads "0" while funding_complete is false: UNKNOWN, not zero.
+    expect(p.funding_paid).toBe('0');
+    expect(p.funding_complete).toBe(false);
+    // The envelope carries address + positions and nothing else.
+    expect(Object.keys(res).sort()).toEqual(['address', 'positions']);
+  });
+
+  it('userPositionHistoryByTime sends the window and gets no echo back', async () => {
+    const api = new InfoApi(BASE);
+    nextType = 'user_position_history_by_time';
+    nextData = { address: ADDR, positions: [] };
+    const res = await api.userPositionHistoryByTime(ADDR, 5, 9);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'user_position_history_by_time',
+      address: ADDR,
+      start_time: 5,
+      end_time: 9,
+    });
+    // Unlike userFillsByTime, this reply does NOT echo the bounds.
+    expect(Object.keys(res).sort()).toEqual(['address', 'positions']);
+  });
+
   it('fundingHistory is keyed by coin and carries premium + funding_rate', async () => {
     const api = new InfoApi(BASE);
     nextData = {
@@ -542,6 +638,8 @@ describe('InfoApi request shapes', () => {
             taker_fee_bps: '5',
             min_notional: '1',
             active: true,
+            // The pair carries the BASE token's size precision.
+            sz_decimals: 5,
             mark_px: '50000',
             mid_px: '50000',
             prev_day_px: null,
@@ -645,7 +743,6 @@ describe('InfoApi deployed-gateway read shapes', () => {
       sz_decimals: 5,
       mark_px: '61443.6',
       oracle_px: '61286.1',
-      mid_px: null,
       prev_day_px: '61276',
       change_24h: '0.00273516',
       day_ntl_vlm: '3772.890084',
@@ -673,6 +770,8 @@ describe('InfoApi deployed-gateway read shapes', () => {
       open: true,
       close: true,
       strict_isolated: false,
+      halted: false,
+      impact_pxs: ['61440.2', '61446.9'],
     };
     const m = await api.marketInfo('BTC');
     expect(m.coin).toBe('BTC');
@@ -685,7 +784,13 @@ describe('InfoApi deployed-gateway read shapes', () => {
     expect(m.margin_tiers[0]?.max_leverage).toBe(50);
     // maint_margin_ratio bands are bps STRINGS.
     expect(m.margin_tiers[0]?.maint_margin_ratio).toBe('100');
-    expect(m.mid_px).toBeNull();
+    // A one-sided book DROPS the key; `mid_px` never arrives as null.
+    expect(m.mid_px).toBeUndefined();
+    // `halted` and `impact_pxs` are served here -- the union read carries both.
+    expect(m.halted).toBe(false);
+    expect(m.impact_pxs).toEqual(['61440.2', '61446.9']);
+    // Uncapped OI omits the key; an absent cap is not a cap of zero.
+    expect(m.oi_cap).toBeUndefined();
   });
 
   it('feeSchedule decodes string bps + tiers[] + burn_ratio (optional top-level pair)', async () => {
@@ -1142,15 +1247,16 @@ describe('InfoApi P2 wave-1 reads', () => {
 
   it('pmSummary is keyed by address; decodes enrolled + zeroed shapes', async () => {
     const api = new InfoApi(BASE);
-    // Enrolled: cents-plane integer strings.
+    // Enrolled: WHOLE-USDC decimal strings. The `*_cents` names this read once
+    // used are gone from the node, and the plane moved with them.
     nextData = {
       address: ADDR,
       enrolled: true,
       enrolled_at: 1_784_800_000_000,
       last_computed_block: 8_416_000,
-      pm_maint_margin_cents: '125000',
-      net_value_cents: '500000',
-      concentration_penalty_cents: '0',
+      pm_maint_margin: '1250',
+      pm_net_value: '5000',
+      pm_concentration_penalty: '0',
     };
     const res = await api.pmSummary(ADDR);
     expect(JSON.parse(captured!.body)).toEqual({
@@ -1159,19 +1265,20 @@ describe('InfoApi P2 wave-1 reads', () => {
     });
     expect(res.enrolled).toBe(true);
     expect(res.enrolled_at).toBe(1_784_800_000_000);
-    // The standalone read KEEPS the `*_cents` names; only the folded
-    // `account_state` twins are whole-USDC.
-    expect(res.pm_maint_margin_cents).toBe('125000');
-    expect(typeof res.net_value_cents).toBe('string');
+    // pm_summary and the folded `account_state` twins render the SAME three
+    // figures under the SAME names on the SAME whole-USDC plane.
+    expect(res.pm_maint_margin).toBe('1250');
+    expect(res.pm_net_value).toBe('5000');
+    expect(typeof res.pm_concentration_penalty).toBe('string');
     // Unknown / non-enrolled → 200 zeroed with enrolled:false.
     nextData = {
       address: ADDR,
       enrolled: false,
       enrolled_at: 0,
       last_computed_block: 0,
-      pm_maint_margin_cents: '0',
-      net_value_cents: '0',
-      concentration_penalty_cents: '0',
+      pm_maint_margin: '0',
+      pm_net_value: '0',
+      pm_concentration_penalty: '0',
     };
     const zero = await api.pmSummary(ADDR);
     expect(zero.enrolled).toBe(false);
@@ -1504,6 +1611,24 @@ describe('InfoApi realigned read shapes', () => {
     // Only the WS `spot_state` CHANNEL was removed; this REST read stays.
     expect(res.balances[0]?.name).toBe('USDC');
     expect(res.height).toBe(8_416_000);
+  });
+
+  it('spotClearinghouseState carries the optional avg_entry_px cost basis', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      address: ADDR,
+      balances: [
+        // Deposited / pre-basis holding: no entry recorded, so no key.
+        { asset: 100, name: 'USDC', total: '390548', hold: '390548' },
+        { asset: 104, name: 'MTF', total: '10000039.5196599', hold: '3000000', avg_entry_px: '412.5' },
+      ],
+      height: 6_845_318,
+      time: 1_786_164_224_330,
+    };
+    const res = await api.spotClearinghouseState(ADDR);
+    // Absent means UNKNOWN, never zero -- a deposit writes no basis at all.
+    expect(res.balances[0]?.avg_entry_px).toBeUndefined();
+    expect(res.balances[1]?.avg_entry_px).toBe('412.5');
   });
 
   it('drops the frontend_open_orders method', () => {

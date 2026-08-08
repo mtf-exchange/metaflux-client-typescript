@@ -227,13 +227,15 @@ export interface PerpUnderlyingToken {
   circulating_supply: string;
 }
 
-/// `market_info` / `markets.perp[]` element — rich per-market metadata.
+/// The STATIC half of a market — the `markets_meta` perp row.
 ///
-/// `mark_px` / `oracle_px` are whole-USDC decimal strings (tick-snapped;
-/// `"0"` fallback). `sz_decimals` is load-bearing for size encoding — raw
-/// order/position `size` = `whole_units × 10^sz_decimals`, NOT derivable from
-/// `step_size`.
-export interface MarketInfo {
+/// Long-cacheable: precision grids, the leverage ladder, the trade-control
+/// flags and the join keys. It carries NO live price, funding or open interest;
+/// read `Markets.perp` for those and merge by `coin`.
+///
+/// `sz_decimals` is load-bearing for size encoding — raw order/position `size`
+/// = `whole_units × 10^sz_decimals`, NOT derivable from `step_size`.
+export interface MarketStatic {
   /// Market symbol (e.g. `"BTC"`) — the canonical market key on this surface.
   coin: string;
   /// @deprecated Numeric asset id shim. Do NOT build on this — key by `coin`.
@@ -245,20 +247,6 @@ export interface MarketInfo {
   /// Size precision: raw order/position `size` = `whole_units × 10^sz_decimals`.
   /// Load-bearing for size encoding — NOT derivable from `step_size`.
   sz_decimals: number;
-  /// Mark price, whole-USDC decimal string (`"0"` fallback).
-  mark_px: string;
-  /// Oracle/index price, whole-USDC decimal string (`"0"` fallback).
-  oracle_px: string;
-  /// Order-book mid price, whole-USDC decimal string; `null` when one-sided.
-  mid_px: string | null;
-  /// Previous-day close price, whole-USDC decimal string; `null` if unset.
-  prev_day_px: string | null;
-  /// 24h price change, decimal fraction string (signed).
-  change_24h: string;
-  /// 24h notional (USD) volume, decimal string.
-  day_ntl_vlm: string;
-  /// Mark-vs-oracle premium, decimal fraction string (signed).
-  premium: string;
   /// Tick size (smallest price increment), decimal string.
   tick_size: string;
   /// Step size (smallest size increment / lot size), decimal string.
@@ -274,14 +262,10 @@ export interface MarketInfo {
   /// OI-banded margin ladder (upper-bound bands; top band unbounded). Replaces
   /// the removed standalone `margin_table` query.
   margin_tiers: MarginTier[];
-  /// Funding parameters.
-  funding: Funding;
   /// Mark-price source descriptor (e.g. `"oracle_median"`).
   mark_source: string;
   /// Whether frequent-batch-auction matching is enabled for this market.
   fba_enabled: boolean;
-  /// Open interest, whole units as a decimal string.
-  open_interest: string;
   /// Whether opening a position is PERMITTED.
   ///
   /// Replaces `disable_open`, and the meaning is INVERTED: `open: true` allows
@@ -294,10 +278,69 @@ export interface MarketInfo {
   close: boolean;
   /// Whether the market is strict-isolated-only.
   strict_isolated: boolean;
+  /// Governance open-interest cap, whole base units as a decimal string.
+  /// OMITTED (absent) when the market is uncapped — an absent cap is not a cap
+  /// of `0`, so test for the key, not for a falsy value.
+  oi_cap?: string;
   /// The registered underlying token block, when the perp has one. OMITTED
   /// (absent) when there is no registered underlying token — never `null`.
   token?: PerpUnderlyingToken;
 }
+
+/// The DYNAMIC half of a market — the `markets` perp row.
+///
+/// Live price, funding, open interest and the 24h ticker. It carries NO
+/// precision grid, NO leverage ladder and NO trade-control flag: reading
+/// `sz_decimals`, `tick_size`, `open` or `close` off this row yields
+/// `undefined`. Read `MarketsMeta.perp` for those and merge by `coin`, or read
+/// `market_info` for the union on one market.
+export interface MarketDynamic {
+  /// Market symbol (e.g. `"BTC"`) — the join key onto `MarketStatic`.
+  coin: string;
+  /// Market kind — lowercase `"perp"` / `"spot"`.
+  kind: MarketKind;
+  /// Mark price, whole-USDC decimal string (tick-snapped; `"0"` fallback).
+  mark_px: string;
+  /// Oracle/index price, whole-USDC decimal string (`"0"` fallback).
+  oracle_px: string;
+  /// Present and `true` ONLY when the oracle index is stale. The market still
+  /// advertises a `mark_px`, but no aggregation pass sourced it and every risk
+  /// path defers on it. A healthy market OMITS the key.
+  px_stale?: boolean;
+  /// Order-book mid price, whole-USDC decimal string. OMITTED (absent) when the
+  /// book is one-sided — the key is dropped, never sent as `null`.
+  mid_px?: string;
+  /// `[bid, ask]` impact prices. OMITTED (absent) when the impact notional
+  /// cannot fill against the current book.
+  impact_pxs?: [string, string];
+  /// Mark-vs-oracle premium, signed decimal fraction string; `null` when no
+  /// premium is computable.
+  premium: string | null;
+  /// Funding parameters.
+  funding: Funding;
+  /// Open interest, whole units as a decimal string.
+  open_interest: string;
+  /// 24h notional (USD) volume, decimal string.
+  day_ntl_vlm: string;
+  /// Oldest consensus ms that `day_ntl_vlm` speaks for. Present ⇒ the volume is
+  /// a LOWER BOUND because the trade tape cannot cover the whole window; ABSENT
+  /// ⇒ the figure covers the full 24h.
+  day_ntl_vlm_lower_bound_from?: number;
+  /// Previous-day close price, whole-USDC decimal string; `null` when no
+  /// 24h-ago snapshot carries a price.
+  prev_day_px: string | null;
+  /// 24h price change, signed decimal fraction string; `null` when there is no
+  /// 24h-ago price to compare against.
+  change_24h: string | null;
+  /// Whether the market is halted.
+  halted: boolean;
+}
+
+/// `market_info` — the UNION of both halves for one market.
+///
+/// Only this read serves every field. `markets` serves `MarketDynamic` and
+/// `markets_meta` serves `MarketStatic`; neither serves the other's fields.
+export interface MarketInfo extends MarketStatic, MarketDynamic {}
 
 /// `vault_state` — per-vault snapshot keyed by vault `address`.
 export interface VaultState {
@@ -478,10 +521,12 @@ export interface EarnState {
 /// REQUEST KEY is `address` (0x hex); an `account_id` is rejected. An unknown /
 /// non-enrolled address answers 200 with `enrolled:false` and zeroed figures.
 ///
-/// The `*_cents` fields are USD-CENTS-plane integer strings (NOT whole USDC) —
-/// divide by 100 for dollars. The folded `account_state` twins
-/// (`pm_maint_margin` / `pm_net_value` / `pm_concentration_penalty`) are
-/// whole-USDC instead.
+/// PLANE: the three money figures are WHOLE-USDC decimal strings — the same
+/// plane, and now the same names, as the `account_state` twins. They were once
+/// USD-cents integers called `pm_maint_margin_cents` / `net_value_cents` /
+/// `concentration_penalty_cents`; the node serves NEITHER those names NOR that
+/// plane. The rename carried a 100x plane change with it, so a caller still
+/// reading an old name gets `undefined`, not a number that is merely stale.
 export interface PmSummary {
   /// Resolved account address (0x).
   address: string;
@@ -491,12 +536,12 @@ export interface PmSummary {
   enrolled_at: number;
   /// Block height of the last PM computation; `0` when not enrolled.
   last_computed_block: number;
-  /// Maintenance-margin requirement, USD-cents integer string.
-  pm_maint_margin_cents: string;
-  /// Net account value, USD-cents integer string.
-  net_value_cents: string;
-  /// Concentration penalty, USD-cents integer string.
-  concentration_penalty_cents: string;
+  /// Maintenance-margin requirement, WHOLE-USDC decimal string.
+  pm_maint_margin: string;
+  /// Net account value, WHOLE-USDC decimal string.
+  pm_net_value: string;
+  /// Concentration penalty, WHOLE-USDC decimal string.
+  pm_concentration_penalty: string;
 }
 
 /// `encode_action` — the canonical core `Action` JSON for a wire action.
