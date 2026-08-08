@@ -43,7 +43,6 @@ import {
 import { nextNonce } from '../native/digest.js';
 import { signTypedAction } from '../native/typed.js';
 import {
-  recoverTypedOrderSigner,
   signTypedOrder,
   type TypedOrderPayload,
 } from '../native/typed_orders.js';
@@ -1106,8 +1105,16 @@ export class WsClient {
   }
 
   /// Submit a limit / market / trigger order over the WS `post` channel under
-  /// the typed scheme. Mirrors `Client.submitOrderNative`: `order.owner` MUST
-  /// equal the signing wallet (recovered locally and rejected on mismatch).
+  /// the typed scheme.
+  ///
+  /// `order.owner` is the ACCOUNT the order belongs to, which is not always the
+  /// signer: set it to the signing wallet for self-trading, or to the VAULT
+  /// address for operator-driven vault trading. The chain admits the account
+  /// itself, an approved agent, and a registered metaliquidity operator — the
+  /// operator is written into the vault's own `approved_agents` — so this lane
+  /// does NOT require owner == signer. A `WsClient` has no `/info` reader, so it
+  /// cannot check the delegation the way `Client.assertMayActFor` does; the node
+  /// is the authority and rejects a signer that may not act.
   async submitOrder(order: NativeOrder): Promise<NativeExchangeAck> {
     if (this.signer === undefined) {
       throw new Error('submitOrder requires a WsSigner (read-only WsClient)');
@@ -1117,12 +1124,12 @@ export class WsClient {
       'submit_order',
       { order },
       actionJson,
-      { owner: order.owner, field: 'order.owner' },
     )) as NativeExchangeAck;
   }
 
-  /// Cancel an order over the WS `post` channel under the typed scheme. Mirrors
-  /// `Client.cancelOrderNative`: `cancel.owner` MUST equal the signing wallet.
+  /// Cancel an order over the WS `post` channel under the typed scheme.
+  /// `cancel.owner` follows `submitOrder`: it is the account that owns the
+  /// resting order and may differ from the signer.
   /// The typed digest binds `oid`, so a cloid-only cancel throws (no typed form).
   async cancelOrder(cancel: NativeCancel): Promise<NativeExchangeAck> {
     if (this.signer === undefined) {
@@ -1133,22 +1140,18 @@ export class WsClient {
       'cancel_order',
       { cancel },
       actionJson,
-      { owner: cancel.owner, field: 'cancel.owner' },
     )) as NativeExchangeAck;
   }
 
   /// Sign a trading action under the typed scheme and post it over the WS `post`
   /// channel. Signs the SAME typed digest the REST `postTypedOrder` path uses
   /// (`../native/typed_orders.ts`); the node re-derives the digest from the
-  /// parsed `action` fields. When `ownerCheck` is set, the recovered signer must
-  /// equal `ownerCheck.owner` — a local guard that fails a key/owner mismatch
-  /// before the round-trip (the node enforces the same). Mirrors the proven Rust
-  /// WS `post_typed_trade` payload shape `{signature, nonce, action}`.
+  /// parsed `action` fields. Mirrors the proven Rust WS `post_typed_trade`
+  /// payload shape `{signature, nonce, action}`.
   private async postTypedTrade(
     actionType: string,
     payload: TypedOrderPayload,
     actionJson: string,
-    ownerCheck?: { owner: string; field: string },
   ): Promise<unknown> {
     const nonce = nextNonce();
     const signed = await signTypedOrder(
@@ -1159,19 +1162,6 @@ export class WsClient {
       nonce,
       this.signer!.chainId,
     );
-    if (ownerCheck !== undefined) {
-      const signer = await recoverTypedOrderSigner(
-        signed,
-        actionType,
-        payload,
-        this.signer!.chainId,
-      );
-      if (signer.toLowerCase() !== ownerCheck.owner.toLowerCase()) {
-        throw new Error(
-          `${ownerCheck.field} ${ownerCheck.owner} != recovered signer ${signer}`,
-        );
-      }
-    }
     const body = {
       signature: signed.signature,
       nonce: Number(signed.nonce),

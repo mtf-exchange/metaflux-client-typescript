@@ -459,6 +459,47 @@ describe('WsClient wire protocol', () => {
     ws.close();
   });
 
+  it('submitOrder posts an order whose owner is not the signer', async () => {
+    // The vault-operator lane: the operator holds the key, the VAULT owns the
+    // order. This path used to recover the signer and reject the mismatch, which
+    // made the lane unreachable from the SDK.
+    const ws = new WsClient(
+      'wss://x/ws',
+      { autoReconnect: false },
+      { privateKey: new Uint8Array(32).fill(7) },
+    );
+    const p = ws.connect();
+    const sock = MockSocket.instances[0]!;
+    sock.open();
+    await p;
+
+    const vault = '0x00000000000000000000000000000000000000cc';
+    const post = ws.submitOrder({
+      owner: vault,
+      market: 0,
+      side: 'bid',
+      kind: 'limit',
+      size: 1_000_000n,
+      limit_px: 2_500_000_000_000n,
+      tif: 'gtc',
+      stp_mode: 'cancel_oldest',
+      reduce_only: false,
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    const frame = JSON.parse(sock.sent[sock.sent.length - 1]!) as {
+      id: number;
+      request: { payload: { action: { order: { owner: string } } } };
+    };
+    expect(frame.request.payload.action.order.owner).toBe(vault);
+
+    sock.inbound(
+      `{"channel":"post","data":{"id":${frame.id},"response":` +
+        '{"type":"action","payload":{"status":"ok"}}}}',
+    );
+    await expect(post).resolves.toBeDefined();
+    ws.close();
+  });
+
   it('subscriptionResponse / error / bare-pong inbound frames all decode', async () => {
     const ws = new WsClient('wss://x/ws', { autoReconnect: false });
     const p = ws.connect();
