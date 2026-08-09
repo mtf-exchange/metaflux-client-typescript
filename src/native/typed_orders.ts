@@ -122,6 +122,27 @@ const ENCODE_TYPES: Readonly<Record<string, string>> = Object.freeze({
     'MetaFluxTransaction:CancelChase(string metafluxChain,uint32 market,uint64 chaseOid,uint64 nonce)',
 });
 
+/// `twap_order` has THREE consensus-frozen signing strings and the payload picks
+/// one. They are deliberately NOT in `ENCODE_TYPES`: `twap_order` is one action
+/// type on the wire, so the public action list must not grow two synthetic
+/// entries.
+///
+/// The selection rule, verbatim from the chain: `randomize: true` selects V3
+/// WHATEVER the leg — a one-way randomized parent signs an EMPTY `positionSide`
+/// rather than needing a fourth string. Otherwise a non-null `position_side`
+/// selects V2, and absent selects the base string.
+const TWAP_ORDER_TYPE_VARIANTS: Readonly<Record<string, string>> = Object.freeze({
+  v2: 'MetaFluxTransaction:TwapOrder(string metafluxChain,uint32 market,string side,uint64 totalSize,uint32 sliceCount,uint64 delayMs,bool reduceOnly,string positionSide,uint64 nonce)',
+  v3: 'MetaFluxTransaction:TwapOrder(string metafluxChain,uint32 market,string side,uint64 totalSize,uint32 sliceCount,uint64 delayMs,bool reduceOnly,string positionSide,bool randomize,uint64 nonce)',
+});
+
+/// Which `twap_order` signing string this payload selects: `''` = the base
+/// string in `ENCODE_TYPES`.
+function twapTypeVariant(p: TwapOrder): '' | 'v2' | 'v3' {
+  if (p.randomize === true) return 'v3';
+  return p.position_side === undefined ? '' : 'v2';
+}
+
 /// Owner-carrying encodeType strings — the agent-resolved params-level `owner`
 /// (address) is inserted at position 2 (right after metafluxChain, before the
 /// action's own fields), for operator / vault trading where the orders' owner
@@ -584,6 +605,20 @@ async function encodeOrderData(
     }
     case 'twap_order': {
       const p = payload.params as TwapOrder;
+      const variant = twapTypeVariant(p);
+      // V3 binds an EMPTY positionSide for a one-way parent, so the leg word is
+      // present for BOTH later variants and the flag word only for V3.
+      const legWords =
+        variant === ''
+          ? []
+          : [
+              await encString(
+                p.position_side === undefined
+                  ? ''
+                  : checkEnum(VALID_POSITION_SIDE, p.position_side, 'position_side'),
+              ),
+            ];
+      const flagWords = variant === 'v3' ? [encBool(true)] : [];
       return [
         chainWord,
         encUint(asBigInt(p.market, 'market'), 32, 'market'),
@@ -592,6 +627,8 @@ async function encodeOrderData(
         encUint(asBigInt(p.slice_count, 'slice_count'), 32, 'slice_count'),
         encUint(asBigInt(p.delay_ms, 'delay_ms'), 64, 'delay_ms'),
         encBool(p.reduce_only),
+        ...legWords,
+        ...flagWords,
         nonceWord,
       ];
     }
@@ -781,6 +818,9 @@ export interface BuiltTypedOrder {
   /// BYTE-IDENTICAL to the pre-existing form. Non-zero folds `,uint64 expiresAfter`
   /// into the encodeType and appends one trailing word after the nonce word.
   readonly expiresAfter: bigint;
+  /// `twap_order` only: which of the three consensus-frozen signing strings the
+  /// payload selected. `''` for every other action and for a base TWAP.
+  readonly twapVariant?: '' | 'v2' | 'v3';
 }
 
 /// Build a typed trading action from its wire payload + the canonical action
@@ -823,6 +863,10 @@ export async function buildTypedOrder(
     withOwner,
     owner: ownerBound ? bound : undefined,
     expiresAfter,
+    twapVariant:
+      actionType === 'twap_order'
+        ? twapTypeVariant(payload.params as TwapOrder)
+        : undefined,
   };
 }
 
@@ -836,7 +880,9 @@ async function hashStructOrder(built: BuiltTypedOrder): Promise<Uint8Array> {
   const typeHash = await keccak256(
     enc.encode(
       foldExpiryTypeString(
-        encodeOrderType(built.actionType, built.withOwner),
+        built.twapVariant !== undefined && built.twapVariant !== ''
+          ? TWAP_ORDER_TYPE_VARIANTS[built.twapVariant]!
+          : encodeOrderType(built.actionType, built.withOwner),
         built.expiresAfter,
       ),
     ),

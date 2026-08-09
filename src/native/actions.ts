@@ -662,9 +662,16 @@ export function buildNativeTwapOrderAction(params: TwapOrder): string {
   validateU64(params.total_size, 'total_size');
   validateU32(params.slice_count, 'slice_count');
   validateU64(params.delay_ms, 'delay_ms');
+  // Both optional keys are OMITTED when absent, so a plain one-way parent's
+  // action JSON stays byte-identical to a pre-hedge SDK's.
+  const leg =
+    params.position_side === undefined
+      ? ''
+      : `,${jsonStr('position_side')}:${jsonStr(params.position_side)}`;
+  const rnd = params.randomize === true ? `,${jsonStr('randomize')}:true` : '';
   return wrapParams(
     'twap_order',
-    `{${jsonStr('market')}:${params.market},${jsonStr('side')}:${jsonStr(params.side)},${jsonStr('total_size')}:${params.total_size},${jsonStr('slice_count')}:${params.slice_count},${jsonStr('delay_ms')}:${params.delay_ms},${jsonStr('reduce_only')}:${params.reduce_only ? 'true' : 'false'}}`,
+    `{${jsonStr('market')}:${params.market},${jsonStr('side')}:${jsonStr(params.side)},${jsonStr('total_size')}:${params.total_size},${jsonStr('slice_count')}:${params.slice_count},${jsonStr('delay_ms')}:${params.delay_ms},${jsonStr('reduce_only')}:${params.reduce_only ? 'true' : 'false'}${leg}${rnd}}`,
   );
 }
 

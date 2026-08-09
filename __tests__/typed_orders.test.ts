@@ -167,6 +167,59 @@ const VECTORS: Vector[] = [
     nonce: 48n,
     digest: '057ba67d71d21a2b32ef060cdaf0eadc1b736524209eb38b285d4be712625714',
   },
+  // The other two TWAP signing strings. Both digests come from the NODE
+  // (`core-state/tests/twap_signing_string_digests.rs`), not from this SDK, so
+  // the fixture cannot agree with a bug in our own encoder. `randomize` selects
+  // V3 whatever the leg, which is why the one-way case still signs a leg word.
+  {
+    actionType: 'twap_order',
+    payload: {
+      params: {
+        market: 4,
+        side: 'ask',
+        total_size: 1_000,
+        slice_count: 10,
+        delay_ms: 500,
+        reduce_only: true,
+        position_side: 'long',
+      } as TwapOrder,
+    },
+    nonce: 48n,
+    digest: '066a16f20ed5edc16d3e2a165321a45f3aaacd67ef7dbad637f453c4ce1f087e',
+  },
+  {
+    actionType: 'twap_order',
+    payload: {
+      params: {
+        market: 4,
+        side: 'ask',
+        total_size: 1_000,
+        slice_count: 10,
+        delay_ms: 500,
+        reduce_only: true,
+        randomize: true,
+      } as TwapOrder,
+    },
+    nonce: 48n,
+    digest: '7c20f4608b60fa7716d4895639847e7be6af0bedddc5a4926b2495ddb16866d5',
+  },
+  {
+    actionType: 'twap_order',
+    payload: {
+      params: {
+        market: 4,
+        side: 'ask',
+        total_size: 1_000,
+        slice_count: 10,
+        delay_ms: 500,
+        reduce_only: true,
+        position_side: 'short',
+        randomize: true,
+      } as TwapOrder,
+    },
+    nonce: 48n,
+    digest: '9f982c8f8403e119b224bb52f2f72367074839ca7b07d8679740975ff175da78',
+  },
   {
     actionType: 'twap_cancel',
     payload: { params: { twap_id: 17 } as TwapCancel },
@@ -197,11 +250,11 @@ const VECTORS: Vector[] = [
 ];
 
 describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing — trading set', () => {
-  it('reproduces all 12 server KAT digests byte-for-byte (chain 114514)', async () => {
+  it('reproduces all 15 server KAT digests byte-for-byte (chain 114514)', async () => {
     const { buildTypedOrder, typedOrderDigest } = await import(
       '../src/native/typed_orders.js'
     );
-    expect(VECTORS.length).toBe(12);
+    expect(VECTORS.length).toBe(15);
     for (const v of VECTORS) {
       const built = await buildTypedOrder(v.actionType, v.payload, '', v.nonce, CHAIN_ID);
       const digest = await typedOrderDigest(built);
