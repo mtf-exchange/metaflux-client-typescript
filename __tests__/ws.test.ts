@@ -657,7 +657,7 @@ describe('WS channel body decode', () => {
     const f = await inbound(
       '{"channel":"account_state","data":{' +
         '"address":"0x00000000000000000000000000000000000000aa",' +
-        '"account_value":"1000","free_collateral":"400","init_margin":"600",' +
+        '"account_value":"1000","withdrawable":"400","init_margin":"600",' +
         '"health":"1000","tier":"Safe","health_deferred":true,' +
         '"abstraction":"unified",' +
         '"clearinghouse_state":{"":{"positions":[]}},' +

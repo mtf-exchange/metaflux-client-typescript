@@ -201,7 +201,12 @@ export interface ActiveAssetData {
   /// `[buy, sell]` max order size, base-unit decimal strings.
   max_trade_szs: [string, string];
   /// OI-cap-derived market-order ceiling, decimal string.
-  max_trade_size: string;
+  /// Remaining market-wide OI headroom in size units, or `null` when the market
+  /// is UNCAPPED. It is shared headroom that other traders consume, not a
+  /// per-user guarantee. The retired `"0"` sentinel meant uncapped, so a client
+  /// that clamped order size to this field refused to trade on exactly the
+  /// markets that had no cap.
+  max_trade_size: string | null;
   /// Whether the user has a non-zero position on this asset.
   has_position: boolean;
 }
@@ -211,7 +216,9 @@ export interface MaxMarketOrderNtl {
   /// Market symbol.
   coin: string;
   /// OI-cap-derived size ceiling, decimal string.
-  max_market_order_ntl: string;
+  /// Max market-order notional, or `null` when uncapped. Same sentinel change as
+  /// `max_trade_size`.
+  max_market_order_ntl: string | null;
 }
 
 /// `max_market_order_ntls` — per-asset max market-order notional.

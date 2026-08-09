@@ -1334,7 +1334,7 @@ describe('InfoApi realigned read shapes', () => {
     nextData = {
       address: ADDR,
       account_value: '1000',
-      free_collateral: '400',
+      withdrawable: '400',
       init_margin: '600',
       health: '850',
       tier: 'Safe',
@@ -1403,7 +1403,7 @@ describe('InfoApi realigned read shapes', () => {
     const base = {
       address: ADDR,
       account_value: '1000',
-      free_collateral: '1000',
+      withdrawable: '1000',
       init_margin: '0',
       health: '1000',
       tier: 'Safe',

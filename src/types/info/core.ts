@@ -71,7 +71,11 @@ export interface AccountPosition {
   /// The user's chosen leverage for the asset (never `0` for an open position).
   lev: number;
   /// Estimated liquidation price, whole-USDC decimal string (`"0"` = none).
-  liq: string;
+  /// Liquidation price, or `null` when the position has none — an isolated leg
+  /// whose bucket no non-negative price can breach reads `null`, NEVER `"0"`. A
+  /// zero is a price; an absence is not, and reading one as the other says
+  /// "liquidates immediately" about a position that cannot be price-liquidated.
+  liq: string | null;
   /// Return on equity, decimal fraction string (signed).
   roe: string;
   /// Cumulative funding paid/received on the position, whole-USDC (signed).
@@ -119,8 +123,14 @@ export interface AccountState {
   address: string;
   /// Equity including unrealised PnL, whole-USDC decimal string.
   account_value: string;
-  /// Equity minus initial margin held by open positions, decimal string.
-  free_collateral: string;
+  /// Cash the account can take out, decimal string, CLAMPED at zero.
+  ///
+  /// It is settled cash minus funding owed minus `init_margin`. It does NOT
+  /// count unrealised profit, so a healthy account whose margin is funded by
+  /// open profit reads `'0'` — that means "nothing to withdraw", not "broke".
+  /// The chain's admission gate uses the raw signed figure, which can go
+  /// negative; this read never does.
+  withdrawable: string;
   /// Initial margin requirement, decimal string.
   init_margin: string;
   /// `account_value - maint_margin` (signed decimal string). Read the
