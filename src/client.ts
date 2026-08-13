@@ -572,8 +572,9 @@ export class Client {
   /// all share `params.cloid`; use [`cancelScale`] to sweep the group.
   /// SENDER-AUTHORIZED (the digest binds the optional agent-resolved
   /// `params.owner` when present — the signer is then the approved agent, so no
-  /// owner cross-check). Availability is fork-gated: the node rejects the action
-  /// until the `scale_order` feature is armed.
+  /// owner cross-check). Availability is gated: the node rejects the action
+  /// until the `scale_order` feature is armed. `params.market` is a PERP market
+  /// today — see [`ScaleOrder`] for the spot lane that is not live yet.
   async placeScale(
     params: ScaleOrder,
     opts: TradeOpts = {},
@@ -610,7 +611,8 @@ export class Client {
   /// channel: track the Leg on `open_orders` / `order_updates` by `cloid`, and
   /// keep the `chase_oid` from the ack (`statuses[0].chase.chase_oid`) for
   /// [`cancelChase`]. SENDER-AUTHORIZED (the digest binds the optional
-  /// agent-resolved `params.owner` when present).
+  /// agent-resolved `params.owner` when present). `params.market` is a PERP
+  /// market today — see [`ChaseOrder`] for the spot lane that is not live yet.
   async placeChase(
     params: ChaseOrder,
     opts: TradeOpts = {},
@@ -666,7 +668,10 @@ export class Client {
 
   // ── TWAP ──────────────────────────────────────
 
-  /// Submit a sliced (TWAP) order via `POST /exchange`.
+  /// Submit a sliced (TWAP) order via `POST /exchange`. `params.market` is a
+  /// PERP market today — see [`TwapOrder`] for the spot lane that is not live
+  /// yet. A HEDGE account is refused at commit unless the parent carries
+  /// `position_side`.
   async twapOrder(
     params: TwapOrder,
     opts: TradeOpts = {},

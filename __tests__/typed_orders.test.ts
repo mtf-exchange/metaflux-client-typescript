@@ -167,9 +167,9 @@ const VECTORS: Vector[] = [
     nonce: 48n,
     digest: '057ba67d71d21a2b32ef060cdaf0eadc1b736524209eb38b285d4be712625714',
   },
-  // The other two TWAP signing strings. Both digests come from the NODE
-  // (`core-state/tests/twap_signing_string_digests.rs`), not from this SDK, so
-  // the fixture cannot agree with a bug in our own encoder. `randomize` selects
+  // The other two TWAP signing strings. Both digests come from the NODE's own
+  // cross-language vectors, not from this SDK, so the fixture cannot agree with
+  // a bug in our own encoder. `randomize` selects
   // V3 whatever the leg, which is why the one-way case still signs a leg word.
   {
     actionType: 'twap_order',

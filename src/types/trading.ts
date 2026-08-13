@@ -324,10 +324,17 @@ export interface CancelAllOrders {
 export type ScaleDist = 'flat' | 'lin_asc' | 'lin_desc' | 'custom';
 
 /// `scale_order` action payload (action id 213) — one signed COMPACT ladder of
-/// `n` resting limit legs on one perp market. The node expands it
-/// DETERMINISTICALLY into `n` ordinary resting orders that all share one `cloid`
-/// (the ladder handle); the signature binds the compact params, NOT the rung
-/// array. Byte-for-byte mirror of the server `NativeScaleOrder`.
+/// `n` resting limit legs on one market. The node expands it DETERMINISTICALLY
+/// into `n` ordinary resting orders that all share one `cloid` (the ladder
+/// handle); the signature binds the compact params, NOT the rung array.
+/// Byte-for-byte mirror of the server `NativeScaleOrder`.
+///
+/// PERP MARKETS ONLY TODAY. A spot pair id in `market` is refused at commit —
+/// every rung is refused in its own slot and nothing rests. The spot lane is
+/// built and waits for an activation height: above it the rungs floor onto the
+/// PAIR's tick/lot grid and run the spot admission, and `reduce_only` /
+/// `position_side` are refused. The wire shape does not change, so this type
+/// needs no new field.
 ///
 /// Field ORDER is load-bearing for the canonical action bytes (see
 /// `buildNativeScaleOrderAction`); the EIP-712 typed digest binds the same field
@@ -337,7 +344,8 @@ export interface ScaleOrder {
   /// agent signs FOR `owner` (bound into the `_WITH_OWNER` typed digest, at
   /// position 2). Omit = the signing wallet trades for itself.
   owner?: string;
-  /// Target market id (`u32`).
+  /// Target market id (`u32`) — a PERP market today. A spot pair id is refused
+  /// until the spot lane activates (see the type doc).
   market: number;
   /// Ladder side — `"bid"` / `"ask"`. Rung 0 sits at `px_low` for both sides.
   side: NativeSide;
@@ -396,7 +404,15 @@ export interface CancelScale {
 /// new Leg just inside the best quote. The Chase runs until the fill completes,
 /// the `ttl_ms` lifetime elapses, or `max_reprices` re-places are reached. Every
 /// Reprice re-stamps the same `cloid`. Byte-for-byte mirror of the server
-/// `NativeChaseOrder`. Perp markets only in v1.
+/// `NativeChaseOrder`.
+///
+/// PERP MARKETS ONLY TODAY. A spot pair id in `market` is refused at commit with
+/// `chase market has no tick/lot grid`. The spot lane is built and waits for an
+/// activation height: above it the Leg pegs inside the SPOT touch,
+/// `position_side` is refused, a Reprice that needs more free quote than you
+/// hold is SKIPPED without cancelling the current Leg, and a failed re-place
+/// RETIRES the Chase. The wire shape does not change, so this type needs no new
+/// field.
 ///
 /// Field ORDER is load-bearing for the canonical action bytes (see
 /// `buildNativeChaseOrderAction`); the EIP-712 typed digest binds the same field
@@ -409,7 +425,8 @@ export interface ChaseOrder {
   /// agent signs FOR `owner` (bound into the `_WITH_OWNER` typed digest, at
   /// position 2). Omit = the signing wallet trades for itself.
   owner?: string;
-  /// Target perp market id (`u32`).
+  /// Target market id (`u32`) — a PERP market today. A spot pair id is refused
+  /// until the spot lane activates (see the type doc).
   market: number;
   /// Chase side — `"bid"` (buy chase) / `"ask"` (sell chase).
   side: NativeSide;
