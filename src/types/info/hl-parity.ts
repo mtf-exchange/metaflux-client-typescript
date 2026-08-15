@@ -257,7 +257,10 @@ export interface VaultEquity {
   vault_id: number;
   /// Vault address (0x).
   vault_address: string;
-  /// Caller's share count (18-dec), decimal string.
+  /// Caller's share count in WHOLE shares, as a decimal string. NOT the raw
+  /// 10^18 integer: the node divides before it answers. Send this exact string
+  /// back to `vault_withdraw`, which reads the same plane. Do not multiply it,
+  /// and do not round-trip it through `Number` — see `WholeShares`.
   shares: string;
   /// `shares × share_price`, decimal string (truncated).
   equity: string;

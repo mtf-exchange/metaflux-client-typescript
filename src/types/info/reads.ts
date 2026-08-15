@@ -185,7 +185,15 @@ export interface UserFill {
   /// Execution price, 8-dp tape decimal string (trailing zeros kept).
   px: string;
   /// Filled size, decimal string. PERP: human plane (`sz_decimals` fraction
-  /// digits). SPOT: the raw integer plane (`szd=0` pin) — no fraction part.
+  /// digits) in every chain state.
+  ///
+  /// SPOT depends on the chain's `spot_tape_size_plane` feature, so do not
+  /// assume either state. Active — the default on a chain started from a fresh
+  /// genesis — renders spot size on the pair's BASE-token `sz_decimals`, the
+  /// same human plane every other read serves. Inactive, which is where an
+  /// older chain sits until an `ArmFeatures` vote arms it, renders the raw lot
+  /// integer with no fraction part. Parse it as a decimal string either way and
+  /// take the plane from the pair's metadata, never from the digits.
   sz: string;
   /// Fill timestamp (consensus ms).
   time: number;

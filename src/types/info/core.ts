@@ -400,12 +400,81 @@ export interface PendingUnstake {
 export interface StakingState {
   /// Echo of the requested 0x address.
   address: string;
-  /// Total staked across all delegations, decimal string.
+  /// DELEGATED stake only, decimal string — the sum of `delegations[*].amount`.
+  /// It is not the account's whole staked balance: add
+  /// `undelegated_pool_balance`.
   total_staked: string;
+  /// Stake deposited but NOT delegated, decimal string on the same plane as
+  /// `total_staked`. `stakingDeposit` credits this pool and `stakingWithdraw`
+  /// debits it, so stake can rest here undelegated for as long as the holder
+  /// likes, and a caller reading only `total_staked` reports less than the
+  /// account holds. This is not `pending_unstakes`: the free pool is already
+  /// free, while a pending unstake is locked until `matures_at_ts`.
+  ///
+  /// Optional because a node that predates the field omits it. Treat an absent
+  /// value as unknown, never as a zero balance.
+  undelegated_pool_balance?: string;
   /// Active per-validator delegations.
   delegations: Delegation[];
   /// Pending unbond entries.
   pending_unstakes: PendingUnstake[];
+}
+
+/// A per-asset row inside `ProtocolMetrics`. Rows arrive as an ARRAY in
+/// ascending `asset`, not as an object, because a JSON object gives no ordering
+/// guarantee across clients and these rows must stay ordered.
+export interface AssetAmount {
+  /// Asset id.
+  asset: number;
+  /// The amount for this asset, decimal string.
+  amount: string;
+}
+
+/// A per-asset signed-position-sum row inside `ProtocolMetrics`.
+export interface AssetSignedSum {
+  /// Asset id.
+  asset: number;
+  /// Sum of `size_signed` over every position row on this market, as a signed
+  /// decimal string on the market's own raw committed lot plane.
+  sum_signed: string;
+}
+
+/// Native MTF held on the EVM side, inside `ProtocolMetrics`. This mirrors the
+/// Core view only; the authoritative EVM state root is separate.
+export interface ProtocolMetricsEvm {
+  /// Total native balance in WEI, decimal string.
+  native_balance_wei: string;
+  /// EVM accounts holding a non-zero native balance.
+  n_nonzero_holders: number;
+  /// EVM accounts with any committed state.
+  n_accounts: number;
+}
+
+/// `protocol_metrics` — protocol-wide committed accumulators.
+///
+/// Only the fields this SDK types are listed. The read serves more, so treat
+/// this as a partial view and read unlisted keys off the raw payload.
+export interface ProtocolMetrics {
+  /// Native-MTF-on-EVM mirror.
+  evm?: ProtocolMetricsEvm;
+  /// Per-market open interest as a WHOLE-UNIT size string on that market's own
+  /// size plane, ascending `asset`.
+  ///
+  /// There is deliberately no cross-market total. Each market keeps its own
+  /// `sz_decimals` lot plane, so summing raw lots across markets adds
+  /// quantities with no common unit — which is what the removed
+  /// `open_interest_total_1e8` did. To get a protocol-wide figure, convert each
+  /// market to notional first.
+  ///
+  /// Optional because a node that predates the field omits it, and answers the
+  /// removed total instead.
+  open_interest_by_asset?: AssetAmount[];
+  /// Per market, the sum of `size_signed` over EVERY position row.
+  ///
+  /// Every long leg has a short leg, so the honest value is `"0"` on each
+  /// asset. A non-zero entry marks a committed one-sided write to a position
+  /// row, which the open-interest figure cannot show.
+  position_size_signed_sum_by_asset?: AssetSignedSum[];
 }
 
 /// One fee tier inside a `FeeSchedule`.

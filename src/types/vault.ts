@@ -7,6 +7,44 @@
 /// vault-kind enum.
 export type VaultKind = 'User' | 'Metaliquidity';
 
+/// A vault share count on the WHOLE-share plane, as the exact decimal string the
+/// node serves and accepts.
+///
+/// The brand is a compile-time marker only. At runtime the value is the plain
+/// string, so a `WholeShares` goes on the wire unchanged and any `string` still
+/// satisfies every existing field. Nothing here is a breaking change.
+///
+/// The plane is the reason this type exists. Committed state keeps shares as a
+/// raw integer on a 10^18 scale, `user_vault_equities` divides by 10^18 before
+/// it answers, and `vault_withdraw` reads that same whole-share plane. So the
+/// one correct operation on a share string is to pass it through untouched.
+/// Scaling it by 10^18 asks to burn 10^18 times too many shares.
+export type WholeShares = string & { readonly __brand: 'WholeShares' };
+
+/// Tag a node-served share string as [`WholeShares`] for the wire.
+///
+/// This is a pure marker: it returns its input. It never rescales, because the
+/// node's read plane and its write plane are already the same.
+///
+/// It rejects a value that cannot be an exact share string — a non-decimal, or
+/// one that arrived through `Number` / `parseFloat`. A share count can carry 18
+/// fraction digits, which is far past the 15-17 significant digits an IEEE-754
+/// double holds, so a float round-trip silently changes the number. Losing the
+/// low digits under-burns, but gaining them over-burns, and neither belongs on
+/// a redemption.
+export function sharesToWire(shares: string): WholeShares {
+  if (typeof shares !== 'string') {
+    throw new TypeError('shares must be a string; a number cannot hold 18 digits exactly');
+  }
+  if (shares.includes('e') || shares.includes('E')) {
+    throw new TypeError(`shares is in exponent form, which is how a float prints: ${shares}`);
+  }
+  if (!/^-?\d+(\.\d+)?$/.test(shares)) {
+    throw new TypeError(`shares is not a decimal string: ${shares}`);
+  }
+  return shares as WholeShares;
+}
+
 /// `create_vault` — create a new vault. The signing wallet becomes the leader.
 export interface CreateVault {
   /// Display name.

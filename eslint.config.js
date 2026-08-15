@@ -30,4 +30,36 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Wire values are exact decimal strings. `Number` and `parseFloat` return
+    // an IEEE-754 double, which holds 15-17 significant digits — a share count
+    // carries up to 18 fraction digits and a wei balance far more. So the
+    // conversion silently changes the number, and the result still looks like a
+    // plausible amount. WARN, not error: reading a small field as a number is
+    // sometimes fine, and the author is the one who can tell.
+    files: ['src/types/**/*.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'warn',
+        {
+          name: 'parseFloat',
+          message:
+            'A wire value is an exact decimal string. parseFloat drops digits past a double. Keep the string, or use a decimal library.',
+        },
+        {
+          name: 'parseInt',
+          message:
+            'A wire value is an exact decimal string. parseInt truncates at the decimal point and past 2^53. Keep the string, or use BigInt.',
+        },
+      ],
+      'no-restricted-syntax': [
+        'warn',
+        {
+          selector: "CallExpression[callee.name='Number']",
+          message:
+            'A wire value is an exact decimal string. Number() drops digits past a double. Keep the string, or use a decimal library.',
+        },
+      ],
+    },
+  },
 );

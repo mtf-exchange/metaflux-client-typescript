@@ -9,6 +9,7 @@
 
 export { Client, type ClientOpts, type TradeOpts } from './client.js';
 export { MetaFluxApiError } from './rest/http.js';
+export { sharesToWire } from './types/vault.js';
 export {
   // Unified order placement — plan a request onto the wire without signing it,
   // and the error the spot route throws when it stops part-way.
@@ -194,6 +195,10 @@ export type {
   StakingState,
   Delegation,
   PendingUnstake,
+  AssetAmount,
+  AssetSignedSum,
+  ProtocolMetricsEvm,
+  ProtocolMetrics,
   FeeSchedule,
   FeeTier,
   TradeSide,
@@ -432,6 +437,7 @@ export type {
   SubmitEncryptedOrder,
   // Vaults.
   VaultKind,
+  WholeShares,
   CreateVault,
   VaultTransfer,
   VaultModify,

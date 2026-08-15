@@ -98,12 +98,14 @@ export type { TwapOrder, TwapCancel } from './twap.js';
 export type { MbChain, MbWithdraw } from './meta-bridge.js';
 export type {
   VaultKind,
+  WholeShares,
   CreateVault,
   VaultTransfer,
   VaultModify,
   VaultWithdraw,
   VaultDistribute,
 } from './vault.js';
+export { sharesToWire } from './vault.js';
 export type { SubmitEncryptedOrder } from './encrypted.js';
 export type { CoreSide, RfqRequest, RfqQuote, RfqAccept } from './rfq.js';
 export type { FbaSubmit } from './fba.js';
