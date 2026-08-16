@@ -6,7 +6,7 @@
 
 /// Destination chain for a MetaBridge withdrawal. PascalCase to match the
 /// node's chain enum.
-export type MbChain = 'Base' | 'Arbitrum' | 'Solana';
+export type MbChain = 'Base' | 'Arbitrum';
 
 /// `mb_withdraw` — withdraw cross-collateral to a destination chain.
 export interface MbWithdraw {
@@ -16,7 +16,6 @@ export interface MbWithdraw {
   asset: number;
   /// Amount in base units (`u64`).
   amount: number;
-  /// Destination address as `0x`-hex: a 20-byte EVM address (Base / Arbitrum)
-  /// or a 32-byte recipient (Solana).
+  /// Destination address as `0x`-hex: a 20-byte EVM address.
   dst_addr: string;
 }

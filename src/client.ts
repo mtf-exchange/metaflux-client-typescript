@@ -1459,7 +1459,7 @@ export class Client {
 
   /// Withdraw cross-collateral to a destination chain (`mb_withdraw`, typed
   /// scheme). The POST `params.chain` carries the chain NAME; the signed struct
-  /// field is its `uint8` code (Solana=0, Base=1, Arbitrum=2). `amount` is an
+  /// field is its `uint8` code (Base=1, Arbitrum=2). `amount` is an
   /// integer (uint64), not a decimal string.
   async mbWithdrawTyped(
     params: MbWithdraw,

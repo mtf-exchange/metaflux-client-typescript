@@ -115,9 +115,8 @@ type FieldSolidityType =
 
 /// MetaBridge destination-chain string names → the `uint8` code the typed
 /// `mb_withdraw.chain` field signs. The POST `params.chain` carries the STRING
-/// name; the signed word carries this code (Solana=0, Base=1, Arbitrum=2).
+/// name; the signed word carries this code (Base=1, Arbitrum=2).
 const MB_CHAIN_CODES: Readonly<Record<string, number>> = Object.freeze({
-  Solana: 0,
   Base: 1,
   Arbitrum: 2,
 });
@@ -869,7 +868,7 @@ function planField(fld: FieldSpec, payload: Record<string, unknown>): FieldPlan 
     }
     case 'chain-u8': {
       // POST `params` carries the STRING chain name; the signed word + v4
-      // message value are the uint8 code (Solana=0, Base=1, Arbitrum=2).
+      // message value are the uint8 code (Base=1, Arbitrum=2).
       const code = typeof raw === 'string' ? MB_CHAIN_CODES[raw] : undefined;
       if (code === undefined) {
         throw new RangeError(

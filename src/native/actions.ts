@@ -980,18 +980,18 @@ export function buildNativeVaultDistributeAction(params: VaultDistribute): strin
 // ---- MetaBridge ----
 
 /// `mb_withdraw` — withdraw cross-collateral to a destination chain. `dst_addr`
-/// is `0x` + 40 hex (EVM, Base/Arbitrum) or 64 hex (32-byte, Solana).
+/// is `0x` + 40 hex (a 20-byte EVM address).
 export function buildNativeMbWithdrawAction(params: MbWithdraw): string {
-  if (params.chain !== 'Base' && params.chain !== 'Arbitrum' && params.chain !== 'Solana') {
-    throw new RangeError('chain must be Base | Arbitrum | Solana');
+  if (params.chain !== 'Base' && params.chain !== 'Arbitrum') {
+    throw new RangeError('chain must be Base | Arbitrum');
   }
   validateU32(params.asset, 'asset');
   validateU64(params.amount, 'amount');
   const dstHex = params.dst_addr.startsWith('0x')
     ? params.dst_addr.slice(2)
     : params.dst_addr;
-  if (!/^[0-9a-fA-F]+$/.test(dstHex) || (dstHex.length !== 40 && dstHex.length !== 64)) {
-    throw new RangeError('dst_addr must be 0x + 40 (EVM) or 64 (Solana) hex chars');
+  if (!/^[0-9a-fA-F]+$/.test(dstHex) || dstHex.length !== 40) {
+    throw new RangeError('dst_addr must be 0x + 40 hex chars (a 20-byte EVM address)');
   }
   return wrapParams(
     'mb_withdraw',
