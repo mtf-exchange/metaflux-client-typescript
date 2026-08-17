@@ -2,10 +2,14 @@
 
 All notable changes to the TypeScript SDK are documented here.
 
-## [Unreleased] — staged as 0.16.0
+## [0.21.0] — 2026-08-17
 
-The Rust SDK ships the same wire realignment as its 0.16.0. The two SDKs stay in
-step, so this release takes the same number.
+A new signable action, so this is a minor rather than a patch.
+
+The header here previously read "staged as 0.16.0" while the published package was
+already 0.20.0. The two SDK version lines are NOT in step and this entry stops
+claiming they are: the Rust SDK is on its own line and is not published to a
+registry.
 
 ### A Core → MetaFluxEVM move charges a fee in MTF
 
