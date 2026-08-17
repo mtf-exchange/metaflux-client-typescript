@@ -426,6 +426,7 @@ export type {
   CDeposit,
   CWithdraw,
   CoreEvmTransfer,
+  SendToEvmWithData,
   // TWAP.
   TwapOrder,
   TwapCancel,

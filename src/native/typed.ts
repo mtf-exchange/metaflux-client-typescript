@@ -501,6 +501,25 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('data', 'bytes', 'data'),
     ],
   },
+  // The payload-carrying transfer with the three extra HL-parity slots. It signs
+  // TWO nonces: `transferNonce` reads the params key `nonce` (the caller's
+  // transfer tag), and the trailing `nonce` word is the envelope nonce. The node
+  // struct gives no serde default to any key, so every field must reach the POST
+  // params — hence no optional halves here.
+  send_to_evm_with_data: {
+    pascal: 'SendToEvmWithData',
+    wireType: 'send_to_evm_with_data',
+    fields: [
+      f('token', 'uint32', 'token'),
+      f('amount', 'string-decimal', 'amount'),
+      f('sourceDex', 'uint32', 'source_dex'),
+      f('destinationRecipient', 'address', 'destination_recipient'),
+      f('toPerp', 'bool', 'to_perp'),
+      f('destinationChainId', 'uint32', 'destination_chain_id'),
+      f('data', 'bytes', 'data'),
+      f('transferNonce', 'uint64', 'nonce'),
+    ],
+  },
   // ---- account / sub-account / staking / abstraction / priority / encrypted ----
   // (formerly un-mapped on the typed-only `/exchange` — now reachable.)
   //

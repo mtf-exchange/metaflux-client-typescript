@@ -317,6 +317,25 @@ const VECTORS: Vector[] = [
     nonce: 64n,
     digest: '86657cd5b8920543f8e4ec41790aeb0957af3c4d2440e25d8009cfa9e5fc9675',
   },
+  {
+    // The server fixture VERBATIM, so the digest is a cross-impl pin. It keeps
+    // the fixture's `source_dex: 1` and its remote `destination_chain_id`, both
+    // of which the action REFUSES at execution — this row pins the signature,
+    // not a usable payload. Do not copy it as an example.
+    actionType: 'send_to_evm_with_data',
+    payload: {
+      token: 7,
+      amount: '12.5',
+      source_dex: 1,
+      destination_recipient: addr(0xe7),
+      to_perp: false,
+      destination_chain_id: 8964,
+      data: [0xca, 0xfe],
+      nonce: 5,
+    },
+    nonce: 18n,
+    digest: '6dd606a21f9786874a3215903bce4d713379222d7e67311c2876a4fd288bd452',
+  },
 ];
 
 describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
@@ -347,10 +366,10 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     }
   });
 
-  it('reproduces all 38 contract KAT digests byte-for-byte (chain 114514)', async () => {
+  it('reproduces all 39 contract KAT digests byte-for-byte (chain 114514)', async () => {
     const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
-    // 39 vectors, 38 actions: the two approve-fee keys share one digest pin.
-    expect(VECTORS.length).toBe(39);
+    // 40 vectors, 39 actions: the two approve-fee keys share one digest pin.
+    expect(VECTORS.length).toBe(40);
     for (const v of VECTORS) {
       const built = buildTyped(v.actionType, v.payload, v.nonce, CHAIN_ID);
       const digest = await typedActionDigest(built);
@@ -573,11 +592,11 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(toHex(base)).not.toBe(toHex(otherChain));
   });
 
-  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 47 reachable actions', async () => {
+  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 48 reachable actions', async () => {
     const { isTypedAction, TYPED_ACTION_TYPES } = await import('../src/native/typed.js');
-    // 48 keys, 47 actions: `approve_builder_fee` is the old key for
+    // 49 keys, 48 actions: `approve_builder_fee` is the old key for
     // `approve_broker_fee` and shares its spec.
-    expect(TYPED_ACTION_TYPES.length).toBe(48);
+    expect(TYPED_ACTION_TYPES.length).toBe(49);
     expect(isTypedAction('approve_broker_fee')).toBe(true);
     expect(isTypedAction('approve_builder_fee')).toBe(true);
     // The multi-sig acting wrapper (user + inner blob + roster signatures).
@@ -614,6 +633,8 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(isTypedAction('priority_bid')).toBe(true);
     expect(isTypedAction('cancel_all_orders')).toBe(true);
     expect(isTypedAction('submit_encrypted_order')).toBe(true);
+    // The payload-carrying transfer with the three extra signed slots.
+    expect(isTypedAction('send_to_evm_with_data')).toBe(true);
   });
 
   it('encodeType strings for the 10 newly-typed actions match the contract', async () => {
@@ -648,6 +669,54 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(encodeType('submit_encrypted_order')).toBe(
       'MetaFluxTransaction:SubmitEncryptedOrder(string metafluxChain,bytes ciphertext,bytes32 commitment,uint8 threshold,uint64 targetBlock,uint64 revealDeadlineMs,uint64 nonce)',
     );
+    expect(encodeType('send_to_evm_with_data')).toBe(
+      'MetaFluxTransaction:SendToEvmWithData(string metafluxChain,uint32 token,string amount,uint32 sourceDex,address destinationRecipient,bool toPerp,uint32 destinationChainId,bytes data,uint64 transferNonce,uint64 nonce)',
+    );
+  });
+
+  /// Two nonces sit in one struct. `transferNonce` is the caller's transfer tag
+  /// and rides the POST `params.nonce`; the trailing `nonce` is the envelope
+  /// nonce. Swapping them signs a payload the node cannot reconstruct, so pin
+  /// both the wire object and the rendered message, not the digest alone.
+  it('send_to_evm_with_data: the transfer tag and the envelope nonce stay apart', async () => {
+    const { buildTyped, typedDataV4 } = await import('../src/native/typed.js');
+    const built = buildTyped(
+      'send_to_evm_with_data',
+      {
+        token: 7,
+        amount: '12.5',
+        source_dex: 0,
+        destination_recipient: addr(0xe7),
+        to_perp: false,
+        destination_chain_id: 0,
+        data: [0xca, 0xfe],
+        nonce: 5,
+      },
+      18n,
+      CHAIN_ID,
+    );
+    expect(JSON.parse(built.actionJson)).toEqual({
+      type: 'send_to_evm_with_data',
+      params: {
+        token: 7,
+        // Verbatim: the node hashes this string, then parses it.
+        amount: '12.5',
+        source_dex: 0,
+        destination_recipient: addr(0xe7),
+        to_perp: false,
+        destination_chain_id: 0,
+        data: [0xca, 0xfe],
+        nonce: 5,
+      },
+    });
+    const msg = typedDataV4(built).message;
+    expect(msg.transferNonce).toBe(5);
+    expect(msg.nonce).toBe('18');
+    expect(msg.data).toBe('0xcafe');
+    expect(msg.amount).toBe('12.5');
+    // The struct declares BOTH, in this order.
+    const names = primaryFields(typedDataV4(built)).map((fld) => fld.name);
+    expect(names.slice(-2)).toEqual(['transferNonce', 'nonce']);
   });
 
   it('optional-flatten: absent explicit_index / asset sign the absent variant + omit from POST', async () => {

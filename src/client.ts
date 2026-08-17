@@ -98,6 +98,7 @@ import type {
   ScaleOrder,
   ScheduleCancel,
   SendAsset,
+  SendToEvmWithData,
   SetDisplayName,
   SetReferrer,
   SubAccountSpotTransfer,
@@ -1573,6 +1574,36 @@ export class Client {
       // `asset` is part of the signed digest; default to 0 (USDC) when omitted so
       // the uint32 field always has a value to encode.
       { ...params, asset: params.asset ?? 0 } as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Move a Core spot token to MetaFluxEVM with an EVM payload
+  /// (`send_to_evm_with_data`, typed scheme). Core → EVM only: it debits the
+  /// sender's Core balance for `token`, mints the scale-converted token to
+  /// `destination_recipient` on the next EVM block, then runs `data` against that
+  /// address. Sender-authorized.
+  ///
+  /// `source_dex`, `to_perp` and `destination_chain_id` are signed slots the node
+  /// REFUSES to bend: it rejects any value but `0`, `false` and a local delivery.
+  /// They default here to the only accepted values, so an omitted field cannot
+  /// produce a payload the node then rejects. `params.nonce` is the transfer tag,
+  /// NOT the replay guard — pass `opts.nonce` to pick the envelope nonce.
+  async sendToEvmWithData(
+    params: SendToEvmWithData,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'send_to_evm_with_data',
+      // The node's wire struct defaults NO key, so every field must reach the
+      // POST params, present or defaulted.
+      {
+        ...params,
+        source_dex: params.source_dex ?? 0,
+        to_perp: params.to_perp ?? false,
+        destination_chain_id: params.destination_chain_id ?? 0,
+        nonce: params.nonce ?? 0,
+      } as unknown as Record<string, unknown>,
       opts,
     );
   }

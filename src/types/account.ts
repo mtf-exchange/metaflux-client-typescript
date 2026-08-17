@@ -188,3 +188,60 @@ export interface CoreEvmTransfer {
   /// signs under `CoreEvmTransferV2`.
   destination_chain_id?: number;
 }
+
+/// `send_to_evm_with_data` — move a Core spot token to MetaFluxEVM with an EVM
+/// payload.
+///
+/// Core → EVM only. The action debits the sender's Core balance for `token`,
+/// mints the scale-converted token to `destination_recipient` on the next EVM
+/// block, then runs `data` against that address. Sender-authorized. Typed-only.
+///
+/// `coreEvmTransfer` moves the same value with the same payload rules. This
+/// action adds three extra signed slots — `source_dex`, `to_perp` and
+/// `destination_chain_id`. **Each of the three refuses any value it cannot
+/// honour; it is never accepted and then ignored.** A historical payload that
+/// carries `source_dex: 1` is therefore rejected today. Read the field rules
+/// below before you re-send one.
+export interface SendToEvmWithData {
+  /// MTF token id to move. Token `100` is USDC: it debits the USDC pool and is
+  /// gated on free collateral, so USDC that backs an open position cannot be
+  /// shipped out. Any other id debits that token's spot balance.
+  ///
+  /// The token must be linked to an EVM contract, or be the native gas token.
+  /// An unlinked token is rejected — the credit would otherwise mint the gas
+  /// token against a debit of something else.
+  token: number;
+  /// Amount in the whole-token plane as a canonical decimal string. Must be
+  /// positive.
+  ///
+  /// The lane truncates the amount toward zero twice: to 8 decimal places, then
+  /// to the token's own EVM decimals. The debit equals the truncated credit, so
+  /// the remainder stays in your Core balance. **An amount that truncates to a
+  /// ZERO credit is rejected** — it would debit Core and credit nothing.
+  amount: string;
+  /// Source DEX id. **`0` only** (the default). The action debits one ledger, so
+  /// no other value is honourable and any other value is rejected.
+  source_dex?: number;
+  /// `0x`-hex 20-byte EVM-side recipient. The EVM side has no owner check: the
+  /// credit is a mint to this address, so a wrong address is not recoverable.
+  destination_recipient: string;
+  /// Credit a perp account on the EVM side. **`false` only** (the default). The
+  /// EVM side has no perp account, so `true` is rejected.
+  to_perp?: boolean;
+  /// Delivery chain. **`0` (the default) or the local EVM chain id only.** Any
+  /// other id is rejected, because cross-chain delivery is not built. The field
+  /// exists so the capability has a signed slot.
+  destination_chain_id?: number;
+  /// EVM calldata run against `destination_recipient` AFTER the credit lands, as
+  /// a real transaction with its own receipt. Up to 4096 bytes; a longer payload
+  /// is rejected.
+  ///
+  /// A reverting payload NEVER unwinds the credit: Core was debited, the EVM was
+  /// credited, and the call is additional. Read its receipt.
+  data: number[];
+  /// Transfer tag carried into the queued transfer, signed as `transferNonce`.
+  ///
+  /// This is NOT the replay guard. The envelope nonce (`opts.nonce`) is the one
+  /// the node checks and advances. Defaults to `0`.
+  nonce?: number | bigint;
+}

@@ -272,6 +272,8 @@ owner-carrying. All the others below are sender-authorized.
 - **Spot margin & Earn** (devnet preview): `spotMarginDeposit` /
   `spotMarginWithdraw` / `spotMarginOpen` / `spotMarginClose`, and the lending
   supply side `earnDeposit` / `earnWithdraw`.
+- **Core → MetaFluxEVM**: `coreEvmTransfer`, and `sendToEvmWithData` for the same
+  move plus EVM calldata run against the recipient.
 - **Encrypted orders**: `submitEncryptedOrder`.
 - **MetaBridge**: `mbWithdraw` (cross-collateral withdrawal to another chain).
 

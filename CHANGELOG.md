@@ -7,6 +7,43 @@ All notable changes to the TypeScript SDK are documented here.
 The Rust SDK ships the same wire realignment as its 0.16.0. The two SDKs stay in
 step, so this release takes the same number.
 
+### `send_to_evm_with_data` is signable again
+
+`POST /exchange` takes `send_to_evm_with_data`, and the SDK could not express it.
+It now types it, signs it and sends it: the `SendToEvmWithData` type,
+`client.sendToEvmWithData({ … })`, and the signing string
+
+```
+MetaFluxTransaction:SendToEvmWithData(string metafluxChain,uint32 token,string amount,uint32 sourceDex,address destinationRecipient,bool toPerp,uint32 destinationChainId,bytes data,uint64 transferNonce,uint64 nonce)
+```
+
+The digest is pinned against the server's own fixture, so a signature this SDK
+makes verifies on arrival.
+
+The action moves the same value as `coreEvmTransfer` and takes the same payload.
+It adds three signed slots. **Each slot refuses a value it cannot honour; it is
+never accepted and then ignored.**
+
+- `source_dex` — `0` only. The action debits one ledger.
+- `to_perp` — `false` only. The EVM side has no perp account.
+- `destination_chain_id` — `0` or the local EVM chain id only. Cross-chain
+  delivery is not built.
+
+**A historical payload carries `source_dex: 1`, so it is rejected today.** Send
+`0` or omit the key. The client defaults all three slots to the accepted value,
+so an omitted field cannot produce a payload the node then refuses.
+
+Two more rules:
+
+- `data` is capped at 4096 bytes. A reverting payload NEVER unwinds the credit —
+  read its receipt.
+- An `amount` that truncates to a ZERO EVM credit is rejected. The lane truncates
+  toward zero twice, to 8 decimal places and then to the token's own EVM
+  decimals, and the debit equals the truncated credit.
+
+`params.nonce` is a transfer tag, signed as `transferNonce`. It is NOT the replay
+guard: the envelope nonce still is.
+
 ### The approve-fee action tag moves to `approve_broker_fee`
 
 `POST /exchange` now takes `approve_broker_fee`. The node accepts BOTH names, so
