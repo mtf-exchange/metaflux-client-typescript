@@ -273,7 +273,10 @@ owner-carrying. All the others below are sender-authorized.
   `spotMarginWithdraw` / `spotMarginOpen` / `spotMarginClose`, and the lending
   supply side `earnDeposit` / `earnWithdraw`.
 - **Core → MetaFluxEVM**: `coreEvmTransfer`, and `sendToEvmWithData` for the same
-  move plus EVM calldata run against the recipient.
+  move plus EVM calldata run against the recipient. Both charge the same fee in
+  MTF, on top of the amount, with a USDC fallback. **The fee is zero today.** Both
+  can refuse the move over the fee alone — one refusal does not depend on the token
+  you move. Read the type docs before you surface an error.
 - **Encrypted orders**: `submitEncryptedOrder`.
 - **MetaBridge**: `mbWithdraw` (cross-collateral withdrawal to another chain).
 

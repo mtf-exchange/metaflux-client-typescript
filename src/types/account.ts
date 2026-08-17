@@ -161,6 +161,46 @@ export interface CWithdraw {
 /// must be linked to an EVM contract) and mints the scale-converted token to
 /// `destination` on the next EVM block. `to_evm: false` (EVM → Core) is rejected
 /// — that direction originates as an EVM burn tx. Sender-authorized. Typed-only.
+///
+/// ## The fee is a quantity of MTF
+///
+/// This move charges a fee. The fee is a SECOND debit, on top of `amount`, and it
+/// is unrelated to the token you move. A BTC transfer debits BTC for the amount
+/// and MTF for the fee.
+///
+/// **The fee is ZERO today, so no fee is charged.** Chain governance sets the
+/// amount, and it can become non-zero with no SDK release. No read returns the
+/// amount, so a client cannot pre-compute the fee. Handle the three refusals below
+/// now.
+///
+/// The fee resolves in this order:
+///
+/// 1. **Spot MTF.** Only the spot balance pays. Staked MTF does not count.
+/// 2. **USDC at the MTF reference price,** when spot MTF is short.
+///
+/// The USDC step draws on FREE collateral. USDC that margins an open position
+/// cannot pay the fee. With `asset: 0` the amount and the fee clear that gate
+/// together, so a transfer that exactly fits your free collateral is refused once
+/// a fee applies.
+///
+/// If moving MTF itself, the spot MTF balance must cover the amount AND the fee.
+/// Otherwise the fee falls to USDC.
+///
+/// ## Three refusals, verbatim
+///
+/// - `insufficient MTF or USDC for the core->evm fee` — neither ledger covers the
+///   fee. ONE string covers both shortfalls, so it never says which ledger was
+///   short. Do not parse it for that.
+/// - `MTF price unavailable; the core->evm fee cannot be quoted in USDC`
+/// - `the core->evm fee does not convert to a positive USDC amount`
+///
+/// The last two are the rule callers get wrong. MTF is priced from its own market,
+/// so the reference price can be unusable — never set, or the market moved away
+/// from it. The transfer is then REFUSED, not charged at a guessed price. **So
+/// this action can fail for a reason unrelated to the token you move, and
+/// unrelated to your balance of it.**
+///
+/// A refused transfer pays nothing.
 export interface CoreEvmTransfer {
   /// Amount in the whole-token plane as a canonical decimal string.
   amount: string;
@@ -208,6 +248,43 @@ export interface CoreEvmTransfer {
 /// honour; it is never accepted and then ignored.** A historical payload that
 /// carries `source_dex: 1` is therefore rejected today. Read the field rules
 /// below before you re-send one.
+///
+/// ## The fee is a quantity of MTF
+///
+/// This lane charges the SAME fee as `coreEvmTransfer`. Neither lane is the cheaper
+/// route. The fee is a SECOND debit, on top of `amount`, and it is unrelated to the
+/// token you move. A BTC transfer debits BTC for the amount and MTF for the fee.
+///
+/// **The fee is ZERO today, so no fee is charged.** Chain governance sets the
+/// amount, and it can become non-zero with no SDK release. No read returns the
+/// amount, so a client cannot pre-compute the fee. Handle the three refusals below
+/// now.
+///
+/// The fee resolves in this order:
+///
+/// 1. **Spot MTF.** Only the spot balance pays. Staked MTF does not count.
+/// 2. **USDC at the MTF reference price,** when spot MTF is short.
+///
+/// The USDC step draws on FREE collateral. USDC that margins an open position
+/// cannot pay the fee. If moving MTF itself, the spot MTF balance must cover the
+/// amount AND the fee, or the fee falls to USDC.
+///
+/// ## Three refusals, verbatim
+///
+/// - `insufficient MTF or USDC for the core->evm fee` — neither ledger covers the
+///   fee. ONE string covers both shortfalls, so it never says which ledger was
+///   short. Do not parse it for that.
+/// - `MTF price unavailable; the core->evm fee cannot be quoted in USDC`
+/// - `the core->evm fee does not convert to a positive USDC amount`
+///
+/// The last two are the rule callers get wrong. MTF is priced from its own market,
+/// so the reference price can be unusable — never set, or the market moved away
+/// from it. The transfer is then REFUSED, not charged at a guessed price. **So this
+/// action can fail for a reason unrelated to the token you move, and unrelated to
+/// your balance of it.**
+///
+/// A refused transfer pays nothing. Until this action goes live, the 400 above
+/// comes first: it is refused before any fee is quoted.
 export interface SendToEvmWithData {
   /// MTF token id to move. Every accepted token debits that token's SPOT balance.
   ///

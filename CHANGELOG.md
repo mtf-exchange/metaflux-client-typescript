@@ -7,6 +7,34 @@ All notable changes to the TypeScript SDK are documented here.
 The Rust SDK ships the same wire realignment as its 0.16.0. The two SDKs stay in
 step, so this release takes the same number.
 
+### A Core → MetaFluxEVM move charges a fee in MTF
+
+Both lanes charge it — `coreEvmTransfer` and `sendToEvmWithData` — through one
+shared quote, so neither is the cheaper route. **The fee is ZERO today, so no fee
+is charged.** Chain governance sets the amount, and it can become non-zero with no
+SDK release. This entry is documentation: no type or payload changed.
+
+The fee is a quantity of MTF, debited on TOP of the amount. It is unrelated to the
+token you move: a BTC transfer debits BTC for the amount and MTF for the fee. It
+resolves as spot MTF first, then USDC at the MTF reference price. Staked MTF does
+not pay it, and the USDC step draws on FREE collateral.
+
+**No read returns the fee amount, so a client cannot pre-compute it.** The refusal
+is the only signal, which makes these three strings the whole UI contract:
+
+- `insufficient MTF or USDC for the core->evm fee` — neither ledger covers the fee.
+  ONE string covers both shortfalls, so it never says which ledger was short.
+- `MTF price unavailable; the core->evm fee cannot be quoted in USDC`
+- `the core->evm fee does not convert to a positive USDC amount`
+
+The last two are the rule callers get wrong. MTF is priced from its own market, so
+the reference price can be unusable — never set, or the market moved away from it.
+The transfer is then REFUSED, not charged at a guessed price. **A move can fail for
+a reason unrelated to the token you move and unrelated to your balance of it**, so
+a UI that only ever says "insufficient balance" will mislead a user.
+
+A refused transfer pays nothing.
+
 ### `send_to_evm_with_data` is signable again
 
 `POST /exchange` takes `send_to_evm_with_data`, and the SDK could not express it.

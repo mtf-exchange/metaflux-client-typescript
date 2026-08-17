@@ -1565,6 +1565,10 @@ export class Client {
   /// redirect the transfer to a different token. `to_evm: false` (EVM → Core) is
   /// rejected by the node — that direction originates as an EVM burn tx.
   /// Sender-authorized.
+  ///
+  /// The move charges a fee in MTF, on top of `amount`, with a USDC fallback. The
+  /// fee is ZERO today. It can be refused three ways, including one that does not
+  /// depend on the token you move — see {@link CoreEvmTransfer}.
   async coreEvmTransfer(
     params: CoreEvmTransfer,
     opts: { nonce?: bigint; chainId?: number } = {},
@@ -1589,6 +1593,11 @@ export class Client {
   /// They default here to the only accepted values, so an omitted field cannot
   /// produce a payload the node then rejects. `params.nonce` is the transfer tag,
   /// NOT the replay guard — pass `opts.nonce` to pick the envelope nonce.
+  ///
+  /// The move charges the SAME MTF fee as `coreEvmTransfer`, on top of `amount`,
+  /// with a USDC fallback. The fee is ZERO today. It can be refused three ways,
+  /// including one that does not depend on the token you move — see
+  /// {@link SendToEvmWithData}.
   async sendToEvmWithData(
     params: SendToEvmWithData,
     opts: { nonce?: bigint; chainId?: number } = {},
