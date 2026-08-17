@@ -192,6 +192,12 @@ export interface CoreEvmTransfer {
 /// `send_to_evm_with_data` — move a Core spot token to MetaFluxEVM with an EVM
 /// payload.
 ///
+/// ⚠️ **NOT LIVE YET.** The deployed exchange still answers
+/// `sendToEvmWithData is retired; use coreEvmTransfer` with a 400. This type and
+/// its signing path ship ahead of that, so a signature you build today is correct
+/// and the request is refused until the next exchange release. Use
+/// `coreEvmTransfer` in the meantime.
+///
 /// Core → EVM only. The action debits the sender's Core balance for `token`,
 /// mints the scale-converted token to `destination_recipient` on the next EVM
 /// block, then runs `data` against that address. Sender-authorized. Typed-only.
@@ -203,13 +209,17 @@ export interface CoreEvmTransfer {
 /// carries `source_dex: 1` is therefore rejected today. Read the field rules
 /// below before you re-send one.
 export interface SendToEvmWithData {
-  /// MTF token id to move. Token `100` is USDC: it debits the USDC pool and is
-  /// gated on free collateral, so USDC that backs an open position cannot be
-  /// shipped out. Any other id debits that token's spot balance.
+  /// MTF token id to move. Every accepted token debits that token's SPOT balance.
   ///
-  /// The token must be linked to an EVM contract, or be the native gas token.
-  /// An unlinked token is rejected — the credit would otherwise mint the gas
-  /// token against a debit of something else.
+  /// The token must be linked to an EVM contract, or be the native gas token. An
+  /// unlinked token is rejected — the credit would otherwise mint the gas token
+  /// against a debit of something else.
+  ///
+  /// **Token `100` (spot USDC) is REJECTED** as unlinked. It carries no EVM
+  /// contract link, and admitting it would queue a credit the exchange cannot
+  /// resolve to a contract. So this action cannot move USDC that backs an open
+  /// position — use `coreEvmTransfer` with `asset: 0`, which is the lane that
+  /// spends the collateral pool and is gated on free collateral.
   token: number;
   /// Amount in the whole-token plane as a canonical decimal string. Must be
   /// positive.
