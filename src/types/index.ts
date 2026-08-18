@@ -71,7 +71,18 @@ export type {
   NativeSpotMarginClose,
   NativeEarnDeposit,
   NativeEarnWithdraw,
+  BorrowLendKind,
+  BorrowLend,
 } from './spot.js';
+export type {
+  // SD-1 permissionless spot-deployer lane (MIP-1).
+  SpotRegisterToken,
+  SpotRegisterPair,
+  SpotSetPairParams,
+  SpotSetPairActive,
+  SpotSeedHolders,
+  SpotFinalizeSupply,
+} from './spot-deploy.js';
 export type {
   UpdateLeverage,
   UpdateIsolatedMargin,
@@ -105,6 +116,7 @@ export type {
   VaultModify,
   VaultWithdraw,
   VaultDistribute,
+  RegisterMetaliquidityOperator,
 } from './vault.js';
 export { sharesToWire } from './vault.js';
 export type { SubmitEncryptedOrder } from './encrypted.js';

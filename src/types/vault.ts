@@ -112,3 +112,33 @@ export interface VaultDistribute {
   /// `pnl` (legacy) — do NOT rename.
   pnl: string;
 }
+
+/// `register_metaliquidity_operator` — a Metaliquidity vault's LEADER grants or
+/// revokes an operator key that then acts as the vault.
+///
+/// The signer must be the vault's leader and the vault's kind must be
+/// `Metaliquidity`; the node refuses a `User` vault here. The operator is
+/// written into the vault address's approved-agent set, so afterwards that key
+/// signs orders with `owner` set to the vault.
+///
+/// **Security gate.** Granting (`allowed: true`) also requires the operator
+/// address to be a recognised MetaLiquidity Provider. A key outside that set is
+/// refused, so a leader cannot hand vault-trading authority to an arbitrary
+/// address. Revoking (`allowed: false`) has no such requirement.
+export interface RegisterMetaliquidityOperator {
+  /// Target vault id (`u64`).
+  vault_id: number;
+  /// Operator address (`0x`-hex).
+  operator: string;
+  /// `true` grants the operator, `false` revokes it.
+  allowed: boolean;
+  /// Optional grant expiry, ms since epoch (`u64`). OMIT the field for an
+  /// operator that never expires.
+  ///
+  /// **Never send an explicit `0`.** The node refuses it with a `400`, and the
+  /// SDK refuses it before signing. The digest flattens an absent field and an
+  /// explicit `0` to the same `uint64 0`, so one leader signature would cover
+  /// two wire forms that commit different state: absent means never expires,
+  /// while `0` means expired at epoch — an operator dead on arrival.
+  expires_at_ms?: number;
+}

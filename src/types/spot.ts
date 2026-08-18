@@ -141,3 +141,24 @@ export interface NativeEarnWithdraw {
   /// Pool shares to redeem, as a decimal string (`> 0`, owned by the sender).
   shares: string;
 }
+
+/// Direction of a [`BorrowLend`] flow against the BOLE pool. PascalCase to
+/// match the node's enum — `UnLend` keeps its capital `L`.
+export type BorrowLendKind = 'Lend' | 'UnLend' | 'Borrow' | 'Repay';
+
+/// MTF-native `borrow_lend` action params — move liquidity directly against the
+/// BOLE pool. SENDER-AUTHORIZED.
+///
+/// `Lend` adds liquidity and `UnLend` withdraws it, up to the sender's own lent
+/// balance. `Borrow` draws on the pool's liquidator credit line and `Repay`
+/// returns it, up to the sender's outstanding borrow.
+///
+/// **`Borrow` needs the allowlist.** The node refuses it as `Unauthorized`
+/// unless the sender is a registered liquidator. The other three kinds are open
+/// to any account.
+export interface BorrowLend {
+  /// Direction of the flow.
+  kind: BorrowLendKind;
+  /// Amount in the USD class (whole units), as a positive decimal string.
+  amount: string;
+}

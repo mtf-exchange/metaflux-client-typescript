@@ -62,6 +62,7 @@ import type {
   CancelChase,
   CancelScale,
   ChaseOrder,
+  BorrowLend,
   CDeposit,
   ClaimRewards,
   ConvertToMultiSigUser,
@@ -92,9 +93,16 @@ import type {
   SpotPlaceResult,
   SpotSubmission,
   PriorityBid,
+  RegisterMetaliquidityOperator,
   RfqAccept,
   RfqQuote,
   RfqRequest,
+  SpotFinalizeSupply,
+  SpotRegisterPair,
+  SpotRegisterToken,
+  SpotSeedHolders,
+  SpotSetPairActive,
+  SpotSetPairParams,
   ScaleOrder,
   ScheduleCancel,
   SendAsset,
@@ -1544,6 +1552,127 @@ export class Client {
   ): Promise<NativeExchangeAck> {
     return this.submitTyped(
       'earn_withdraw',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Move liquidity against the BOLE pool (`borrow_lend`, typed scheme).
+  ///
+  /// `kind` rides the wire as its PascalCase name and signs as a `uint8` code.
+  /// `Borrow` is refused unless the sender is a registered liquidator.
+  /// Sender-authorized.
+  async borrowLend(
+    params: BorrowLend,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'borrow_lend',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  // ── metaliquidity vault leader ────────────────────────────────────────────
+
+  /// Grant or revoke a Metaliquidity vault operator
+  /// (`register_metaliquidity_operator`, typed scheme).
+  ///
+  /// The signer must be the vault's leader, and a grant also needs the operator
+  /// to be a recognised MetaLiquidity Provider. Omit `expires_at_ms` for an
+  /// operator that never expires — an explicit `0` is refused before signing,
+  /// because the digest cannot tell it from an absent field.
+  /// Sender-authorized.
+  async registerMetaliquidityOperator(
+    params: RegisterMetaliquidityOperator,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'register_metaliquidity_operator',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  // ── SD-1 permissionless spot deployer lane (MIP-1) ────────────────────────
+  //
+  // All six are sender-authorized: the recovered signer IS the deployer. The
+  // two register calls pay the Dutch-clock ask at commit, bounded by the signed
+  // `max_deploy_fee`. Decimal fields ride the wire verbatim — pass the exact
+  // string, never a `Number` round-trip.
+
+  /// Register a spot token and pay the Dutch-clock ask (`spot_register_token`).
+  async spotRegisterToken(
+    params: SpotRegisterToken,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'spot_register_token',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Register a `(base, quote)` trading pair (`spot_register_pair`).
+  async spotRegisterPair(
+    params: SpotRegisterPair,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'spot_register_pair',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Set a pair's fee tier and min notional (`spot_set_pair_params`). Both fee
+  /// legs are DECI-bps and must stay below `1000`.
+  async spotSetPairParams(
+    params: SpotSetPairParams,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'spot_set_pair_params',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Open or close a pair to new orders (`spot_set_pair_active`).
+  async spotSetPairActive(
+    params: SpotSetPairActive,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'spot_set_pair_active',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Stage genesis holder rows for a registered token (`spot_seed_holders`).
+  ///
+  /// Repeatable. `holders` and `amounts` are parallel and both are signed in
+  /// order. Amounts are WHOLE units, never wei.
+  async spotSeedHolders(
+    params: SpotSeedHolders,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'spot_seed_holders',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Check the staged rows, then mint once (`spot_finalize_supply`).
+  /// `max_supply` must equal the sum of every staged row.
+  async spotFinalizeSupply(
+    params: SpotFinalizeSupply,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'spot_finalize_supply',
       params as unknown as Record<string, unknown>,
       opts,
     );

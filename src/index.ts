@@ -375,6 +375,17 @@ export type {
   NativeEarnWithdraw,
   NativeSignedAction,
   NativeExchangeAck,
+  // BOLE lend / borrow + the SD-1 spot-deployer lane (MIP-1) + the
+  // metaliquidity vault leader's operator grant.
+  BorrowLendKind,
+  BorrowLend,
+  SpotRegisterToken,
+  SpotRegisterPair,
+  SpotSetPairParams,
+  SpotSetPairActive,
+  SpotSeedHolders,
+  SpotFinalizeSupply,
+  RegisterMetaliquidityOperator,
   // Unified placement (one entry point over the order wire actions).
   PerpOrderLeg,
   SpotOrderLeg,

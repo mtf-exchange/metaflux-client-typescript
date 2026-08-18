@@ -336,6 +336,64 @@ const VECTORS: Vector[] = [
     nonce: 18n,
     digest: '6dd606a21f9786874a3215903bce4d713379222d7e67311c2876a4fd288bd452',
   },
+  // ---- The eight actions added for the MIP-1 deployer lane, the metaliquidity
+  // operator and BOLE. Digests taken from the node's own KAT run
+  // (`signing_typed_tests::all_actions`, chain 114514), not hand-derived.
+  {
+    actionType: 'spot_register_token',
+    payload: { symbol: 'WIF', sz_decimals: 4, wei_decimals: 8, max_deploy_fee: '1500.5' },
+    nonce: 58n,
+    digest: '97a6ef5ea272f78fe8de24190350badb846919cfc0c5dbd9761c5e7109d0e7a2',
+  },
+  {
+    actionType: 'spot_register_pair',
+    payload: { base: 77, quote: 0, name: 'WIF/USDC', max_deploy_fee: '900' },
+    nonce: 59n,
+    digest: '83c8709b7590d388dd7067a1283476fa5d9ad34c514093c1a4c0984a65086022',
+  },
+  {
+    actionType: 'spot_set_pair_params',
+    payload: { pair: 78, taker_fee_dbps: 45, maker_fee_dbps: 12, min_notional_cents: 1_000 },
+    nonce: 60n,
+    digest: 'd4eb0940833368f6b3ae4d4aea6b3db3f0d5d4250fd2e8a64fca72bbeba21a51',
+  },
+  {
+    actionType: 'spot_set_pair_active',
+    payload: { pair: 78, active: true },
+    nonce: 61n,
+    digest: '2966b4aba4aa02595bd90e3610eae23b1c262a22f96b654b4b49015eb427de68',
+  },
+  // The only cross-implementation execution of the `string-decimal[]` word.
+  {
+    actionType: 'spot_seed_holders',
+    payload: { asset: 77, holders: [addr(0x51), addr(0x52)], amounts: ['1000000', '250.75'] },
+    nonce: 62n,
+    digest: 'b965e1334fcb953d8136c4844b7d9a5dcbaec7cda59153268cd773ab65396533',
+  },
+  {
+    actionType: 'spot_finalize_supply',
+    payload: { asset: 77, max_supply: '1000250.75' },
+    nonce: 63n,
+    digest: 'ea8d4e229026465b8327c94721d538637fcbd97cd4d9c9992a8de6838876c6ee',
+  },
+  {
+    actionType: 'register_metaliquidity_operator',
+    payload: {
+      vault_id: 42,
+      operator: addr(0x70),
+      allowed: true,
+      expires_at_ms: 1_700_000_000_000,
+    },
+    nonce: 34n,
+    digest: '4de965c3bc25f15ddafa0b778179909f50cd0930bf4f58a652dde93bce524c80',
+  },
+  // `kind` signs the uint8 code; the POST params carry the PascalCase name.
+  {
+    actionType: 'borrow_lend',
+    payload: { kind: 'Lend', amount: '1000' },
+    nonce: 18n,
+    digest: '3e5afde6b9f0d0b1c0b2f9f55234c62ca9487d8d46f990ae0593ff147dfc3bb5',
+  },
 ];
 
 describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
@@ -366,10 +424,10 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     }
   });
 
-  it('reproduces all 39 contract KAT digests byte-for-byte (chain 114514)', async () => {
+  it('reproduces all 47 contract KAT digests byte-for-byte (chain 114514)', async () => {
     const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
-    // 40 vectors, 39 actions: the two approve-fee keys share one digest pin.
-    expect(VECTORS.length).toBe(40);
+    // 48 vectors, 47 actions: the two approve-fee keys share one digest pin.
+    expect(VECTORS.length).toBe(48);
     for (const v of VECTORS) {
       const built = buildTyped(v.actionType, v.payload, v.nonce, CHAIN_ID);
       const digest = await typedActionDigest(built);
@@ -592,11 +650,20 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(toHex(base)).not.toBe(toHex(otherChain));
   });
 
-  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 48 reachable actions', async () => {
+  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 56 reachable actions', async () => {
     const { isTypedAction, TYPED_ACTION_TYPES } = await import('../src/native/typed.js');
-    // 49 keys, 48 actions: `approve_builder_fee` is the old key for
+    // 57 keys, 56 actions: `approve_builder_fee` is the old key for
     // `approve_broker_fee` and shares its spec.
-    expect(TYPED_ACTION_TYPES.length).toBe(49);
+    expect(TYPED_ACTION_TYPES.length).toBe(57);
+    // MIP-1 spot deployer lane (6) + the metaliquidity operator grant + BOLE.
+    expect(isTypedAction('spot_register_token')).toBe(true);
+    expect(isTypedAction('spot_register_pair')).toBe(true);
+    expect(isTypedAction('spot_set_pair_params')).toBe(true);
+    expect(isTypedAction('spot_set_pair_active')).toBe(true);
+    expect(isTypedAction('spot_seed_holders')).toBe(true);
+    expect(isTypedAction('spot_finalize_supply')).toBe(true);
+    expect(isTypedAction('register_metaliquidity_operator')).toBe(true);
+    expect(isTypedAction('borrow_lend')).toBe(true);
     expect(isTypedAction('approve_broker_fee')).toBe(true);
     expect(isTypedAction('approve_builder_fee')).toBe(true);
     // The multi-sig acting wrapper (user + inner blob + roster signatures).

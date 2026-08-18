@@ -91,12 +91,32 @@ export function metafluxChainTag(chainId: number): MetafluxChainTag {
 /// per-element keccak256)`), and the v4 message renders the hex string(s). This
 /// differs from `bytes` (which POSTs a JSON byte array) — the multi-sig wrapper
 /// carries hex strings on the wire.
+///
+/// `string-decimal[]` backs the spot-deployer `spot_seed_holders.amounts`: an
+/// EIP-712 `string[]` of VERBATIM decimal strings. The signed word is
+/// `keccak256(concat of per-element keccak256(utf8))` — the standard
+/// array-of-dynamic rule, the same shape `bytes[]-hex` uses.
+///
+/// `borrow-kind` backs `borrow_lend.kind`: the POST `params.kind` carries the
+/// PascalCase enum NAME, the signed word + v4 message value are the `uint8`
+/// code — the same string-in / code-signed split `vault-kind` and `side-u8` use.
+///
+/// `sentinel-uint64` backs `register_metaliquidity_operator.expires_at_ms`: an
+/// OPTIONAL u64 whose `0` is the never-set sentinel. Absent signs `0` and omits
+/// the key from the POST params; an explicit `0` is REFUSED here, because the
+/// node refuses that wire form too. The digest flattens absent and explicit-`0`
+/// to the same `uint64 0`, so one signature would cover two wire forms that
+/// commit different state — never-expires against expired-at-epoch. Unlike
+/// `opt-uint64` this kind carries no paired presence bool: the node's typed
+/// struct declares a plain `uint64`.
 type FieldSolidityType =
   | 'string'
   | 'string-decimal'
+  | 'string-decimal[]'
   | 'chain-u8'
   | 'address'
   | 'address[]'
+  | 'borrow-kind'
   | 'bool'
   | 'uint8'
   | 'uint16'
@@ -107,6 +127,7 @@ type FieldSolidityType =
   | 'presence-bool'
   | 'opt-uint32'
   | 'opt-uint64'
+  | 'sentinel-uint64'
   | 'const-false-bool'
   | 'bytes'
   | 'bytes32'
@@ -139,6 +160,18 @@ const VAULT_KIND_CODES: Readonly<Record<string, number>> = Object.freeze({
 const SIDE_CODES: Readonly<Record<string, number>> = Object.freeze({
   Bid: 0,
   Ask: 1,
+});
+
+/// `BorrowLendKind` PascalCase name → the `uint8` code the typed
+/// `borrow_lend.kind` field signs. The POST `params.kind` carries the STRING
+/// name (the node's `BorrowLendKind` enum has NO `rename_all`, so it
+/// deserializes PascalCase); the signed word + v4 message value carry this code.
+/// `UnLend` keeps its capital `L` — that spelling IS the wire value.
+const BORROW_LEND_KIND_CODES: Readonly<Record<string, number>> = Object.freeze({
+  Lend: 0,
+  UnLend: 1,
+  Borrow: 2,
+  Repay: 3,
 });
 
 /// One field of a typed struct.
@@ -475,6 +508,88 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('shares', 'string-decimal', 'shares'),
     ],
   },
+  // ---- BOLE lend / borrow (1) ----
+  borrow_lend: {
+    pascal: 'BorrowLend',
+    wireType: 'borrow_lend',
+    fields: [
+      f('kind', 'borrow-kind', 'kind'),
+      f('amount', 'string-decimal', 'amount'),
+    ],
+  },
+  // ---- metaliquidity vault leader (1) ----
+  register_metaliquidity_operator: {
+    pascal: 'RegisterMetaliquidityOperator',
+    wireType: 'register_metaliquidity_operator',
+    fields: [
+      f('vaultId', 'uint64', 'vault_id'),
+      f('operator', 'address', 'operator'),
+      f('allowed', 'bool', 'allowed'),
+      f('expiresAtMs', 'sentinel-uint64', 'expires_at_ms'),
+    ],
+  },
+  // ---- SD-1 permissionless spot deployer lane (6) ----
+  //
+  // Sender-authorized: the recovered signer IS the deployer, so none of these
+  // takes an `owner`. `max_deploy_fee` / `max_supply` / `amounts` are VERBATIM
+  // decimal strings — the node hashes the exact text it received, then parses
+  // it, so "1.0" and "1.00" are two different digests.
+  //
+  // `holders` / `amounts` are WHOLE UNITS, never wei. The spot ledger is a
+  // whole-unit decimal; wei amounts mint 10^18 times too much AND the
+  // `max_supply` checksum agrees, so the error is silent.
+  spot_register_token: {
+    pascal: 'SpotRegisterToken',
+    wireType: 'spot_register_token',
+    fields: [
+      f('symbol', 'string', 'symbol'),
+      f('szDecimals', 'uint8', 'sz_decimals'),
+      f('weiDecimals', 'uint8', 'wei_decimals'),
+      f('maxDeployFee', 'string-decimal', 'max_deploy_fee'),
+    ],
+  },
+  spot_register_pair: {
+    pascal: 'SpotRegisterPair',
+    wireType: 'spot_register_pair',
+    fields: [
+      f('base', 'uint32', 'base'),
+      f('quote', 'uint32', 'quote'),
+      f('name', 'string', 'name'),
+      f('maxDeployFee', 'string-decimal', 'max_deploy_fee'),
+    ],
+  },
+  spot_set_pair_params: {
+    pascal: 'SpotSetPairParams',
+    wireType: 'spot_set_pair_params',
+    fields: [
+      f('pair', 'uint32', 'pair'),
+      f('takerFeeDbps', 'uint32', 'taker_fee_dbps'),
+      f('makerFeeDbps', 'uint32', 'maker_fee_dbps'),
+      f('minNotionalCents', 'uint64', 'min_notional_cents'),
+    ],
+  },
+  spot_set_pair_active: {
+    pascal: 'SpotSetPairActive',
+    wireType: 'spot_set_pair_active',
+    fields: [f('pair', 'uint32', 'pair'), f('active', 'bool', 'active')],
+  },
+  spot_seed_holders: {
+    pascal: 'SpotSeedHolders',
+    wireType: 'spot_seed_holders',
+    fields: [
+      f('asset', 'uint32', 'asset'),
+      f('holders', 'address[]', 'holders'),
+      f('amounts', 'string-decimal[]', 'amounts'),
+    ],
+  },
+  spot_finalize_supply: {
+    pascal: 'SpotFinalizeSupply',
+    wireType: 'spot_finalize_supply',
+    fields: [
+      f('asset', 'uint32', 'asset'),
+      f('maxSupply', 'string-decimal', 'max_supply'),
+    ],
+  },
   // ---- Core ↔ MetaFluxEVM transfer (1) ----
   core_evm_transfer: {
     pascal: 'CoreEvmTransfer',
@@ -751,13 +866,16 @@ export function accountSupportsOwner(actionType: string): boolean {
 /// `bool` presence flag + a `uint32` value in the signed type.
 function solidityTypeName(ty: FieldSolidityType): string {
   if (ty === 'string-decimal') return 'string';
+  if (ty === 'string-decimal[]') return 'string[]';
   if (ty === 'chain-u8') return 'uint8';
   if (ty === 'vault-kind') return 'uint8';
   if (ty === 'side-u8') return 'uint8';
+  if (ty === 'borrow-kind') return 'uint8';
   if (ty === 'presence-bool') return 'bool';
   if (ty === 'const-false-bool') return 'bool';
   if (ty === 'opt-uint32') return 'uint32';
   if (ty === 'opt-uint64') return 'uint64';
+  if (ty === 'sentinel-uint64') return 'uint64';
   if (ty === 'bytes-hex') return 'bytes';
   if (ty === 'bytes[]-hex') return 'bytes[]';
   return ty;
@@ -885,6 +1003,33 @@ function planField(fld: FieldSpec, payload: Record<string, unknown>): FieldPlan 
       validateDecimal(s, fld.wireKey);
       return mkPlan(fld, jsonStr(s), s, () => keccak256(enc.encode(s)));
     }
+    case 'string-decimal[]': {
+      // EIP-712 `string[]` over VERBATIM decimal strings: the signed word is
+      // `keccak256(concat of per-element keccak256(utf8))`. Element ORDER is
+      // signed, so `holders` and `amounts` stay row-aligned under the digest.
+      if (!Array.isArray(raw)) {
+        throw new RangeError(`${fld.wireKey} must be an array of decimal strings`);
+      }
+      const items = raw as string[];
+      items.forEach((s, i) => validateDecimal(s, `${fld.wireKey}[${i}]`));
+      const jsonValue = `[${items.map((s) => jsonStr(s)).join(',')}]`;
+      return mkPlan(fld, jsonValue, [...items], async () => {
+        const elemHashes = await Promise.all(items.map((s) => keccak256(enc.encode(s))));
+        return keccak256(concatBytes(elemHashes));
+      });
+    }
+    case 'borrow-kind': {
+      // POST `params.kind` carries the STRING enum name; the signed word + v4
+      // message value are the uint8 code (Lend=0, UnLend=1, Borrow=2, Repay=3).
+      const code = typeof raw === 'string' ? BORROW_LEND_KIND_CODES[raw] : undefined;
+      if (code === undefined) {
+        throw new RangeError(
+          `${fld.wireKey} must be one of: ${Object.keys(BORROW_LEND_KIND_CODES).join(', ')}`,
+        );
+      }
+      const word = encUintWord(BigInt(code), 8, fld.wireKey);
+      return mkPlan(fld, jsonStr(raw as string), code, async () => word);
+    }
     case 'chain-u8': {
       // POST `params` carries the STRING chain name; the signed word + v4
       // message value are the uint8 code (Base=1, Arbitrum=2).
@@ -989,6 +1134,21 @@ function planField(fld: FieldSpec, payload: Record<string, unknown>): FieldPlan 
       // wire the optional key is emitted ONLY when present (omitted otherwise).
       const present = isPresent(raw);
       const v = present ? asBigInt(raw, fld.wireKey) : 0n;
+      const word = encUintWord(v, 64, fld.wireKey);
+      return mkPlan(fld, v.toString(), numberFor(v, fld.wireKey), async () => word, !present);
+    }
+    case 'sentinel-uint64': {
+      // An optional u64 with NO presence half: absent signs `0` and omits the
+      // key. An explicit `0` is refused — it digests identically to absent, and
+      // the node refuses that wire form for the same reason.
+      const present = isPresent(raw);
+      const v = present ? asBigInt(raw, fld.wireKey) : 0n;
+      if (present && v === 0n) {
+        throw new RangeError(
+          `${fld.wireKey}: an explicit 0 is ambiguous (the signed digest cannot ` +
+            `tell it from an absent field); omit the field instead`,
+        );
+      }
       const word = encUintWord(v, 64, fld.wireKey);
       return mkPlan(fld, v.toString(), numberFor(v, fld.wireKey), async () => word, !present);
     }
