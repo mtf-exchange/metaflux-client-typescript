@@ -590,6 +590,86 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('maxSupply', 'string-decimal', 'max_supply'),
     ],
   },
+  // ---- MIP-3 permissionless perp deployer lane (9) ----
+  //
+  // One spec per `PerpDeployKind`. Each binds ONLY the fields its own
+  // sub-handler reads, so no digest carries a field the chain ignores.
+  // Sender-authorized: the recovered signer IS the deployer, so none takes an
+  // `owner`. None carries `bid` — the legacy gas-auction lane is dead and the
+  // handler rejects a non-zero bid.
+  //
+  // `perp_set_fee_tier` states the three legs SEPARATELY; the node packs them
+  // into the one encoded value its handler decodes. The signer signs the legs
+  // it means, not the packing.
+  perp_register_asset: {
+    pascal: 'PerpRegisterAsset',
+    wireType: 'perp_register_asset',
+    fields: [
+      f('symbol', 'string', 'symbol'),
+      f('decimals', 'uint8', 'decimals'),
+    ],
+  },
+  perp_set_oracle: {
+    pascal: 'PerpSetOracle',
+    wireType: 'perp_set_oracle',
+    fields: [
+      f('asset', 'uint32', 'asset'),
+      f('oracleSourceMask', 'uint16', 'oracle_source_mask'),
+    ],
+  },
+  perp_set_leverage: {
+    pascal: 'PerpSetLeverage',
+    wireType: 'perp_set_leverage',
+    fields: [
+      f('asset', 'uint32', 'asset'),
+      f('maxLeverage', 'uint8', 'max_leverage'),
+    ],
+  },
+  perp_set_fee_tier: {
+    pascal: 'PerpSetFeeTier',
+    wireType: 'perp_set_fee_tier',
+    fields: [
+      f('asset', 'uint32', 'asset'),
+      f('takerFeeDbps', 'uint32', 'taker_fee_dbps'),
+      f('makerFeeDbps', 'uint32', 'maker_fee_dbps'),
+      f('deployerFeeBps', 'uint32', 'deployer_fee_bps'),
+    ],
+  },
+  perp_set_maker_rebate: {
+    pascal: 'PerpSetMakerRebate',
+    wireType: 'perp_set_maker_rebate',
+    fields: [
+      f('asset', 'uint32', 'asset'),
+      f('rebateBps', 'uint16', 'rebate_bps'),
+    ],
+  },
+  perp_set_min_size: {
+    pascal: 'PerpSetMinSize',
+    wireType: 'perp_set_min_size',
+    fields: [
+      f('asset', 'uint32', 'asset'),
+      f('minOrderSize', 'uint64', 'min_order_size'),
+    ],
+  },
+  perp_activate_market: {
+    pascal: 'PerpActivateMarket',
+    wireType: 'perp_activate_market',
+    fields: [f('asset', 'uint32', 'asset')],
+  },
+  perp_deactivate_market: {
+    pascal: 'PerpDeactivateMarket',
+    wireType: 'perp_deactivate_market',
+    fields: [f('asset', 'uint32', 'asset')],
+  },
+  perp_set_sub_deployers: {
+    pascal: 'PerpSetSubDeployers',
+    wireType: 'perp_set_sub_deployers',
+    fields: [
+      f('asset', 'uint32', 'asset'),
+      f('subDeployer', 'address', 'sub_deployer'),
+      f('add', 'bool', 'add'),
+    ],
+  },
   // ---- Core ↔ MetaFluxEVM transfer (1) ----
   core_evm_transfer: {
     pascal: 'CoreEvmTransfer',

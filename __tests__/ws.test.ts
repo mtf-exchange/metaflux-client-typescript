@@ -474,6 +474,7 @@ describe('WsClient wire protocol', () => {
     await p;
 
     const vault = '0x00000000000000000000000000000000000000cc';
+    const before = sock.sent.length;
     const post = ws.submitOrder({
       owner: vault,
       market: 0,
@@ -485,7 +486,12 @@ describe('WsClient wire protocol', () => {
       stp_mode: 'cancel_oldest',
       reduce_only: false,
     });
-    await new Promise((r) => setTimeout(r, 50));
+    // Wait for the frame, not for a fixed delay: WASM signing has no bounded
+    // latency, so a sleep long enough on an idle machine still races a loaded one.
+    const deadline = Date.now() + 2000;
+    while (sock.sent.length === before && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
     const frame = JSON.parse(sock.sent[sock.sent.length - 1]!) as {
       id: number;
       request: { payload: { action: { order: { owner: string } } } };

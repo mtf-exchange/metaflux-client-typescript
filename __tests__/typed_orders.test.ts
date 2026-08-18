@@ -2,7 +2,7 @@
 //
 // Pins the TS trading-action typed digest to the SAME value the server commits
 // to for all 12 trading actions (chain id 114514 / "Testnet"). The inputs mirror
-// the server's `sample_order()` / `sample_modify()` / `all_actions()` fixtures;
+// the chain's own cross-language vector set for orders and modifies;
 // the digest pins are the frozen cross-language contract. If a digest drifts, the
 // TS SDK is signing something the server will not verify.
 

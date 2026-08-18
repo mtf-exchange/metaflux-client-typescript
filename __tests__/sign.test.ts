@@ -3,7 +3,7 @@
 // Skips with a helpful message when `pkg/` is missing (the test does not
 // invoke `wasm-pack` itself — that's a manual step per the SDK setup
 // flow). On a built repo, exercises the same primitives the native
-// `cargo test` covers, this time through the WASM ABI.
+// the chain's own suite covers, this time through the WASM ABI.
 
 import { describe, expect, it } from 'vitest';
 import { existsSync } from 'node:fs';

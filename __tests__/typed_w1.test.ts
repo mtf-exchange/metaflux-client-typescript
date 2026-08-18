@@ -47,7 +47,7 @@ function primaryFields(data: TypedDataV4): { name: string; type: string }[] {
 }
 
 // The frozen node EIP-712 type strings these actions must reproduce (verbatim
-// from the W1 node `signing_typed_*` encoders).
+// from the W1 node's own typed encoders).
 const ENCODE_TYPES = {
   rfq_request:
     'MetaFluxTransaction:RfqRequest(string metafluxChain,uint32 market,uint8 side,uint64 size,bool hasLimitPx,uint64 limitPx,uint64 expiryMs,bool hasStpGroup,uint64 stpGroup,uint64 nonce)',
@@ -286,10 +286,10 @@ describe.skipIf(!wasmBuilt)('W1 typed-action digests', () => {
 //
 // Unlike the self-computed regression pins above, these five digests are COPIED
 // VERBATIM from the node's own `typed_action_kat_vectors` output
-// (`core-state::signing_typed_tests`, chain 114514) — the SAME inputs the node
+// (the chain's own cross-language vector set, domain chain 114514) — the SAME inputs the node
 // signs. A CROSS-IMPL match proves the TS digest equals the byte the node
 // verifies; a drift 401s the action. Never edit these by hand — regenerate from
-// `cargo test -p core-state typed_action_kat_vectors -- --nocapture`.
+// the chain's own typed-action vector generator.
 const NODE_KAT = {
   // owner=None, rfq_id=9, price=105, max_size=500, valid_until_ms=9000,
   // stp_group absent, nonce=54.

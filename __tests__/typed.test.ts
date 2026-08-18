@@ -3,7 +3,7 @@
 // Pins the TS typed-action digest to the SAME value the server commits to for
 // the 18 reachable actions (chain id 114514 / "Testnet"). If a digest drifts,
 // the TS SDK is signing something the server will not verify. Vectors mirror the
-// server's `all_actions()` fixtures; the digest pins are the frozen contract.
+// the chain's own cross-language vector set; the digest pins are the frozen contract.
 
 import { describe, expect, it } from 'vitest';
 import { existsSync } from 'node:fs';
@@ -338,7 +338,7 @@ const VECTORS: Vector[] = [
   },
   // ---- The eight actions added for the MIP-1 deployer lane, the metaliquidity
   // operator and BOLE. Digests taken from the node's own KAT run
-  // (`signing_typed_tests::all_actions`, chain 114514), not hand-derived.
+  // (the chain's own cross-language vector set, domain chain 114514), not hand-derived.
   {
     actionType: 'spot_register_token',
     payload: { symbol: 'WIF', sz_decimals: 4, wei_decimals: 8, max_deploy_fee: '1500.5' },
@@ -394,6 +394,66 @@ const VECTORS: Vector[] = [
     nonce: 18n,
     digest: '3e5afde6b9f0d0b1c0b2f9f55234c62ca9487d8d46f990ae0593ff147dfc3bb5',
   },
+  // ---- The nine MIP-3 perp-deployer actions. Digests taken from the node's
+  // own vector set (domain chain 114514), not
+  // hand-derived. Asset 1001 is a MIP-3 id: the lane allocates at or above
+  // 1000, and the chain's own perps sit below that.
+  {
+    actionType: 'perp_register_asset',
+    payload: { symbol: 'WIF', decimals: 8 },
+    nonce: 201n,
+    digest: 'ed8d4dbc9462484893615eb0dba08fe55b08d187e9346ad66e6a0e0f2ba786c8',
+  },
+  {
+    actionType: 'perp_set_oracle',
+    payload: { asset: 1001, oracle_source_mask: 0x03ff },
+    nonce: 202n,
+    digest: 'ba16e9a9767306835ed196b3bc4261c35491ae0e9c1d41887fe1cc77a7e960c0',
+  },
+  {
+    actionType: 'perp_set_leverage',
+    payload: { asset: 1001, max_leverage: 20 },
+    nonce: 203n,
+    digest: '536be19f9cd4572c2bf2cefdfa8fdb1fbedbe5f8667f9ca7b82f25122f14a223',
+  },
+  // The three legs stay separate in the digest; the node packs them itself.
+  {
+    actionType: 'perp_set_fee_tier',
+    payload: { asset: 1001, taker_fee_dbps: 45, maker_fee_dbps: 12, deployer_fee_bps: 6 },
+    nonce: 204n,
+    digest: 'c54b9157d397ffc3f295314e35b636bd46be99baf8f3842e9438c015ca55189a',
+  },
+  {
+    actionType: 'perp_set_maker_rebate',
+    payload: { asset: 1001, rebate_bps: 2 },
+    nonce: 205n,
+    digest: 'a88cfd6fd468a694c9bb519b75c2e9e20ae8fe828329a627a7bea7ddc28fe858',
+  },
+  {
+    actionType: 'perp_set_min_size',
+    payload: { asset: 1001, min_order_size: 1000 },
+    nonce: 206n,
+    digest: 'db58e1837626e4e08b8887e6055cf0fb35a7016d1b9efe6e1a0e0f4302dc131c',
+  },
+  {
+    actionType: 'perp_activate_market',
+    payload: { asset: 1001 },
+    nonce: 207n,
+    digest: 'e2abbf93054c43fb4b85376fa40e48e7942caf539bf13555bc6d1ff229171c13',
+  },
+  {
+    actionType: 'perp_deactivate_market',
+    payload: { asset: 1001 },
+    nonce: 208n,
+    digest: '8134fe45117bb61f29586b1da5ade99df583faeeadaac6ed3371d309c3b6d183',
+  },
+  // Both the delegate and the add / remove flag are inside the digest.
+  {
+    actionType: 'perp_set_sub_deployers',
+    payload: { asset: 1001, sub_deployer: addr(0xaa), add: true },
+    nonce: 209n,
+    digest: '6e39d36bdd1f80375e71c3609d10ee15ad030004d3c41c246fcfbcb93df6750d',
+  },
 ];
 
 describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
@@ -424,10 +484,10 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     }
   });
 
-  it('reproduces all 47 contract KAT digests byte-for-byte (chain 114514)', async () => {
+  it('reproduces all 56 contract KAT digests byte-for-byte (chain 114514)', async () => {
     const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
-    // 48 vectors, 47 actions: the two approve-fee keys share one digest pin.
-    expect(VECTORS.length).toBe(48);
+    // 57 vectors, 56 actions: the two approve-fee keys share one digest pin.
+    expect(VECTORS.length).toBe(57);
     for (const v of VECTORS) {
       const built = buildTyped(v.actionType, v.payload, v.nonce, CHAIN_ID);
       const digest = await typedActionDigest(built);
@@ -650,11 +710,22 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(toHex(base)).not.toBe(toHex(otherChain));
   });
 
-  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 56 reachable actions', async () => {
+  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 65 reachable actions', async () => {
     const { isTypedAction, TYPED_ACTION_TYPES } = await import('../src/native/typed.js');
-    // 57 keys, 56 actions: `approve_builder_fee` is the old key for
+    // 66 keys, 65 actions: `approve_builder_fee` is the old key for
     // `approve_broker_fee` and shares its spec.
-    expect(TYPED_ACTION_TYPES.length).toBe(57);
+    expect(TYPED_ACTION_TYPES.length).toBe(66);
+    // MIP-3 perp deployer lane (9). Landed in the node, NOT yet released: the
+    // live chain refuses all nine until the swap height.
+    expect(isTypedAction('perp_register_asset')).toBe(true);
+    expect(isTypedAction('perp_set_oracle')).toBe(true);
+    expect(isTypedAction('perp_set_leverage')).toBe(true);
+    expect(isTypedAction('perp_set_fee_tier')).toBe(true);
+    expect(isTypedAction('perp_set_maker_rebate')).toBe(true);
+    expect(isTypedAction('perp_set_min_size')).toBe(true);
+    expect(isTypedAction('perp_activate_market')).toBe(true);
+    expect(isTypedAction('perp_deactivate_market')).toBe(true);
+    expect(isTypedAction('perp_set_sub_deployers')).toBe(true);
     // MIP-1 spot deployer lane (6) + the metaliquidity operator grant + BOLE.
     expect(isTypedAction('spot_register_token')).toBe(true);
     expect(isTypedAction('spot_register_pair')).toBe(true);
@@ -1074,7 +1145,7 @@ describe.skipIf(!wasmBuilt)(
 // ============================================================================
 // Optional action-expiry (`expiresAfter`) — chain-pinned KAT + invariants.
 //
-// Fixtures generated by executing the chain crate `core-state` (chain id 114514,
+// Fixtures generated by executing the chain itself (chain id 114514,
 // tag "Testnet", nonce 1735689600000). `expiresAfter=0` MUST be byte-identical
 // to the plain digest; a non-zero value folds `,uint64 expiresAfter` into the
 // type string and appends one trailing word. If a pin drifts, the SDK is signing

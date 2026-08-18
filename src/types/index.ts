@@ -84,6 +84,18 @@ export type {
   SpotFinalizeSupply,
 } from './spot-deploy.js';
 export type {
+  // MIP-3 permissionless perp-deployer lane.
+  PerpRegisterAsset,
+  PerpSetOracle,
+  PerpSetLeverage,
+  PerpSetFeeTier,
+  PerpSetMakerRebate,
+  PerpSetMinSize,
+  PerpActivateMarket,
+  PerpDeactivateMarket,
+  PerpSetSubDeployers,
+} from './perp-deploy.js';
+export type {
   UpdateLeverage,
   UpdateIsolatedMargin,
   TopUpIsolatedOnlyMargin,

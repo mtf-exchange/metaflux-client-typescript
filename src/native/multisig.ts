@@ -20,7 +20,7 @@
 //     unbound scheme. Kept as an explicit opt-in for signing BEFORE the upgrade
 //     activates; rejected by the chain from the activation point onward.
 //
-// Byte-exact twin of the chain verifier (`core-state` `signing.rs`
+// Byte-exact twin of the chain verifier (its own signing module
 // `multi_sig_inner_digest` / the legacy `native_action_digest`). The signature
 // is verified over the EXACT `inner_action_blob` bytes the roster member signed
 // — the same bytes later carried (0x-hex) in the wrapper's `inner_action_blob`

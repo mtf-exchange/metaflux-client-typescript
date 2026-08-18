@@ -93,6 +93,15 @@ import type {
   SpotPlaceResult,
   SpotSubmission,
   PriorityBid,
+  PerpActivateMarket,
+  PerpDeactivateMarket,
+  PerpRegisterAsset,
+  PerpSetFeeTier,
+  PerpSetLeverage,
+  PerpSetMakerRebate,
+  PerpSetMinSize,
+  PerpSetOracle,
+  PerpSetSubDeployers,
   RegisterMetaliquidityOperator,
   RfqAccept,
   RfqQuote,
@@ -1673,6 +1682,131 @@ export class Client {
   ): Promise<NativeExchangeAck> {
     return this.submitTyped(
       'spot_finalize_supply',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  // ── MIP-3 permissionless perp deployer lane ───────────────────────────────
+  //
+  // All nine are sender-authorized: the recovered signer IS the deployer or one
+  // of its sub-deployers. None carries a `bid` — the legacy gas-auction lane is
+  // dead and the handler rejects a non-zero bid.
+  //
+  // NOT LIVE YET. The nine tags landed in the node but that binary is not
+  // released, so the live chain refuses every one of them today. They start
+  // working at the freeze-swap height of the release that carries them.
+
+  /// Allocate a fresh MIP-3 perp market (`perp_register_asset`). The signer
+  /// becomes its deployer. `decimals` of `0` reads as the handler default of 8.
+  async perpRegisterAsset(
+    params: PerpRegisterAsset,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'perp_register_asset',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Bind the market's enabled oracle-source subset (`perp_set_oracle`).
+  async perpSetOracle(
+    params: PerpSetOracle,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'perp_set_oracle',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Set the market's max leverage (`perp_set_leverage`), bounded `1`–`50`.
+  async perpSetLeverage(
+    params: PerpSetLeverage,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'perp_set_leverage',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Set the three fee legs (`perp_set_fee_tier`). Each leg must stay below
+  /// `1000`. The taker and maker legs are DECI-bps; the deployer leg is WHOLE
+  /// bps. A governance ceiling also bounds the taker and maker legs.
+  async perpSetFeeTier(
+    params: PerpSetFeeTier,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'perp_set_fee_tier',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Set the market's maker rebate (`perp_set_maker_rebate`), bounded `0`–`2`
+  /// WHOLE bps.
+  async perpSetMakerRebate(
+    params: PerpSetMakerRebate,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'perp_set_maker_rebate',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Set the market's min order size (`perp_set_min_size`), in the market's
+  /// size plane.
+  async perpSetMinSize(
+    params: PerpSetMinSize,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'perp_set_min_size',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Open the market to trading (`perp_activate_market`).
+  async perpActivateMarket(
+    params: PerpActivateMarket,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'perp_activate_market',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Close the market to NEW orders (`perp_deactivate_market`).
+  async perpDeactivateMarket(
+    params: PerpDeactivateMarket,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'perp_deactivate_market',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Add or remove ONE delegated deployer (`perp_set_sub_deployers`). Both the
+  /// address and the add / remove flag are signed, so no relay can re-target
+  /// the delegate or flip a removal into a grant.
+  async perpSetSubDeployers(
+    params: PerpSetSubDeployers,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'perp_set_sub_deployers',
       params as unknown as Record<string, unknown>,
       opts,
     );

@@ -1,14 +1,14 @@
-// EIP-712 typed signing — the MIP-1 spot-deployer lane, the metaliquidity
-// operator grant, and the BOLE `borrow_lend` flow.
+// EIP-712 typed signing — the MIP-1 spot-deployer lane, the MIP-3 perp-deployer
+// lane, the metaliquidity operator grant, and the BOLE `borrow_lend` flow.
 //
 // The type strings below are copied VERBATIM from the node's frozen constants
-// (`core-state` `signing_typed.rs`). They are the contract: if `encodeType`
+// (the chain's frozen typed-signing constants). They are the contract: if `encodeType`
 // drifts from one of them, this SDK signs a struct the node will not verify.
 //
 // The digest assertions here are RELATIONAL, not absolute — each one proves a
 // field reaches the digest, or that two inputs separate. The absolute 32-byte
-// known-answer vectors for these eight actions still have to come from the
-// node's own KAT run; they are not hand-derived here.
+// known-answer vectors for all seventeen actions live in `typed.test.ts` and
+// carry the chain's OWN digests, from its cross-language vector set.
 
 import { describe, expect, it } from 'vitest';
 import { existsSync } from 'node:fs';
@@ -344,5 +344,139 @@ describe.skipIf(!wasmBuilt)('typed digest binding — every field enters its dig
       );
     }
     expect(seen.size).toBe(4);
+  });
+});
+
+// ── MIP-3 perp-deployer lane ─────────────────────────────────────────────────
+//
+// The nine tags landed in the node but that binary is NOT released, so the live
+// chain refuses every one of them today. The type strings are frozen all the
+// same: they are what the node will verify against at the swap height.
+
+describe('typed encodeType — MIP-3 perp deployer lane', () => {
+  const FROZEN_PERP: Record<string, string> = {
+    perp_register_asset:
+      'MetaFluxTransaction:PerpRegisterAsset(string metafluxChain,string symbol,uint8 decimals,uint64 nonce)',
+    perp_set_oracle:
+      'MetaFluxTransaction:PerpSetOracle(string metafluxChain,uint32 asset,uint16 oracleSourceMask,uint64 nonce)',
+    perp_set_leverage:
+      'MetaFluxTransaction:PerpSetLeverage(string metafluxChain,uint32 asset,uint8 maxLeverage,uint64 nonce)',
+    perp_set_fee_tier:
+      'MetaFluxTransaction:PerpSetFeeTier(string metafluxChain,uint32 asset,uint32 takerFeeDbps,uint32 makerFeeDbps,uint32 deployerFeeBps,uint64 nonce)',
+    perp_set_maker_rebate:
+      'MetaFluxTransaction:PerpSetMakerRebate(string metafluxChain,uint32 asset,uint16 rebateBps,uint64 nonce)',
+    perp_set_min_size:
+      'MetaFluxTransaction:PerpSetMinSize(string metafluxChain,uint32 asset,uint64 minOrderSize,uint64 nonce)',
+    perp_activate_market:
+      'MetaFluxTransaction:PerpActivateMarket(string metafluxChain,uint32 asset,uint64 nonce)',
+    perp_deactivate_market:
+      'MetaFluxTransaction:PerpDeactivateMarket(string metafluxChain,uint32 asset,uint64 nonce)',
+    perp_set_sub_deployers:
+      'MetaFluxTransaction:PerpSetSubDeployers(string metafluxChain,uint32 asset,address subDeployer,bool add,uint64 nonce)',
+  };
+
+  it('matches the node type string for all nine actions', async () => {
+    const { encodeType } = await import('../src/native/typed.js');
+    for (const [actionType, frozen] of Object.entries(FROZEN_PERP)) {
+      expect(encodeType(actionType)).toBe(frozen);
+    }
+  });
+
+  it('none of the nine takes an agent-resolved owner', async () => {
+    const { accountSupportsOwner } = await import('../src/native/typed.js');
+    for (const actionType of Object.keys(FROZEN_PERP)) {
+      expect(accountSupportsOwner(actionType)).toBe(false);
+    }
+  });
+
+  /// The dead gas-auction lane is off this wire. A `bid` key in the payload
+  /// must not reach the POST action or the signed message — the handler rejects
+  /// a non-zero bid, so a client that smuggled one would sign an action the
+  /// node refuses.
+  it('no perp deploy action carries a bid', async () => {
+    const { buildTyped, typedDataV4 } = await import('../src/native/typed.js');
+    for (const actionType of Object.keys(FROZEN_PERP)) {
+      expect(FROZEN_PERP[actionType]).not.toContain('bid');
+      const built = buildTyped(
+        actionType,
+        { symbol: 'WIF', decimals: 8, asset: 1001, oracle_source_mask: 1, max_leverage: 20,
+          taker_fee_dbps: 45, maker_fee_dbps: 12, deployer_fee_bps: 6, rebate_bps: 2,
+          min_order_size: 1000, sub_deployer: addr(0xaa), add: true, bid: '1' },
+        1n,
+        CHAIN_ID,
+      );
+      expect(Object.keys(JSON.parse(built.actionJson).params)).not.toContain('bid');
+      expect(Object.keys(typedDataV4(built).message)).not.toContain('bid');
+    }
+  });
+});
+
+describe('typed wire shape — MIP-3 perp deployer lane', () => {
+  /// The three legs stay SEPARATE under the digest. The node packs them itself,
+  /// so a client never reproduces the packing arithmetic — and three legs that
+  /// pack to the same value must still sign three different digests.
+  it('perp_set_fee_tier signs each fee leg on its own', async () => {
+    const { buildTyped, typedActionDigest, typedDataV4 } = await import('../src/native/typed.js');
+    const tier = (taker: number, maker: number, deployer: number) =>
+      buildTyped(
+        'perp_set_fee_tier',
+        { asset: 1001, taker_fee_dbps: taker, maker_fee_dbps: maker, deployer_fee_bps: deployer },
+        204n,
+        CHAIN_ID,
+      );
+    const msg = typedDataV4(tier(45, 12, 6)).message;
+    expect(msg.takerFeeDbps).toBe(45);
+    expect(msg.makerFeeDbps).toBe(12);
+    expect(msg.deployerFeeBps).toBe(6);
+
+    const seen = new Set<string>();
+    for (const legs of [[45, 12, 6], [12, 45, 6], [6, 12, 45], [45, 12, 7]] as const) {
+      seen.add(toHex(await typedActionDigest(tier(legs[0], legs[1], legs[2]))));
+    }
+    expect(seen.size).toBe(4);
+  });
+
+  /// SECURITY: a relay must not be able to re-target the delegate, nor flip a
+  /// removal into a grant, under a replayed signature. Both fields are signed.
+  it('perp_set_sub_deployers binds both the delegate and the add flag', async () => {
+    const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
+    const grant = (subDeployer: string, add: boolean) =>
+      buildTyped(
+        'perp_set_sub_deployers',
+        { asset: 1001, sub_deployer: subDeployer, add },
+        209n,
+        CHAIN_ID,
+      );
+    const base = toHex(await typedActionDigest(grant(addr(0xaa), true)));
+    const otherDelegate = toHex(await typedActionDigest(grant(addr(0xbb), true)));
+    const revoke = toHex(await typedActionDigest(grant(addr(0xaa), false)));
+    expect(otherDelegate).not.toBe(base);
+    expect(revoke).not.toBe(base);
+  });
+
+  /// `perp_activate_market` and `perp_deactivate_market` carry the SAME single
+  /// field. Only the type string separates them, so an open must never sign the
+  /// same digest as a close.
+  it('activate and deactivate never share a digest', async () => {
+    const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
+    const open = toHex(
+      await typedActionDigest(buildTyped('perp_activate_market', { asset: 1001 }, 207n, CHAIN_ID)),
+    );
+    const close = toHex(
+      await typedActionDigest(buildTyped('perp_deactivate_market', { asset: 1001 }, 207n, CHAIN_ID)),
+    );
+    expect(open).not.toBe(close);
+  });
+
+  /// `decimals` of `0` reads as the handler's default of 8. The SDK must pass
+  /// the value through untouched: silently rewriting 0 to 8 here would sign a
+  /// digest the deployer never agreed to.
+  it('perp_register_asset passes decimals through verbatim, including 0', async () => {
+    const { buildTyped, typedDataV4 } = await import('../src/native/typed.js');
+    for (const decimals of [0, 8, 18]) {
+      const built = buildTyped('perp_register_asset', { symbol: 'WIF', decimals }, 201n, CHAIN_ID);
+      expect(JSON.parse(built.actionJson).params.decimals).toBe(decimals);
+      expect(typedDataV4(built).message.decimals).toBe(decimals);
+    }
   });
 });
