@@ -367,8 +367,9 @@ export class Client {
   // Leveraged spot borrows quote from the Earn lending pool. All SENDER-
   // AUTHORIZED (the signer is the actor). Each returns the 202 admission ack,
   // NOT a synchronous oid; observe committed state via `/info` `spot_margin_state`
-  // / `earn_state`. Preview: forced-liquidation settlement is not yet wired and
-  // per-pair maintenance ratios are still being calibrated.
+  // / `earn_state`. Forced-liquidation settlement IS wired and runs every block.
+  // What is still pending is governance, not code: no spot pair has its per-pair
+  // risk parameters calibrated yet, so opening rejects until a vote lands.
 
   /**
    * Post quote collateral into a spot-margin account via `POST /exchange`.
