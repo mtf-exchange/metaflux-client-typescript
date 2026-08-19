@@ -10,8 +10,15 @@
 // under that ceiling, where the node's conversion is exact.
 
 import { describe, it, expect } from 'vitest';
-import { sharesToWire, type VaultWithdraw } from '../src/types/vault.js';
+import {
+  sharesToWire,
+  rawShares,
+  rawSharesToWhole,
+  type Raw1e18,
+  type VaultWithdraw,
+} from '../src/types/vault.js';
 import type { VaultEquity } from '../src/types/info/hl-parity.js';
+import type { Client } from '../src/client.js';
 
 /// `[raw committed integer, the whole-share string the node serves]`.
 const GOLDENS: ReadonlyArray<readonly [bigint, string]> = [
@@ -95,5 +102,106 @@ describe('vault share plane', () => {
     expect(() => sharesToWire('1.2.3')).toThrow();
     expect(() => sharesToWire('abc')).toThrow();
     expect(() => sharesToWire('1e18')).toThrow();
+  });
+});
+
+describe('rawSharesToWhole is the one exit from the raw plane', () => {
+  it('reproduces the node string for every golden', () => {
+    for (const [raw, whole] of GOLDENS) {
+      // Asserted against the LITERAL golden, not against this file's
+      // `rawToWhole`. Comparing two runs of the same algorithm proves nothing.
+      expect(rawSharesToWhole(rawShares(raw))).toBe(whole);
+    }
+  });
+
+  it('feeds a wire share string that survives the redemption round trip', () => {
+    for (const [raw, whole] of GOLDENS) {
+      const withdraw: VaultWithdraw = {
+        vault_id: 7,
+        shares: sharesToWire(rawSharesToWhole(rawShares(raw))),
+      };
+      expect(withdraw.shares).toBe(whole);
+    }
+  });
+
+  it('is exact where a float divide is not', () => {
+    const raw = rawShares('79228162514264337593543950335');
+    expect(rawSharesToWhole(raw)).toBe('79228162514.264337593543950335');
+    // The same divide in a double. It agrees to about 17 digits, then invents.
+    expect(String(Number(raw) / 1e18)).not.toBe('79228162514.264337593543950335');
+  });
+
+  it('accepts a bigint, which is how an EVM read arrives', () => {
+    expect(rawShares(12_345_000_000_000_000_000_000n)).toBe('12345000000000000000000');
+    expect(rawSharesToWhole(rawShares(1n))).toBe('0.000000000000000001');
+  });
+
+  it('refuses anything that is not a non-negative integer', () => {
+    expect(() => rawShares('-1')).toThrow(TypeError);
+    expect(() => rawShares(-1n)).toThrow(TypeError);
+    expect(() => rawShares('1.5')).toThrow(TypeError);
+    expect(() => rawShares('1e18')).toThrow(TypeError);
+    expect(() => rawShares('abc')).toThrow(TypeError);
+    expect(() => rawShares(1 as unknown as string)).toThrow(TypeError);
+  });
+
+  it('re-checks its input, because a cast can forge the brand', () => {
+    expect(() => rawSharesToWhole('1.5' as Raw1e18)).toThrow(TypeError);
+  });
+});
+
+// The plane split is a TYPE guarantee, not a runtime check. `tsc` runs over
+// this file (tsconfig.test.json), so a `@ts-expect-error` that stops erroring
+// fails the typecheck gate.
+//
+// No runtime check can do this job. `'1000000000000000000'` is also a legal
+// whole-share count, so only the brand separates the two planes.
+describe('the raw 1e18 plane cannot reach the wire', () => {
+  const raw: Raw1e18 = rawShares('1000000000000000000');
+
+  it('sharesToWire refuses a raw share count', () => {
+    // @ts-expect-error a Raw1e18 is the committed plane, not the wire plane
+    const bad = sharesToWire(raw);
+    // The runtime accepts it: this string is a well-formed decimal. The
+    // compiler is the only layer that can tell the planes apart.
+    expect(bad).toBe('1000000000000000000');
+  });
+
+  it('vault_withdraw refuses a raw share count', () => {
+    const bad: VaultWithdraw = {
+      vault_id: 7,
+      // @ts-expect-error vault_withdraw reads the WHOLE-share plane
+      shares: raw,
+    };
+    expect(bad.shares).toBe('1000000000000000000');
+  });
+
+  it('accepts the same value once it is converted', () => {
+    const withdraw: VaultWithdraw = {
+      vault_id: 7,
+      shares: sharesToWire(rawSharesToWhole(raw)),
+    };
+    expect(withdraw.shares).toBe('1');
+  });
+
+  it('still accepts a plain string, so no existing caller breaks', () => {
+    const fromJson: string = '12345';
+    const withdraw: VaultWithdraw = { vault_id: 7, shares: fromJson };
+    expect(sharesToWire(fromJson)).toBe('12345');
+    expect(withdraw.shares).toBe('12345');
+  });
+
+  // `client.vaultWithdraw` is the entry point a caller reaches for. Pin the
+  // wall there too, so widening that signature also fails the gate.
+  it('client.vaultWithdraw refuses a raw share count', () => {
+    type WithdrawParams = Parameters<Client['vaultWithdraw']>[0];
+    const bad: WithdrawParams = {
+      vault_id: 7,
+      // @ts-expect-error the client entry point reads the WHOLE-share plane
+      shares: raw,
+    };
+    const good: WithdrawParams = { vault_id: 7, shares: rawSharesToWhole(raw) };
+    expect(bad.shares).toBe('1000000000000000000');
+    expect(good.shares).toBe('1');
   });
 });

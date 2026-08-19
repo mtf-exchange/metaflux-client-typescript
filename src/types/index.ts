@@ -123,6 +123,8 @@ export type { MbChain, MbWithdraw } from './meta-bridge.js';
 export type {
   VaultKind,
   WholeShares,
+  Raw1e18,
+  NotRaw1e18,
   CreateVault,
   VaultTransfer,
   VaultModify,
@@ -130,7 +132,7 @@ export type {
   VaultDistribute,
   RegisterMetaliquidityOperator,
 } from './vault.js';
-export { sharesToWire } from './vault.js';
+export { sharesToWire, rawShares, rawSharesToWhole } from './vault.js';
 export type { SubmitEncryptedOrder } from './encrypted.js';
 export type { CoreSide, RfqRequest, RfqQuote, RfqAccept } from './rfq.js';
 export type { FbaSubmit } from './fba.js';
