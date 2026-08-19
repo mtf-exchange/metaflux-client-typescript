@@ -2,6 +2,131 @@
 
 All notable changes to the TypeScript SDK are documented here.
 
+## [0.22.0] — 2026-08-19
+
+Seventeen new signable actions, one type-level break, and two doc corrections.
+Seventeen new actions make this a minor; the break is the part that needs a
+migration note.
+
+### The break: a raw 10^18 magnitude no longer type-checks as a whole one
+
+`Raw1e18` is a new brand for the RAW 10^18 plane. `ProtocolMetricsEvm
+.native_balance_wei` now carries it, because the node sums the `u128` wei field
+and serves it unconverted. It is the one read magnitude that is NOT already in
+whole units.
+
+**Reading the field still compiles.** `Raw1e18` is a `string` subtype, so
+`const s: string = metrics.native_balance_wei` is unchanged, and so is anything
+that prints, logs or concatenates it.
+
+**CONSTRUCTING the DTO with a plain `string` no longer compiles.** A mock, a
+fixture or a hand-built response object now fails with
+
+```
+TS2322: Type 'string' is not assignable to type 'Raw1e18'.
+```
+
+Tag the value with `rawShares(...)` and the build passes. That is the whole
+migration. Nothing else in the SDK changed shape.
+
+The brand is the point. Before it, a wei balance reached `vault_withdraw.shares`
+and type-checked, and the burn was 10^18 times too large. `sharesToWire` and
+`VaultWithdraw.shares` now take `NotRaw1e18`, which admits a plain `string` and
+a `WholeShares` but refuses a `Raw1e18`. **Every existing caller that passes a
+plain string keeps compiling** — the wall fires only where the plane is TAGGED.
+
+Leave the raw plane with `rawSharesToWhole`. It divides in `BigInt`, so the
+result is exact at every magnitude; a float divide drops digits past the 15-17
+a double holds, and a share count carries 18 fraction digits.
+
+No runtime check can separate the two planes. `'1000000000000000000'` is also a
+legal whole-share count, so the separation has to be a compile-time fact.
+
+### The MIP-3 perp deployer lane — nine actions, NOT LIVE YET
+
+`perp_register_asset`, `perp_set_oracle`, `perp_set_leverage`,
+`perp_set_fee_tier`, `perp_set_maker_rebate`, `perp_set_min_size`,
+`perp_activate_market`, `perp_deactivate_market` and `perp_set_sub_deployers`.
+
+**The nine tags landed in the node but that binary is not released.** The live
+chain refuses all nine today, the same way it refuses an action that does not
+exist. They start working at the freeze-swap height of the release that carries
+them. A signature you build today is correct and arrives early.
+
+All nine are sender-authorized: the recovered signer IS the deployer or one of
+its sub-deployers. None carries a `bid` — the gas-auction lane is dead and the
+handler rejects a non-zero bid.
+
+A deployer cannot pick the asset id. `perp_register_asset` allocates it, at or
+above 1000; the ids below that are the chain's own perps. Read the id back
+before calling any of the other eight.
+
+Two governance limits bind the lane, and `0` means UNCAPPED for both, never
+blocked: `max_deploys_per_epoch` rate-limits registration across this lane and
+both spot lanes together, and `fee_ceiling_bps` bounds the taker and maker legs.
+The off-switch is separate — governance sets `mip3_enabled`.
+
+### The MIP-1 spot deployer lane — six actions
+
+`spot_register_token`, `spot_register_pair`, `spot_set_pair_params`,
+`spot_set_pair_active`, `spot_seed_holders` and `spot_finalize_supply`.
+
+### `register_metaliquidity_operator`
+
+A Metaliquidity vault's LEADER grants or revokes an operator key that then acts
+as the vault. The signer must be the leader, and the vault's kind must be
+`Metaliquidity` — the node refuses a `User` vault here.
+
+**Granting also requires the operator to be a recognised MetaLiquidity
+Provider.** A key outside that set is refused, so a leader cannot hand
+vault-trading authority to an arbitrary address. Revoking has no such
+requirement.
+
+**Never send an explicit `expires_at_ms: 0`.** OMIT the key for an operator that
+never expires. The node refuses an explicit `0` with a `400`, and the SDK
+refuses it before signing. The digest flattens an absent field and an explicit
+`0` to the same `uint64 0`, so one leader signature would cover two wire forms
+that commit different state: absent means never expires, `0` means expired at
+epoch — an operator dead on arrival.
+
+### `borrow_lend`
+
+Move liquidity directly against the BOLE pool. `Lend` adds liquidity and
+`UnLend` withdraws it, up to the sender's own lent balance. `Borrow` draws on
+the pool's liquidator credit line and `Repay` returns it, up to the sender's
+outstanding borrow.
+
+**`Borrow` needs the allowlist.** The node refuses it as `Unauthorized` unless
+the sender is a registered liquidator. The other three kinds are open to any
+account.
+
+`kind` is PascalCase to match the node's enum, and `UnLend` keeps its capital
+`L`.
+
+### Two corrections: the SDK said a live action was dead
+
+Both notes described a refusal the node does not carry. Both actions landed on
+the signed `/exchange` path on 2026-06-20 and have been live across every
+release since.
+
+- **`send_to_evm_with_data`** — the type said `⚠️ NOT LIVE YET` and quoted a
+  400 reading `sendToEvmWithData is retired; use coreEvmTransfer`. No such
+  string exists in the node. A caller who believed the note routed around a
+  working lane.
+- **`vault_distribute`** — the type said the node answers the tag with
+  `UnsupportedAction` on the public `/exchange` path. It does not.
+  `UnsupportedAction` covers the validator-injected lane only: `vote_global`,
+  `gov_vote`, `c_validator`, `set_pm_shock_grid`, `set_mark_mode`,
+  `approve_upgrade`, `arm_features` and `vote_app_hash`.
+
+No type or payload changed for either. These entries are documentation.
+
+### Forced-liquidation settlement is wired
+
+The spot-margin comment said it is not. It IS wired, and it runs every block.
+What is still pending is governance, not code: no spot pair has its per-pair
+risk parameters calibrated, so opening rejects until a vote lands.
+
 ## [0.21.0] — 2026-08-17
 
 A new signable action, so this is a minor rather than a patch.

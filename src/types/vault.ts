@@ -191,9 +191,7 @@ export interface VaultWithdraw {
 /// decimal string (the SDK's decimal-on-the-wire convention, matching
 /// `vault_transfer` / `vault_withdraw`).
 ///
-/// Forward-compat: the node currently answers this tag with `UnsupportedAction`
-/// on the public `/exchange` path; the SDK emits the byte-correct shape the core
-/// handler will accept once the bridge lands.
+/// **LIVE.** `POST /exchange` accepts this tag.
 export interface VaultDistribute {
   /// Target vault id (`u64`). Serializes as a bare JSON number.
   vault_id: number;

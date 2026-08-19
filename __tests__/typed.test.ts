@@ -454,6 +454,13 @@ const VECTORS: Vector[] = [
     nonce: 209n,
     digest: '6e39d36bdd1f80375e71c3609d10ee15ad030004d3c41c246fcfbcb93df6750d',
   },
+  // `noop` carries no field: the digest is the chain tag and the nonce alone.
+  {
+    actionType: 'noop',
+    payload: {},
+    nonce: 57n,
+    digest: '64c8dcfe04b60e572df9b22536e82c46020d6953a36a3a5619307b0ef1fb1a1b',
+  },
 ];
 
 describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
@@ -484,10 +491,10 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     }
   });
 
-  it('reproduces all 56 contract KAT digests byte-for-byte (chain 114514)', async () => {
+  it('reproduces all 57 contract KAT digests byte-for-byte (chain 114514)', async () => {
     const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
-    // 57 vectors, 56 actions: the two approve-fee keys share one digest pin.
-    expect(VECTORS.length).toBe(57);
+    // 58 vectors, 57 actions: the two approve-fee keys share one digest pin.
+    expect(VECTORS.length).toBe(58);
     for (const v of VECTORS) {
       const built = buildTyped(v.actionType, v.payload, v.nonce, CHAIN_ID);
       const digest = await typedActionDigest(built);
@@ -710,11 +717,13 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(toHex(base)).not.toBe(toHex(otherChain));
   });
 
-  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 65 reachable actions', async () => {
+  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 66 reachable actions', async () => {
     const { isTypedAction, TYPED_ACTION_TYPES } = await import('../src/native/typed.js');
-    // 66 keys, 65 actions: `approve_builder_fee` is the old key for
+    // 67 keys, 66 actions: `approve_builder_fee` is the old key for
     // `approve_broker_fee` and shares its spec.
-    expect(TYPED_ACTION_TYPES.length).toBe(66);
+    expect(TYPED_ACTION_TYPES.length).toBe(67);
+    // `noop` (132) burns a nonce and does nothing else.
+    expect(isTypedAction('noop')).toBe(true);
     // MIP-3 perp deployer lane (9). Landed in the node, NOT yet released: the
     // live chain refuses all nine until the swap height.
     expect(isTypedAction('perp_register_asset')).toBe(true);

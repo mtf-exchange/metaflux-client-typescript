@@ -232,11 +232,7 @@ export interface CoreEvmTransfer {
 /// `send_to_evm_with_data` — move a Core spot token to MetaFluxEVM with an EVM
 /// payload.
 ///
-/// ⚠️ **NOT LIVE YET.** The deployed exchange still answers
-/// `sendToEvmWithData is retired; use coreEvmTransfer` with a 400. This type and
-/// its signing path ship ahead of that, so a signature you build today is correct
-/// and the request is refused until the next exchange release. Use
-/// `coreEvmTransfer` in the meantime.
+/// **LIVE.** `POST /exchange` accepts this tag.
 ///
 /// Core → EVM only. The action debits the sender's Core balance for `token`,
 /// mints the scale-converted token to `destination_recipient` on the next EVM
@@ -283,8 +279,7 @@ export interface CoreEvmTransfer {
 /// action can fail for a reason unrelated to the token you move, and unrelated to
 /// your balance of it.**
 ///
-/// A refused transfer pays nothing. Until this action goes live, the 400 above
-/// comes first: it is refused before any fee is quoted.
+/// A refused transfer pays nothing.
 export interface SendToEvmWithData {
   /// MTF token id to move. Every accepted token debits that token's SPOT balance.
   ///

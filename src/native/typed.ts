@@ -272,6 +272,13 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
     wireType: 'set_referrer',
     fields: [f('referrer', 'address', 'referrer')],
   },
+  /// A deliberate no-op (132). It carries no field of its own — the digest is
+  /// the chain tag and the nonce — so signing one burns a nonce and nothing else.
+  noop: {
+    pascal: 'Noop',
+    wireType: 'noop',
+    fields: [],
+  },
   // `pascal` stays `ApproveBuilderFee`: the EIP-712 type string is
   // consensus-frozen, so only the wire tag moves to the broker name.
   approve_broker_fee: {
