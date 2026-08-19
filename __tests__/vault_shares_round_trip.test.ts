@@ -9,7 +9,7 @@
 // is the 96-bit decimal-mantissa ceiling, 2^96-1. Every pair below sits at or
 // under that ceiling, where the node's conversion is exact.
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import {
   sharesToWire,
   rawShares,
@@ -18,7 +18,9 @@ import {
   type VaultWithdraw,
 } from '../src/types/vault.js';
 import type { VaultEquity } from '../src/types/info/hl-parity.js';
+import type { ProtocolMetrics } from '../src/types/info/core.js';
 import type { Client } from '../src/client.js';
+import { InfoApi } from '../src/rest/info.js';
 
 /// `[raw committed integer, the whole-share string the node serves]`.
 const GOLDENS: ReadonlyArray<readonly [bigint, string]> = [
@@ -203,5 +205,85 @@ describe('the raw 1e18 plane cannot reach the wire', () => {
     const good: WithdrawParams = { vault_id: 7, shares: rawSharesToWhole(raw) };
     expect(bad.shares).toBe('1000000000000000000');
     expect(good.shares).toBe('1');
+  });
+});
+
+// The SDK brands the read fields the node serves RAW, so a value parsed from a
+// response carries its plane with no hand tag. This closes the original defect
+// path: read a raw magnitude, then send it straight to a redemption.
+//
+// `native_balance_wei` is that field. The node sums a `u128` wei balance and
+// serves it unconverted, while every other read magnitude is already whole
+// units.
+describe('a raw field parsed from a response carries its plane', () => {
+  const realFetch = globalThis.fetch;
+
+  // The node's own metrics golden: 7 whole MTF plus 3 wei.
+  const WEI = '7000000000000000003';
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  async function readMetrics(): Promise<ProtocolMetrics> {
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      const reqType = JSON.parse(String(init.body)).type as string;
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            type: reqType,
+            data: {
+              evm: {
+                native_balance_wei: WEI,
+                n_nonzero_holders: 2,
+                n_accounts: 5,
+              },
+            },
+          }),
+      } as Response;
+    }) as typeof fetch;
+    const api = new InfoApi('http://localhost:8080');
+    return api.raw<ProtocolMetrics>({ type: 'protocol_metrics' });
+  }
+
+  it('brands the wei balance without the caller tagging it', async () => {
+    const metrics = await readMetrics();
+    const evm = metrics.evm;
+    if (!evm) throw new Error('protocol_metrics served no evm block');
+
+    // The load-bearing line. `rawSharesToWhole` takes a `Raw1e18` only, so a
+    // plain `string` fails to compile here. Unbranding the field fails the
+    // typecheck gate on THIS call, not on the negative case below.
+    const whole = rawSharesToWhole(evm.native_balance_wei);
+    expect(whole).toBe('7.000000000000000003');
+  });
+
+  it('refuses that wei balance at vault_withdraw', async () => {
+    const metrics = await readMetrics();
+    const evm = metrics.evm;
+    if (!evm) throw new Error('protocol_metrics served no evm block');
+
+    const bad: VaultWithdraw = {
+      vault_id: 7,
+      // @ts-expect-error a wei balance is the raw 10^18 plane, not the wire plane
+      shares: evm.native_balance_wei,
+    };
+    // The runtime accepts it: the string is a well-formed decimal. Only the
+    // compiler separates the planes.
+    expect(bad.shares).toBe(WEI);
+  });
+
+  it('accepts the same balance once it leaves the raw plane', async () => {
+    const metrics = await readMetrics();
+    const evm = metrics.evm;
+    if (!evm) throw new Error('protocol_metrics served no evm block');
+
+    const withdraw: VaultWithdraw = {
+      vault_id: 7,
+      shares: sharesToWire(rawSharesToWhole(evm.native_balance_wei)),
+    };
+    expect(withdraw.shares).toBe('7.000000000000000003');
   });
 });

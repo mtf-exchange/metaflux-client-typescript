@@ -21,13 +21,18 @@ export type VaultKind = 'User' | 'Metaliquidity';
 /// Scaling it by 10^18 asks to burn 10^18 times too many shares.
 export type WholeShares = string & { readonly __brand: 'WholeShares' };
 
-/// A share count on the RAW 10^18 plane, as an exact non-negative integer
-/// string. This is the committed-state plane, NOT the wire plane.
+/// A magnitude on the RAW 10^18 plane, as an exact non-negative integer
+/// string. A vault share count and a wei balance both ride this plane. It is
+/// the committed-state plane, NOT the wire plane.
 ///
 /// The brand makes the plane a compile-time fact. [`sharesToWire`] and
 /// [`VaultWithdraw.shares`] refuse this type, so a raw value that reaches a
 /// redemption fails the build. Before the brand it type-checked, and the burn
 /// was 10^18 times too large.
+///
+/// The read types carry the brand as well. `ProtocolMetricsEvm
+/// .native_balance_wei` is typed `Raw1e18`, so a value parsed from a response
+/// arrives tagged and the caller tags nothing by hand.
 ///
 /// Build one with [`rawShares`]. Leave the raw plane with [`rawSharesToWhole`],
 /// which divides in exact integer arithmetic.
@@ -40,7 +45,8 @@ export type Raw1e18 = string & { readonly __brand: 'Raw1e18' };
 ///
 /// A plain `string` is untagged, not checked. No runtime test can separate the
 /// two planes, because `'1000000000000000000'` is also a legal whole-share
-/// count. So the wall fires only where the caller tags the raw source.
+/// count. So the wall fires where the plane is TAGGED: on a read type the SDK
+/// brands, or on a value the caller tags with [`rawShares`].
 export type NotRaw1e18 = WholeShares | (string & { readonly __brand?: undefined });
 
 /// Fraction digits the node keeps for a share count.
@@ -48,11 +54,12 @@ const SHARE_SCALE_DIGITS = 18;
 
 const SHARE_SCALE = 10n ** BigInt(SHARE_SCALE_DIGITS);
 
-/// Tag a raw 10^18-plane share count as [`Raw1e18`].
+/// Tag a raw 10^18-plane magnitude as [`Raw1e18`].
 ///
-/// Use it where a raw value enters the code — an EVM read, a log, or your own
-/// 10^18 arithmetic. After the tag the compiler tracks the plane, and the value
-/// cannot reach the wire except through [`rawSharesToWhole`].
+/// Use it where a raw value enters the code from OUTSIDE the SDK — an EVM read,
+/// a log, or your own 10^18 arithmetic. The SDK read types already brand what
+/// the node serves raw. After the tag the compiler tracks the plane, and the
+/// value cannot reach the wire except through [`rawSharesToWhole`].
 ///
 /// It accepts a `bigint` or an exact integer string. It refuses a sign, a
 /// decimal point and exponent form, because a raw share count is a

@@ -17,6 +17,8 @@
 // within safe range stay `number`. Optional fields the node only emits
 // conditionally are `?`.
 
+import type { Raw1e18 } from '../vault.js';
+
 /// `node_info` — static node identity + protocol version.
 export interface NodeInfo {
   /// Network variant: `"devnet"`, `"testnet"`, or `"mainnet"`.
@@ -442,8 +444,13 @@ export interface AssetSignedSum {
 /// Native MTF held on the EVM side, inside `ProtocolMetrics`. This mirrors the
 /// Core view only; the authoritative EVM state root is separate.
 export interface ProtocolMetricsEvm {
-  /// Total native balance in WEI, decimal string.
-  native_balance_wei: string;
+  /// Total native balance in WEI, as a decimal string on the RAW 10^18 plane.
+  ///
+  /// The node sums the `u128` wei field and serves it unconverted, so this is
+  /// the one read magnitude that is NOT already whole units. It is typed
+  /// [`Raw1e18`], which stops it reaching a whole-plane field such as
+  /// `vault_withdraw.shares`. Divide the plane first with `rawSharesToWhole`.
+  native_balance_wei: Raw1e18;
   /// EVM accounts holding a non-zero native balance.
   n_nonzero_holders: number;
   /// EVM accounts with any committed state.
