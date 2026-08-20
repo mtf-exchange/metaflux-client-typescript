@@ -285,6 +285,13 @@ export type {
   WebData,
   WebDataStaking,
   WebDataVault,
+  // Custody-bridge deployment rows + the withdrawal outbox.
+  BridgeChainConfigRow,
+  BridgeChainConfigs,
+  BridgeOutboxEntry,
+  BridgeOutboxStatus,
+  BridgeScanPolicy,
+  BridgeUserOutbox,
 } from './types/info/index.js';
 export {
   // MTF-native WebSocket client + subscription/channel types.

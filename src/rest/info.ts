@@ -29,6 +29,8 @@ import type {
   ActiveAssetData,
   Agents,
   BlockInfo,
+  BridgeChainConfigs,
+  BridgeUserOutbox,
   CandleSnapshot,
   CandleType,
   DelegatorSummary,
@@ -173,6 +175,36 @@ export class InfoApi {
   /// `fee_schedule` — protocol fee schedule.
   async feeSchedule(): Promise<FeeSchedule> {
     return this.post<FeeSchedule>({ type: 'fee_schedule' });
+  }
+
+  // ── custody bridge reads ────────────────────────────────────────────────
+
+  /// `bridge_chain_configs` — every committed bridge deployment row.
+  ///
+  /// Each field is independently verifiable against the deployed contract on
+  /// Base or Arbitrum. Read the `effective_*` fields, not the raw ones: the raw
+  /// values are 0-as-unset sentinels.
+  async bridgeChainConfigs(): Promise<BridgeChainConfigs> {
+    return this.post<BridgeChainConfigs>({ type: 'bridge_chain_configs' });
+  }
+
+  /// `bridge_user_outbox` — one account's pending bridge withdrawals, keyed by
+  /// `address` (0x hex). `chain` restricts to `1` (Base) or `2` (Arbitrum);
+  /// omit it to read every chain.
+  ///
+  /// Check `status` on each entry. `stranded_on_retired_domain` is TERMINAL and
+  /// needs operator action, not a retry. `message_id` is the CURRENT-domain
+  /// signing digest and it moves when governance rotates the deployment.
+  async bridgeUserOutbox(
+    address: string,
+    chain?: number,
+  ): Promise<BridgeUserOutbox> {
+    const body: { type: string; [k: string]: unknown } = {
+      type: 'bridge_user_outbox',
+      address,
+    };
+    if (chain !== undefined) body.chain = chain;
+    return this.post<BridgeUserOutbox>(body);
   }
 
   // ── book / trade / account-history reads ────────────────────────────────

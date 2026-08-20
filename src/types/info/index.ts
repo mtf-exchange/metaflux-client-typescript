@@ -3,6 +3,7 @@
 //   reads.ts     — book / trade / funding / candle / account-history reads
 //   hl-parity.ts — the node-snapshot parity query shapes
 //   web-data.ts  — the consolidated `web_data` account snapshot
+//   bridge.ts    — the custody-bridge deployment + withdrawal-outbox reads
 
 export type {
   NodeInfo,
@@ -115,3 +116,11 @@ export type {
   GossipRootIps,
 } from './hl-parity.js';
 export type { WebData, WebDataStaking, WebDataVault } from './web-data.js';
+export type {
+  BridgeChainConfigRow,
+  BridgeChainConfigs,
+  BridgeOutboxEntry,
+  BridgeOutboxStatus,
+  BridgeScanPolicy,
+  BridgeUserOutbox,
+} from './bridge.js';
