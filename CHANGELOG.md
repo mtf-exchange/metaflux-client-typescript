@@ -2,6 +2,50 @@
 
 All notable changes to the TypeScript SDK are documented here.
 
+## [0.24.0] — 2026-08-21
+
+### Added
+
+- `mip3SetOraclePx` and the `Mip3SetOraclePx` params type. A MIP-3 market
+  deployer can push their market's index price from their own source. The chain
+  has carried the action since its EIP-712 type was frozen, but no client could
+  sign it, so the capability was unreachable from TypeScript.
+
+  `px` is a decimal STRING and is signed VERBATIM: the exact bytes passed are the
+  bytes hashed and the bytes posted, so a relay can neither reprice a push nor
+  re-target it at another market. Only the market's deployer or a registered
+  sub-deployer may sign one.
+
+  The digest vector is derived FROM THE NODE, not from this SDK's own output.
+
+### Changed
+
+- **Availability claims corrected — they were false.** The deployer actions do
+  NOT answer `unknown variant` on the primary networks; the node knows every
+  tag. And `mip3_deployer_oracle` is ACTIVE FROM GENESIS on a chain that started
+  fresh, so no stake vote will ever arm it there. Only a legacy or unknown
+  network keeps it dormant. Availability is per network: probe one call and read
+  the error.
+
+- `Candle.v`, `Candle.q` and `Candle.n` are now OPTIONAL, and `Candle.f` is
+  added. The serving layer omits the volume triple when it cannot prove trade
+  coverage for a bucket: an ABSENT field means "no volume data", where a `"0"`
+  would mean "no trades". Typing them as required made the first uncovered bar
+  fail to parse. `f` marks an invented bar (carry-forward or seed) — test it,
+  never `n === 0`.
+
+- `TokenEvmContract.address` is documented as the BOUND contract a Core-to-EVM
+  transfer credits, not a contract a deployer merely declared at
+  `register_token`. `evm_extra_wei_decimals` is that declared value and does not
+  change a credit: a credit lands in the token's `wei_decimals`.
+
+### Removed
+
+- `WsNodeCandle`. The node no longer aggregates OHLCV, so the node-direct bar
+  shape it described no longer exists. `WsChannelData.candles` narrows from a
+  three-way union to `WsCandleFrame`, which removes the `Array.isArray`
+  narrowing a client had to write.
+
 ## [0.23.0] — 2026-08-21
 
 One BREAKING change: `gossip_root_ips` now returns peer rows, not a string list.
