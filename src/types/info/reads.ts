@@ -399,18 +399,17 @@ export type CandleType = 'mark' | 'oracle' | 'trade';
 /// One bar from the `candle_snapshot` read.
 ///
 /// Compact keys: `t`/`T` bar open/close epoch-ms, `s` symbol, `i` interval
-/// token, `o`/`c`/`h`/`l` whole-USDC decimal strings, `v`/`q` and `n` — see
-/// [`CandleType`] for what those three mean per series.
+/// token, `o`/`c`/`h`/`l` whole-USDC decimal strings, `f` the filled-bar flag,
+/// and the OPTIONAL `v`/`q`/`n` volume triple.
 ///
-/// The bar folds a SAMPLED price series, not the continuous price path, and it
-/// folds no trades. `o`/`c` are the first and last sample of the window;
+/// The bar folds a SAMPLED price series, not the continuous price path.
+/// `o`/`c` are the first and last sample of the window;
 /// `h`/`l` are the extremes OF THE SAMPLES. A spike between two samples leaves
 /// no trace. Do not build wick analysis or a "did the price touch X?" test on
 /// these bars.
 ///
 /// The gateway `candles` WS channel carries this SAME bar, wrapped in the
-/// `WsCandleFrame` envelope. A node-direct `/ws` mount carries a DIFFERENT bar
-/// — see `WsNodeCandle`. Do not cast one onto the other.
+/// `WsCandleFrame` envelope. The channel is served by the gateway only.
 export interface Candle {
   /// Bar open timestamp (ms, bucket-aligned).
   t: number;
@@ -428,14 +427,18 @@ export interface Candle {
   h: string;
   /// Low price, whole-USDC decimal string.
   l: string;
-  /// Always `"0"`. A price bar folds no trades, so it carries no base-asset
-  /// volume. Read executions from `recent_trades` / `trades_by_time`.
-  v: string;
-  /// Always `"0"`. A price bar folds no trades, so it carries no quote volume.
-  q: string;
-  /// Sample count — how many price samples the bar folded. NOT a trade count.
-  /// `0` on a carry-forward bar.
-  n: number;
+  /// Filled bar: `true` when the gateway invented this bar (carry-forward for
+  /// an empty bucket, or a seed bar), `false` when real samples built it. Test
+  /// this, never `n === 0`.
+  f: boolean;
+  /// Base-asset volume, decimal string. ABSENT when the gateway cannot prove
+  /// trade coverage for this bucket. An absent field means "no volume data";
+  /// a `"0"` would mean "no trades". Never default this to zero.
+  v?: string;
+  /// Quote volume, decimal string. Absent under the same coverage rule as `v`.
+  q?: string;
+  /// Trade count in the bucket. Absent under the same coverage rule as `v`.
+  n?: number;
 }
 
 /// `candle_snapshot` — historical price bars for `(coin, interval, candle_type)`.
@@ -443,7 +446,7 @@ export interface Candle {
 /// the newest element is the still-forming bar.
 ///
 /// The series is GAPLESS: a window with no sample carries the previous close
-/// forward as a flat bar (`o = h = l = c`, `n = 0`). A bar needs no trade,
+/// forward as a flat bar (`o = h = l = c`, `f = true`). A bar needs no trade,
 /// because a price exists at all times.
 ///
 /// GATEWAY-served, not node: candles are derived display data — query the

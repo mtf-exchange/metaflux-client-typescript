@@ -444,35 +444,6 @@ export interface WsCandleFrame {
   candles: Candle[];
 }
 
-/// One `candles` bar on a NODE-direct `/ws` mount.
-///
-/// A node builds its own bars from FILLS and labels them `coin` / `interval`,
-/// with no quote volume. It routes on `(coin, interval)` alone and ignores
-/// `candle_type` — the price series lives on the gateway mount only. The gateway
-/// does not serve this shape — see `WsCandleFrame`.
-export interface WsNodeCandle {
-  /// Market symbol (e.g. `"BTC"`).
-  coin: string;
-  /// Interval token (`1m`/`5m`/`15m`/`1h`/`4h`/`1d`).
-  interval: string;
-  /// Bar open timestamp (ms, bucket-aligned).
-  t: number;
-  /// Bar close timestamp (ms) — the exclusive upper edge, `t + interval`.
-  T: number;
-  /// Open price, whole-USDC decimal string.
-  o: string;
-  /// High price, whole-USDC decimal string.
-  h: string;
-  /// Low price, whole-USDC decimal string.
-  l: string;
-  /// Close price, whole-USDC decimal string.
-  c: string;
-  /// Base-asset volume in the bar, decimal string.
-  v: string;
-  /// Fill count in the bar.
-  n: number;
-}
-
 /// `user_events` channel payload — the account's tagged event body.
 ///
 /// Today it carries exactly one fill per frame, in the SAME record shape the
@@ -695,11 +666,9 @@ export interface WsChannelData {
   markets: WsMarketRow[];
   explorer_block: ExplorerBlock[];
   explorer_txs: ExplorerTx[];
-  /// Three live shapes. A gateway sends `WsCandleFrame`. A bare node sends
-  /// `WsNodeCandle[]` on subscribe and a SINGLE `WsNodeCandle` per commit after
-  /// that, so `Array.isArray` alone cannot narrow it — test for the `candles`
-  /// key first, then for the array.
-  candles: WsCandleFrame | WsNodeCandle[] | WsNodeCandle;
+  /// Served by the GATEWAY only. The node does not aggregate OHLCV, so a
+  /// node-direct subscribe is refused as an unknown channel.
+  candles: WsCandleFrame;
   fills: WsFill[];
   user_events: WsUserEvent;
   order_updates: WsOrderUpdate[];

@@ -324,7 +324,6 @@ export {
   type WsL2Book,
   type WsBbo,
   type WsCandleFrame,
-  type WsNodeCandle,
   type WsUserEvent,
   type WsNotification,
   type WsNotificationKind,
