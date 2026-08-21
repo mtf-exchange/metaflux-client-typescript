@@ -281,6 +281,7 @@ export type {
   ValidatorSummaries,
   ValidatorSummary,
   GossipRootIps,
+  AdvertisedPeer,
   // The consolidated `web_data` account snapshot.
   WebData,
   WebDataStaking,

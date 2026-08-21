@@ -2,6 +2,43 @@
 
 All notable changes to the TypeScript SDK are documented here.
 
+## [0.23.0] — 2026-08-21
+
+One BREAKING change: `gossip_root_ips` now returns peer rows, not a string list.
+
+### The break: `GossipRootIps.root_ips` is replaced by `GossipRootIps.peers`
+
+The read used to return a bare list of `host:port` strings. It now returns one
+row per advertised node, typed by the new `AdvertisedPeer` interface:
+
+```ts
+interface AdvertisedPeer {
+  id: number;
+  gossip: string;
+  peer_rpc: string;
+  auth: string;
+  pubkey_hex?: string;
+}
+```
+
+**Why the shape changed.** A bare address list cannot say which node an address
+belongs to, cannot carry the other two ports, and cannot carry the public key. A
+caller therefore could not act on it. A row maps one-to-one onto a joining
+node's own peer config, so the read is usable for peer discovery.
+
+`root_ips` is NOT kept alongside `peers`. The old payload could not express a
+node that publishes no address, and keeping both duplicates the same data.
+
+**Migration.** Replace `res.root_ips` with `res.peers.map((p) => p.gossip)` for
+the equivalent address list. The method name `gossipRootIps()` and the wire
+request type `gossip_root_ips` are unchanged.
+
+**A node that advertises nothing is absent from `peers`.** An empty array is the
+honest answer for a deployment that advertises nothing. It is not an error.
+
+**Wire availability.** The node release that serves `peers` has not fired. Until
+it does, a live node returns the old `root_ips` payload.
+
 ## [0.22.0] — 2026-08-19
 
 Seventeen new signable actions, one type-level break, and two doc corrections.

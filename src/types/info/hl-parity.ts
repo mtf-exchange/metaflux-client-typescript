@@ -436,8 +436,25 @@ export interface ValidatorSummaries {
   validators: ValidatorSummary[];
 }
 
-/// `gossip_root_ips` — configured gossip root/seed peer endpoints.
+/// One advertised node. The five fields map one-to-one onto a joining node's
+/// own peer config, so a row is copied field-for-field and dialed.
+export interface AdvertisedPeer {
+  /// The node's numeric id.
+  id: number;
+  /// Public gossip endpoint, `host:port`.
+  gossip: string;
+  /// Public peer-RPC endpoint, `host:port`.
+  peer_rpc: string;
+  /// Public auth endpoint, `host:port`.
+  auth: string;
+  /// Compressed secp256k1 public key for the peer's TCP auth. Absent when the
+  /// operator did not publish it.
+  pubkey_hex?: string;
+}
+
+/// `gossip_root_ips` — the nodes this deployment advertises for peer discovery.
 export interface GossipRootIps {
-  /// Configured gossip peer endpoints (`host:port`); empty on a solo node.
-  root_ips: string[];
+  /// One row per advertised node. A node that advertises nothing is absent, so
+  /// an empty array is the honest answer, not an error.
+  peers: AdvertisedPeer[];
 }

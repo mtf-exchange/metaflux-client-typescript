@@ -114,6 +114,7 @@ export type {
   ValidatorSummaries,
   ValidatorSummary,
   GossipRootIps,
+  AdvertisedPeer,
 } from './hl-parity.js';
 export type { WebData, WebDataStaking, WebDataVault } from './web-data.js';
 export type {

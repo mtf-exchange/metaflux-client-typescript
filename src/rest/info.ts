@@ -673,7 +673,7 @@ export class InfoApi {
     return this.post<ValidatorSummaries>({ type: 'validator_summaries' });
   }
 
-  /// `gossip_root_ips` — configured gossip root/seed peer endpoints. No params.
+  /// `gossip_root_ips` — the advertised peer roster. No params.
   async gossipRootIps(): Promise<GossipRootIps> {
     return this.post<GossipRootIps>({ type: 'gossip_root_ips' });
   }
