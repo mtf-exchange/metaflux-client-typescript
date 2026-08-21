@@ -677,6 +677,20 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('add', 'bool', 'add'),
     ],
   },
+  // ---- MIP-3 deployer oracle (1) ----
+  //
+  // The tenth deployer action and the only repeating one. `asset` and the
+  // VERBATIM `px` string are both in the digest, so a relay can neither reprice
+  // a push nor re-target it at another market. It rides its own fork feature,
+  // which governance has not armed.
+  mip3_set_oracle_px: {
+    pascal: 'Mip3SetOraclePx',
+    wireType: 'mip3_set_oracle_px',
+    fields: [
+      f('asset', 'uint32', 'asset'),
+      f('px', 'string-decimal', 'px'),
+    ],
+  },
   // ---- Core ↔ MetaFluxEVM transfer (1) ----
   core_evm_transfer: {
     pascal: 'CoreEvmTransfer',

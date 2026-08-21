@@ -6,6 +6,11 @@
 // deployer, so none of them takes an `owner`. After registration the market's
 // deployer and its sub-deployers are the only accounts the handler accepts.
 //
+// `mip3_set_oracle_px` is the TENTH deployer action and the only repeating one:
+// a market may run its own index feed, and the deployer then pushes every
+// price. It is sender-authorized in the same way, and it rides a SEPARATE fork
+// feature from the nine — see `Mip3SetOraclePx`.
+//
 // NOT LIVE YET. The nine wire tags landed in the node (commit e04489363) but
 // that binary is not released. The live chain refuses all nine today, the same
 // way it refuses an action that does not exist. They start working at the
@@ -132,4 +137,32 @@ export interface PerpSetSubDeployers {
   sub_deployer: string;
   /// `true` adds the delegate, `false` removes it.
   add: boolean;
+}
+
+/// `mip3_set_oracle_px` — push the market's index px from its deployer oracle.
+///
+/// **NOT LIVE YET, and it fails DIFFERENTLY from the nine.** The node KNOWS
+/// this action; it refuses the push with `mip3_deployer_oracle feature not
+/// active`, because governance has not armed that fork feature. Arming it is a
+/// stake vote, not a release.
+///
+/// Only the market's deployer or a registered sub-deployer may sign a push. No
+/// relay and no system sender can inject one.
+///
+/// The feed is load-bearing, not advisory. Once the feature is armed:
+///
+/// - The FIRST push force-migrates every existing cross leg on the market to
+///   strict-isolated margin, and every later leg opens strict-isolated.
+/// - A feed that goes stale flips the market reduce-only: opens are refused and
+///   closes always pass. Push faster than the staleness window.
+export interface Mip3SetOraclePx {
+  /// Target market asset id (`u32`).
+  asset: number;
+  /// The pushed index px, as a WHOLE-USDC decimal string — never the 1e8 book
+  /// plane, and never a JSON number.
+  ///
+  /// The node hashes this string VERBATIM, so the signature covers the
+  /// SPELLING and not the value: `"1250.5"` and `"1250.50"` are one price and
+  /// two digests. Build the string once, then sign and send the same bytes.
+  px: string;
 }

@@ -1,5 +1,6 @@
 // EIP-712 typed signing — the MIP-1 spot-deployer lane, the MIP-3 perp-deployer
-// lane, the metaliquidity operator grant, and the BOLE `borrow_lend` flow.
+// lane and its deployer oracle, the metaliquidity operator grant, and the BOLE
+// `borrow_lend` flow.
 //
 // The type strings below are copied VERBATIM from the node's frozen constants
 // (the chain's frozen typed-signing constants). They are the contract: if `encodeType`
@@ -7,7 +8,7 @@
 //
 // The digest assertions here are RELATIONAL, not absolute — each one proves a
 // field reaches the digest, or that two inputs separate. The absolute 32-byte
-// known-answer vectors for all seventeen actions live in `typed.test.ts` and
+// known-answer vectors for all 58 actions live in `typed.test.ts` and
 // carry the chain's OWN digests, from its cross-language vector set.
 
 import { describe, expect, it } from 'vitest';
@@ -35,7 +36,7 @@ function toHex(bytes: Uint8Array): string {
 
 // ── encodeType: byte-for-byte against the node's frozen constants ────────────
 
-describe('typed encodeType — spot deployer / metaliquidity operator / BOLE', () => {
+describe('typed encodeType — spot deployer / operator / BOLE / MIP-3 oracle', () => {
   const FROZEN: Record<string, string> = {
     spot_register_token:
       'MetaFluxTransaction:SpotRegisterToken(string metafluxChain,string symbol,uint8 szDecimals,uint8 weiDecimals,string maxDeployFee,uint64 nonce)',
@@ -53,16 +54,18 @@ describe('typed encodeType — spot deployer / metaliquidity operator / BOLE', (
       'MetaFluxTransaction:RegisterMetaliquidityOperator(string metafluxChain,uint64 vaultId,address operator,bool allowed,uint64 expiresAtMs,uint64 nonce)',
     borrow_lend:
       'MetaFluxTransaction:BorrowLend(string metafluxChain,uint8 kind,string amount,uint64 nonce)',
+    mip3_set_oracle_px:
+      'MetaFluxTransaction:Mip3SetOraclePx(string metafluxChain,uint32 asset,string px,uint64 nonce)',
   };
 
-  it('matches the node type string for all eight actions', async () => {
+  it('matches the node type string for all nine actions', async () => {
     const { encodeType } = await import('../src/native/typed.js');
     for (const [actionType, frozen] of Object.entries(FROZEN)) {
       expect(encodeType(actionType)).toBe(frozen);
     }
   });
 
-  it('none of the eight takes an agent-resolved owner', async () => {
+  it('none of the nine takes an agent-resolved owner', async () => {
     const { accountSupportsOwner } = await import('../src/native/typed.js');
     for (const actionType of Object.keys(FROZEN)) {
       expect(accountSupportsOwner(actionType)).toBe(false);
@@ -72,7 +75,7 @@ describe('typed encodeType — spot deployer / metaliquidity operator / BOLE', (
 
 // ── wire shape: what lands in the POST params ────────────────────────────────
 
-describe('typed wire shape — spot deployer / operator / BOLE', () => {
+describe('typed wire shape — spot deployer / operator / BOLE / MIP-3 oracle', () => {
   it('decimal fields ride verbatim into the POST action', async () => {
     const { buildTyped } = await import('../src/native/typed.js');
     const tok = buildTyped(
@@ -92,6 +95,26 @@ describe('typed wire shape — spot deployer / operator / BOLE', () => {
       CHAIN_ID,
     );
     expect(seal.actionJson.includes('"max_supply":"1000250.75"')).toBe(true);
+  });
+
+  /// The node hashes the px string it is SENT. If the builder ever re-formatted
+  /// the px between signing and posting, every push would fail signer auth.
+  it('mip3_set_oracle_px posts the exact px string it signs', async () => {
+    const { buildTyped, typedDataV4 } = await import('../src/native/typed.js');
+    const built = buildTyped(
+      'mip3_set_oracle_px',
+      { asset: 42, px: '1250.500001' },
+      210n,
+      CHAIN_ID,
+    );
+    expect(JSON.parse(built.actionJson)).toEqual({
+      type: 'mip3_set_oracle_px',
+      params: { asset: 42, px: '1250.500001' },
+    });
+    const data = typedDataV4(built);
+    expect(data.message.px).toBe('1250.500001');
+    const fields = data.types[data.primaryType] ?? [];
+    expect(fields.find((t) => t.name === 'px')?.type).toBe('string');
   });
 
   it('spot_seed_holders carries both parallel arrays verbatim', async () => {

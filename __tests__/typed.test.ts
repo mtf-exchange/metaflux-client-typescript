@@ -1,7 +1,7 @@
 // EIP-712 typed-action signing — cross-impl known-answer vectors + round-trips.
 //
 // Pins the TS typed-action digest to the SAME value the server commits to for
-// the 18 reachable actions (chain id 114514 / "Testnet"). If a digest drifts,
+// the 58 reachable actions (chain id 114514 / "Testnet"). If a digest drifts,
 // the TS SDK is signing something the server will not verify. Vectors mirror the
 // the chain's own cross-language vector set; the digest pins are the frozen contract.
 
@@ -454,6 +454,15 @@ const VECTORS: Vector[] = [
     nonce: 209n,
     digest: '6e39d36bdd1f80375e71c3609d10ee15ad030004d3c41c246fcfbcb93df6750d',
   },
+  // The tenth MIP-3 deployer action: the repeating index-px push. The px is
+  // hashed VERBATIM, so this pin also fixes its SPELLING — a re-formatted
+  // string is a different digest and an unsigned push.
+  {
+    actionType: 'mip3_set_oracle_px',
+    payload: { asset: 42, px: '1250.500001' },
+    nonce: 210n,
+    digest: 'b927bb6c255ba92dee601d083e13779abee1b42e527e29f2b944dbf7c2ac56b6',
+  },
   // `noop` carries no field: the digest is the chain tag and the nonce alone.
   {
     actionType: 'noop',
@@ -491,10 +500,10 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     }
   });
 
-  it('reproduces all 57 contract KAT digests byte-for-byte (chain 114514)', async () => {
+  it('reproduces all 58 contract KAT digests byte-for-byte (chain 114514)', async () => {
     const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
-    // 58 vectors, 57 actions: the two approve-fee keys share one digest pin.
-    expect(VECTORS.length).toBe(58);
+    // 59 vectors, 58 actions: the two approve-fee keys share one digest pin.
+    expect(VECTORS.length).toBe(59);
     for (const v of VECTORS) {
       const built = buildTyped(v.actionType, v.payload, v.nonce, CHAIN_ID);
       const digest = await typedActionDigest(built);
@@ -717,11 +726,11 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(toHex(base)).not.toBe(toHex(otherChain));
   });
 
-  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 66 reachable actions', async () => {
+  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 67 reachable actions', async () => {
     const { isTypedAction, TYPED_ACTION_TYPES } = await import('../src/native/typed.js');
-    // 67 keys, 66 actions: `approve_builder_fee` is the old key for
+    // 68 keys, 67 actions: `approve_builder_fee` is the old key for
     // `approve_broker_fee` and shares its spec.
-    expect(TYPED_ACTION_TYPES.length).toBe(67);
+    expect(TYPED_ACTION_TYPES.length).toBe(68);
     // `noop` (132) burns a nonce and does nothing else.
     expect(isTypedAction('noop')).toBe(true);
     // MIP-3 perp deployer lane (9). Landed in the node, NOT yet released: the
@@ -735,6 +744,9 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(isTypedAction('perp_activate_market')).toBe(true);
     expect(isTypedAction('perp_deactivate_market')).toBe(true);
     expect(isTypedAction('perp_set_sub_deployers')).toBe(true);
+    // The tenth deployer action. Refused for a DIFFERENT reason: its own fork
+    // feature `mip3_deployer_oracle` is not armed.
+    expect(isTypedAction('mip3_set_oracle_px')).toBe(true);
     // MIP-1 spot deployer lane (6) + the metaliquidity operator grant + BOLE.
     expect(isTypedAction('spot_register_token')).toBe(true);
     expect(isTypedAction('spot_register_pair')).toBe(true);

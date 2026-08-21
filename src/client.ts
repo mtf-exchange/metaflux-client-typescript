@@ -95,6 +95,7 @@ import type {
   PriorityBid,
   PerpActivateMarket,
   PerpDeactivateMarket,
+  Mip3SetOraclePx,
   PerpRegisterAsset,
   PerpSetFeeTier,
   PerpSetLeverage,
@@ -1808,6 +1809,27 @@ export class Client {
   ): Promise<NativeExchangeAck> {
     return this.submitTyped(
       'perp_set_sub_deployers',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Push the market's index px from its deployer oracle
+  /// (`mip3_set_oracle_px`).
+  ///
+  /// **Not live yet.** The node refuses the push with `mip3_deployer_oracle
+  /// feature not active` until governance arms that fork feature.
+  ///
+  /// `px` is a WHOLE-USDC decimal string, hashed verbatim: the exact bytes
+  /// passed here are both signed and posted. Once the feature is armed, the
+  /// FIRST push force-migrates existing cross legs on the market to
+  /// strict-isolated margin, and a stale feed turns the market reduce-only.
+  async mip3SetOraclePx(
+    params: Mip3SetOraclePx,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'mip3_set_oracle_px',
       params as unknown as Record<string, unknown>,
       opts,
     );

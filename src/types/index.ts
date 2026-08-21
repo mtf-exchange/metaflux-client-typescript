@@ -94,6 +94,7 @@ export type {
   PerpActivateMarket,
   PerpDeactivateMarket,
   PerpSetSubDeployers,
+  Mip3SetOraclePx,
 } from './perp-deploy.js';
 export type {
   UpdateLeverage,
