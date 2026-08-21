@@ -207,12 +207,14 @@ export interface MarginTier {
 
 /// An EVM contract binding on a registered token. Emitted as an OBJECT on the
 /// spot token registry and on a perp market's underlying-`token` block — NOT a
-/// bare `0x` string. `null`/omitted when the token has no EVM binding.
+/// bare `0x` string. `null`/omitted when the token binds nothing.
 export interface TokenEvmContract {
-  /// `0x` EVM contract address bound to the token.
+  /// `0x` EVM contract address BOUND to the token. This is the address a
+  /// Core-to-EVM transfer credits. A contract a deployer merely declared at
+  /// `register_token` is never served here.
   address: string;
-  /// Extra wei-decimals offset applied on the EVM side relative to the token's
-  /// native `wei_decimals` (signed; `0` = no offset).
+  /// Deployer-declared offset, signed. It does NOT change a credit: a credit
+  /// lands in the token's sibling `wei_decimals`. Treat this as metadata.
   evm_extra_wei_decimals: number;
 }
 
