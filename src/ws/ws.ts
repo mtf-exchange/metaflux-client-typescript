@@ -218,7 +218,8 @@ export type ActiveAssetDataFrame = import('../types/info/index.js').ActiveAssetD
 /// One `trades` channel record. The on-subscribe snapshot is a NON-EMPTY
 /// array of recent tape prints (`users: null` on snapshot rows — the
 /// committed tape does not retain taker/maker); each live push is an array of
-/// fresh prints with `users: [taker, maker]` (taker first, the aggressor).
+/// fresh prints with `users: [taker]` — the aggressor only. The resting
+/// maker is never disclosed.
 export interface WsTrade {
   /// Market symbol (e.g. `"BTC"`).
   coin: string;
@@ -233,7 +234,7 @@ export interface WsTrade {
   /// Deterministic trade id (shared by both legs of the print).
   tid: number;
   /// `[taker, maker]` 0x addresses on live pushes; `null` on snapshot rows.
-  users: [string, string] | null;
+  users: [string] | null;
   /// Committed block height the trade landed in.
   block: number;
   /// Taker action's transaction hash (`0x`-hex); empty when systemic.
