@@ -2,6 +2,20 @@
 
 All notable changes to the TypeScript SDK are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- `WsLedgerUpdateKind` names two more kinds and no longer rejects an unknown
+  one. `deposit` (a bridge inbound credit) and `liquidation` (a forced-close
+  settlement) arrive in a later node release; both are listed now so a caller
+  can switch on them before that release ships.
+
+  The union also gained a `(string & {})` member. It keeps the literals as
+  editor completions while ACCEPTING a kind this build has never seen — the node
+  adds kinds as it attributes more causes, and the closed union made every one
+  of them a type error on arrival.
+
 ## [0.24.1] — 2026-08-22
 
 ### Fixed

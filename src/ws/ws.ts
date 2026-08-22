@@ -494,6 +494,15 @@ export interface WsNotification {
 }
 
 /// The `kind` tag on a `ledger_updates` record.
+///
+/// `deposit` (a bridge inbound credit) and `liquidation` (a forced-close
+/// settlement) arrive in a later node release. They are listed here so a caller
+/// can switch on them before that release ships.
+///
+/// The trailing `(string & {})` member is load-bearing: it keeps the literals
+/// as editor completions while still ACCEPTING a kind this build has never
+/// seen. The node adds kinds as it attributes more causes, and a closed union
+/// would make every one of them a type error on arrival.
 export type WsLedgerUpdateKind =
   | 'usd_send'
   | 'usd_receive'
@@ -502,17 +511,21 @@ export type WsLedgerUpdateKind =
   | 'asset_send'
   | 'asset_receive'
   | 'withdraw'
+  | 'deposit'
+  | 'liquidation'
   | 'system_credit'
   | 'sub_account_transfer'
   | 'sub_account_spot_transfer'
-  | 'vault_transfer';
+  | 'vault_transfer'
+  | (string & {});
 
 /// One `ledger_updates` channel record — a per-account money movement drawn
 /// from the committed block payload. Each push is an array; the on-subscribe
 /// snapshot is the recent ring, NEWEST first.
 ///
 /// `kind` tags the record. Only `kind`, `amount` and `time` are on every
-/// record. `amount` is unsigned — read the direction from `kind`. This differs
+/// record. `amount` is unsigned — read the direction from `kind` — except on a
+/// `liquidation` record, where it is signed (negative on a loss). This differs
 /// from the gateway `user_non_funding_ledger_updates` REST read, which
 /// normalizes to a signed `delta`.
 export interface WsLedgerUpdate {
@@ -543,6 +556,16 @@ export interface WsLedgerUpdate {
   deposit?: boolean;
   /// `true` = the asset moves to the perp side (`asset_send` / `asset_receive`).
   to_perp?: boolean;
+  /// Perp market a `liquidation` record's forced close ran on. Not live yet.
+  market?: string;
+  /// Forced-close cause on a `liquidation` record, e.g. `"forced_close_full"`.
+  /// Not live yet.
+  cause?: string;
+  /// Whole-USDC mark a `liquidation` slice was priced from; absent when the
+  /// market had no usable mark. On a `liquidation` record `amount` is SIGNED
+  /// (negative on a loss) — the one signed exception on this channel. Not
+  /// live yet.
+  mark_px?: string;
 }
 
 /// One `user_twap_slice_fills` channel record — a TWAP child slice that filled.

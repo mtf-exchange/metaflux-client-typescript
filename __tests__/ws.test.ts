@@ -13,6 +13,7 @@ import {
   WS_CHANNELS,
   isChannelFrame,
   type WsFrame,
+  type WsLedgerUpdateKind,
 } from '../src/ws/ws.js';
 
 // Minimal WebSocket stand-in. Records every sent frame; lets the test inject
@@ -788,6 +789,35 @@ describe('WS channel body decode', () => {
     // The takeover record can never be confused with a fill.
     expect(takeover!.signed_sz).toBe('-1.5');
     expect(takeover!.px).toBe('25000');
+  });
+
+  // `deposit` and `liquidation` arrive in a later node release, and a node may
+  // add another kind after that. All three must PARSE today. The positive
+  // control is the fourth record: a known kind still narrows to its literal, so
+  // this is not "the union became plain string and nothing is checked".
+  it('ledger_updates accepts the incoming kinds and an unknown one', async () => {
+    const f = await inbound(
+      '{"channel":"ledger_updates","data":[' +
+        '{"kind":"deposit","coin":"USDC","amount":"1000",' +
+        '"time":1784820001000},' +
+        '{"kind":"liquidation","coin":"USDC","amount":"125.5",' +
+        '"time":1784820001000},' +
+        '{"kind":"a_kind_from_a_newer_node","coin":"USDC","amount":"1",' +
+        '"time":1784820001000},' +
+        '{"kind":"vault_transfer","vault_id":3,"deposit":false,' +
+        '"amount":"10","time":1784820001000}],"is_snapshot":true}',
+    );
+    if (!isChannelFrame(f, 'ledger_updates')) throw new Error('narrow failed');
+    const [dep, liq, unknown, vault] = f.data;
+    expect(dep!.kind).toBe('deposit');
+    expect(dep!.coin).toBe('USDC');
+    expect(dep!.amount).toBe('1000');
+    expect(liq!.kind).toBe('liquidation');
+    expect(liq!.amount).toBe('125.5');
+    expect(unknown!.kind).toBe('a_kind_from_a_newer_node');
+    const known: WsLedgerUpdateKind = 'vault_transfer';
+    expect(vault!.kind).toBe(known);
+    expect(vault!.vault_id).toBe(3);
   });
 
   it('ledger_updates carries an UNSIGNED `amount` tagged by `kind`', async () => {
