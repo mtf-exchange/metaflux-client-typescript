@@ -141,10 +141,10 @@ export interface PerpSetSubDeployers {
 
 /// `mip3_set_oracle_px` — push the market's index px from its deployer oracle.
 ///
-/// **NOT LIVE YET, and it fails DIFFERENTLY from the nine.** The node KNOWS
-/// this action; it refuses the push with `mip3_deployer_oracle feature not
-/// active`, because governance has not armed that fork feature. Arming it is a
-/// stake vote, not a release.
+/// Gated by its own fork feature, `mip3_deployer_oracle`, which is ACTIVE FROM
+/// GENESIS on a fresh chain. Only a legacy or unknown network keeps it dormant
+/// and answers `mip3_deployer_oracle feature not active` until a two-thirds
+/// stake vote arms it. Probe your target network; do not assume.
 ///
 /// Only the market's deployer or a registered sub-deployer may sign a push. No
 /// relay and no system sender can inject one.

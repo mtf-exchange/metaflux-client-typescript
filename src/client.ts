@@ -1817,11 +1817,12 @@ export class Client {
   /// Push the market's index px from its deployer oracle
   /// (`mip3_set_oracle_px`).
   ///
-  /// **Not live yet.** The node refuses the push with `mip3_deployer_oracle
-  /// feature not active` until governance arms that fork feature.
+  /// Gated by the `mip3_deployer_oracle` fork feature, which is ACTIVE FROM
+  /// GENESIS on a fresh chain. A legacy or unknown network answers
+  /// `mip3_deployer_oracle feature not active` until a stake vote arms it.
   ///
   /// `px` is a WHOLE-USDC decimal string, hashed verbatim: the exact bytes
-  /// passed here are both signed and posted. Once the feature is armed, the
+  /// passed here are both signed and posted. Where the feature is active, the
   /// FIRST push force-migrates existing cross legs on the market to
   /// strict-isolated margin, and a stale feed turns the market reduce-only.
   async mip3SetOraclePx(

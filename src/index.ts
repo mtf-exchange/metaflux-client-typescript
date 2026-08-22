@@ -404,8 +404,8 @@ export type {
   PerpActivateMarket,
   PerpDeactivateMarket,
   PerpSetSubDeployers,
-  // The tenth deployer action. It is refused for a DIFFERENT reason: its own
-  // fork feature `mip3_deployer_oracle` is not armed.
+  // The tenth deployer action. It rides its own fork feature,
+  // `mip3_deployer_oracle`, active from genesis on a fresh chain.
   Mip3SetOraclePx,
   // Unified placement (one entry point over the order wire actions).
   PerpOrderLeg,

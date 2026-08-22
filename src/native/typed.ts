@@ -682,7 +682,7 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
   // The tenth deployer action and the only repeating one. `asset` and the
   // VERBATIM `px` string are both in the digest, so a relay can neither reprice
   // a push nor re-target it at another market. It rides its own fork feature,
-  // which governance has not armed.
+  // active from genesis on a fresh chain.
   mip3_set_oracle_px: {
     pascal: 'Mip3SetOraclePx',
     wireType: 'mip3_set_oracle_px',

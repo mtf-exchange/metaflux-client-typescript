@@ -744,8 +744,8 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(isTypedAction('perp_activate_market')).toBe(true);
     expect(isTypedAction('perp_deactivate_market')).toBe(true);
     expect(isTypedAction('perp_set_sub_deployers')).toBe(true);
-    // The tenth deployer action. Refused for a DIFFERENT reason: its own fork
-    // feature `mip3_deployer_oracle` is not armed.
+    // The tenth deployer action. It rides its own fork feature,
+    // `mip3_deployer_oracle`, active from genesis on a fresh chain.
     expect(isTypedAction('mip3_set_oracle_px')).toBe(true);
     // MIP-1 spot deployer lane (6) + the metaliquidity operator grant + BOLE.
     expect(isTypedAction('spot_register_token')).toBe(true);

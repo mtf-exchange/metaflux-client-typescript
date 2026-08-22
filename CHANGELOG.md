@@ -2,6 +2,16 @@
 
 All notable changes to the TypeScript SDK are documented here.
 
+## [0.24.1] — 2026-08-22
+
+### Fixed
+
+- The availability corrections described in 0.24.0 were written but never
+  committed, so the published 0.24.0 still told callers these actions answer
+  `unknown variant` and that governance has not armed the deployer oracle. Both
+  claims are false on the primary networks. This release carries the corrected
+  doc comments that 0.24.0 was supposed to.
+
 ## [0.24.0] — 2026-08-21
 
 ### Added
