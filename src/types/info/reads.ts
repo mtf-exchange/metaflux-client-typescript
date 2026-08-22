@@ -144,9 +144,12 @@ export interface TradeRecord {
   tid: number;
   /// Committed block height the trade landed in.
   block: number;
-  /// Transaction hash of the originating taker action (`0x`-hex); empty
-  /// string when the trade has no signed taker action (system fills).
-  hash: string;
+  /// Transaction hash of the originating taker action (`0x`-hex).
+  ///
+  /// ABSENT = not recorded: an archive-served print, whose table stores no
+  /// trace hash. `""` = recorded, and there was no signed taker action (a
+  /// system fill). The two are different facts.
+  hash?: string;
 }
 
 /// `recent_trades` — market-scoped trade tape, keyed by `coin`. Newest first.

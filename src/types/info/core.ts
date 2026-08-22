@@ -373,7 +373,8 @@ export interface VaultState {
   /// High-water mark, WHOLE-USDC decimal string.
   high_water_mark: string;
   /// Leader management/performance fee in bps.
-  performance_fee_bps: number;
+  /** Leader performance fee, whole basis points as a decimal string. */
+  performance_fee_bps: string;
   /// Follower withdrawal lock in ms.
   lock_period_ms: number;
   /// Vault strategy / kind label (`"User"` / `"Metaliquidity"`).

@@ -106,7 +106,8 @@ export interface BridgeChainConfigRow {
   /// 32-byte deployment id (`0x` + 64 hex) — the EVM address left-padded.
   contract_address: string;
   /// Stake share required to co-sign, in basis points (`6700` = 67%).
-  validator_quorum_threshold_bps: number;
+  /** Stake share required to co-sign, whole basis points as a decimal string. */
+  validator_quorum_threshold_bps: string;
   /// Per-chain replay counter, shared by both directions.
   replay_nonce: number;
   /// Per-chain kill switch. Blocks withdrawals AND deposit attestation.

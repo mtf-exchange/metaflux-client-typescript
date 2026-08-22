@@ -333,7 +333,8 @@ export interface MaxBuilderFee {
   /// Echo of the requested builder 0x address.
   builder: string;
   /// Approved bps ceiling; `0` if not approved.
-  max_fee_bps: number;
+  /** Approved bps ceiling, whole basis points as a decimal string. */
+  max_fee_bps: string;
   /// Whether `(address, builder)` is an approved pair.
   approved: boolean;
 }

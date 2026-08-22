@@ -6,6 +6,17 @@ All notable changes to the TypeScript SDK are documented here.
 
 ### Changed
 
+- **Breaking: three read fields change type.** The node serializes every `*_bps`
+  field on the public wire as a JSON string, so `max_fee_bps`,
+  `performance_fee_bps` and `validator_quorum_threshold_bps` are now `string`.
+  The value is unchanged; only the type moves. This lands with the node release
+  that makes the change, not before it.
+
+- **Breaking: `TradeRecord.hash` is now optional.** An ABSENT hash and an EMPTY
+  hash are different facts and the required `string` collapsed them. Absent means
+  NOT RECORDED — an archive-served print, whose table stores no trace hash. `""`
+  means recorded, and there was no signed taker action.
+
 - `WsLedgerUpdateKind` names two more kinds and no longer rejects an unknown
   one. `deposit` (a bridge inbound credit) and `liquidation` (a forced-close
   settlement) arrive in a later node release; both are listed now so a caller
