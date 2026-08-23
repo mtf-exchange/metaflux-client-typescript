@@ -427,8 +427,6 @@ export interface ValidatorSummary {
 
 /// `validator_summaries` — per-validator snapshot.
 export interface ValidatorSummaries {
-  /// Current staking epoch.
-  epoch: number;
   /// Σ stake across all validators, decimal string.
   total_stake: string;
   /// Size of the active set.
