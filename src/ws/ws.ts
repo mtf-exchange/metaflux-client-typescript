@@ -35,7 +35,6 @@ import type {
   OrderTrigger,
   TradeSide,
 } from '../types/info/reads.js';
-import type { WebData } from '../types/info/web-data.js';
 import {
   buildNativeCancelAction,
   buildNativeOrderAction,
@@ -53,11 +52,14 @@ import type {
 } from '../types/index.js';
 
 /// Channel names exactly as the gateway's native `/ws` surface accepts them
-/// (snake_case MTF-native) — the 22 channels the gateway serves natively.
+/// (snake_case MTF-native) — the 21 channels the gateway serves natively.
 ///
 /// `web_data2` was REMOVED. So was `spot_state`: a subscribe to it now answers
-/// with the error envelope. Compose `account_state` + `web_data` instead. The
-/// REST `spot_clearinghouse_state` read still works.
+/// with the error envelope. Compose `account_state` + the REST
+/// `spot_clearinghouse_state` read instead.
+///
+/// The WS `web_data` channel is RETIRED. Poll the REST `web_data` read; it
+/// keeps serving the same body.
 export type WsChannel =
   // per-market (require `coin` — the market SYMBOL, e.g. "BTC")
   | 'l2_book'
@@ -82,13 +84,12 @@ export type WsChannel =
   | 'user_twap_slice_fills'
   | 'user_twap_history'
   | 'account_state'
-  | 'web_data'
   | 'spot_margin_state'
   // per-account + market (`active_asset_data` needs `user` + `coin`)
   | 'active_asset_data';
 
 /// All known channels — handy for callers that want to subscribe broadly. The
-/// exact 22 native gateway channels.
+/// exact 21 native gateway channels.
 export const WS_CHANNELS: readonly WsChannel[] = [
   'l2_book',
   'bbo',
@@ -109,7 +110,6 @@ export const WS_CHANNELS: readonly WsChannel[] = [
   'user_twap_slice_fills',
   'user_twap_history',
   'account_state',
-  'web_data',
   'spot_margin_state',
   'active_asset_data',
 ] as const;
@@ -124,7 +124,7 @@ export const WS_CHANNELS: readonly WsChannel[] = [
 ///   - `user`     — per-account channels (`fills`, `user_events`,
 ///                  `order_updates`, `open_orders`, `notifications`,
 ///                  `ledger_updates`, `user_fundings`, `user_twap_slice_fills`,
-///                  `user_twap_history`, `account_state`, `web_data`,
+///                  `user_twap_history`, `account_state`,
 ///                  `spot_margin_state`, `active_asset_data`); the 0x address.
 ///   - `interval` — `candles` only (`1m`/`5m`/`15m`/`1h`/`4h`/`1d`)
 ///   - `candle_type` — `candles` only (`mark` / `oracle`)
@@ -664,10 +664,6 @@ export interface WsMarketRow {
 /// read returns, including the `height` / `time` stamp.
 export type WsAccountState = AccountState;
 
-/// `web_data` channel payload — the SAME body the REST `web_data` read
-/// returns, including the `height` / `time` stamp.
-export type WsWebData = WebData;
-
 /// `spot_margin_state` channel payload — the REST `spot_margin_state` body PLUS
 /// the `height` / `time` stamp. The REST read carries no stamp.
 export type WsSpotMarginState = SpotMarginState & {
@@ -703,7 +699,6 @@ export interface WsChannelData {
   user_twap_slice_fills: WsTwapSliceFill[];
   user_twap_history: WsTwapHistoryRecord[];
   account_state: WsAccountState;
-  web_data: WsWebData;
   spot_margin_state: WsSpotMarginState;
   active_asset_data: ActiveAssetDataFrame;
 }
@@ -1017,16 +1012,10 @@ export class WsClient {
   }
 
   /// Subscribe to the per-user live PERP account-state stream (0x address).
-  /// With `web_data`, this replaces the removed `web_data2` composite.
+  /// With the REST `web_data` read, this replaces the removed `web_data2`
+  /// composite.
   async subscribeAccountState(user: string): Promise<void> {
     return this.subscribe({ type: 'account_state', user });
-  }
-
-  /// Subscribe to the per-user consolidated account snapshot (`web_data`, 0x
-  /// address): vault, staking, sub-accounts, multisig, and agents. Each frame
-  /// is the same body the REST `web_data` read returns.
-  async subscribeWebData(user: string): Promise<void> {
-    return this.subscribe({ type: 'web_data', user });
   }
 
   /// Subscribe to the per-user spot-margin position stream (0x address). Each

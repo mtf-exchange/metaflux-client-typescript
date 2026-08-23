@@ -4,6 +4,19 @@ All notable changes to the TypeScript SDK are documented here.
 
 ## [Unreleased]
 
+### Removed
+
+- **Breaking: the WS `web_data` channel is retired.** `WsChannel` no longer
+  names it, `WS_CHANNELS` no longer lists it, `subscribeWebData()` is gone, and
+  the `WsWebData` payload type is gone. `WS_CHANNELS` now holds 21 names.
+  The node refuses a `web_data` subscribe at the next release.
+
+  **The REST `web_data` read is unchanged.** Keep using `info().webData(addr)`;
+  it returns the same `WebData` body the channel pushed. Poll it in place of
+  the push. Every facet also has its own focused read: `user_vault_equities`,
+  `staking_state`, `delegator_summary`, `sub_accounts`,
+  `user_to_multi_sig_signers` and `agents`.
+
 ### Changed
 
 - **Breaking: three read fields change type.** The node serializes every `*_bps`

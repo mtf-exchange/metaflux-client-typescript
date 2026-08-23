@@ -334,7 +334,6 @@ export {
   type WsTwapHistoryState,
   type WsMarketRow,
   type WsAccountState,
-  type WsWebData,
   type WsSpotMarginState,
 } from './ws/ws.js';
 export {

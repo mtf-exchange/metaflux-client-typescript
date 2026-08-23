@@ -192,7 +192,7 @@ describe('WsClient wire protocol', () => {
     ws.close();
   });
 
-  it('exposes the exact 22 native gateway channel names (spot_state GONE)', () => {
+  it('exposes the exact 21 native gateway channel names (spot_state GONE)', () => {
     expect([...WS_CHANNELS]).toEqual([
       'l2_book',
       'bbo',
@@ -213,19 +213,19 @@ describe('WsClient wire protocol', () => {
       'user_twap_slice_fills',
       'user_twap_history',
       'account_state',
-      'web_data',
       'spot_margin_state',
       'active_asset_data',
     ]);
-    expect(WS_CHANNELS).toHaveLength(22);
-    expect(WS_CHANNELS).toContain('web_data');
+    expect(WS_CHANNELS).toHaveLength(21);
     expect(WS_CHANNELS).toContain('spot_margin_state');
-    // Both removed server-side: a subscribe answers with the error envelope.
+    // All removed server-side: a subscribe answers with the error envelope.
+    // The REST `web_data` read keeps serving.
+    expect(WS_CHANNELS).not.toContain('web_data');
     expect(WS_CHANNELS).not.toContain('web_data2');
     expect(WS_CHANNELS).not.toContain('spot_state');
   });
 
-  it('subscribes to the two new per-account channels by `user`', async () => {
+  it('subscribes to the per-account spot_margin_state channel by `user`', async () => {
     const ws = new WsClient('wss://x/ws', { autoReconnect: false });
     const p = ws.connect();
     const sock = MockSocket.instances[0]!;
@@ -233,10 +233,6 @@ describe('WsClient wire protocol', () => {
     await p;
 
     const USER = '0x00000000000000000000000000000000000000aa';
-    await ws.subscribeWebData(USER);
-    expect(sock.sent).toContain(
-      `{"method":"subscribe","subscription":{"type":"web_data","user":"${USER}"}}`,
-    );
     await ws.subscribeSpotMarginState(USER);
     expect(sock.sent).toContain(
       `{"method":"subscribe","subscription":{"type":"spot_margin_state","user":"${USER}"}}`,
@@ -999,21 +995,6 @@ describe('WS channel body decode', () => {
     expect(aad.data.margin_mode).toBe('cross');
     expect(aad.data.max_trade_szs[0]).toBe('0.04');
 
-    const web = await inbound(
-      '{"channel":"web_data","data":{' +
-        '"address":"0x00000000000000000000000000000000000000aa",' +
-        '"vault":{"equities":[],"vaults":[]},' +
-        '"staking":{"state":{"total_staked":"0","delegations":[],' +
-        '"pending_unstakes":[]},"summary":{"total_delegated":"0",' +
-        '"pending_withdrawal":"0","claimable_rewards":"0","n_delegations":0}},' +
-        '"sub_accounts":[],' +
-        '"multisig":{"is_multi_sig":false,"threshold":0,"signers":[]},' +
-        '"agents":[],"height":8416000,"time":1784820001000},' +
-        '"is_snapshot":true}',
-    );
-    if (!isChannelFrame(web, 'web_data')) throw new Error('narrow failed');
-    expect(web.data.staking.summary.n_delegations).toBe(0);
-    expect(web.data.height).toBe(8_416_000);
   });
 
   it('isChannelFrame rejects a different channel name', async () => {
