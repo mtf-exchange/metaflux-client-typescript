@@ -1078,6 +1078,15 @@ export class Client {
   // are RAW `u64` wire values; `side` POSTs the core PascalCase name and signs
   // the uint8 code; `limit_px` / `stp_group` are optional (omit when absent).
 
+  /// **RFQ IS OPTIONS-ONLY, AND EVERY MARKET IS REFUSED TODAY.** All three RFQ
+  /// methods reach the node and are rejected with
+  /// `rfq is options-only: market <n> is not an option series`. No market is an
+  /// option series, so the refusal is total. A request-for-quote lane beside a
+  /// public order book lets size trade away from the price everyone else posts
+  /// against, so MetaFlux offers RFQ only where there is no continuous book to
+  /// undercut — options, which are not built. These methods keep this shape for
+  /// when option series land. Do not build against them yet.
+
   /// Open an RFQ session as a taker (`rfq_request`, typed scheme).
   async rfqRequest(
     params: RfqRequest,
