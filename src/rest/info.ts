@@ -10,14 +10,20 @@
 // the unwrap lives in exactly one place (`post`). The `raw<T>()` escape hatch
 // returns the unwrapped `data` too (use `rawEnvelope` for the full envelope).
 //
-// KEYING (consolidated surface). Market-scoped reads (`l2_book`,
-// `recent_trades`, `trades_by_time`, `funding_history`, `market_info`,
-// `candle_snapshot`, `active_asset_data`) are keyed by `coin` — the market
-// SYMBOL string (e.g. `"BTC"`). Account-scoped reads (`open_orders`,
-// `user_fills`, `user_fills_by_time`, `agents`, `sub_accounts`, every user
-// read) are keyed by `address` (0x hex). The old numeric `market_id` /
-// `asset_id` / `account_id` request params were REMOVED server-side; the
-// numeric asset plane survives ONLY on signed `/exchange` actions.
+// ONE QUESTION, ONE READ. A read that merely filtered or projected another was
+// removed, and its ask became a PARAMETER on the read it duplicated:
+// `market_info` is `markets` / `marketsMeta` with a `coin`, `margin_summary` is
+// `accountState` with `detail: "margin"`, `recent_trades` / `trades_by_time`
+// are `trades` with and without a window, and `user_fills_by_time` is
+// `userFills` with a window.
+//
+// KEYING (consolidated surface). Market-scoped reads (`l2_book`, `trades`,
+// `funding_history`, `markets`, `markets_meta`, `candle_snapshot`,
+// `active_asset_data`) are keyed by `coin` — the market SYMBOL string (e.g.
+// `"BTC"`). Account-scoped reads (`open_orders`, `user_fills`,
+// `account_state`, every user read) are keyed by `address` (0x hex). The old
+// numeric `market_id` / `asset_id` / `account_id` request params were REMOVED
+// server-side; the number a SIGNER needs is `MarketStatic.signing_id`.
 //
 // Money magnitudes that can exceed JS `Number.MAX_SAFE_INTEGER` (2^53) are
 // typed `string` in `../types/info/index.js` to match the node's decimal-string
@@ -25,15 +31,13 @@
 
 import { httpRequest } from './http.js';
 import type {
+  AccountOverview,
   AccountState,
   ActiveAssetData,
-  Agents,
   BlockInfo,
-  BridgeChainConfigs,
   BridgeUserOutbox,
   CandleSnapshot,
   CandleType,
-  DelegatorSummary,
   EarnState,
   EncodeAction,
   ExchangeStatus,
@@ -43,45 +47,32 @@ import type {
   HistoricalOrders,
   L2Book,
   L2BookParams,
-  LeadingVaults,
-  Liquidatable,
-  MarketInfo,
   Markets,
   MarketsMeta,
-  MaxBuilderFee,
-  MaxMarketOrderNtls,
   Mip3ActiveBids,
   NodeInfo,
   OpenOrders,
   OrderStatusInfo,
   PerpDexs,
-  PerpsAtOpenInterestCap,
-  PmSummary,
-  PredictedFunding,
-  RecentTrades,
-  SpotClearinghouseState,
-  SpotDeployState,
+  SpotDeployAuction,
   SpotMarginState,
   SpotMeta,
   StakingState,
-  SubAccounts,
-  TradesByTime,
+  Trades,
   UserFills,
-  UserFillsByTime,
   UserFunding,
   UserLedgerUpdates,
   UserNonFundingLedgerUpdates,
   UserPositionHistory,
   UserRateLimit,
-  UserRole,
-  UserToMultiSigSigners,
-  UserVaultEquities,
   ValidatorL1Votes,
   ValidatorSummaries,
   VaultState,
   VaultSummaries,
-  WebData,
 } from '../types/info/index.js';
+
+/// Response depth for `InfoApi.accountState`.
+export type AccountDetail = 'full' | 'margin';
 
 /// The committed `{type, data}` response envelope every `/info` query returns.
 interface InfoEnvelope<T> {
@@ -105,30 +96,53 @@ export class InfoApi {
     return this.post<NodeInfo>({ type: 'node_info' });
   }
 
-  /// `account_state` — rich per-account snapshot keyed by `address` (0x hex).
+  /// `account_state` — the account's full TRADING state, keyed by `address`
+  /// (0x hex).
   ///
-  /// Positions are grouped by perp dex under `clearinghouse_state`; the core
-  /// dex key is `""`. Balances are an ARRAY of `{asset, name, total, hold}`
-  /// rows, USDC first. `height` / `time` stamp the committed snapshot.
-  async accountState(address: string): Promise<AccountState> {
-    return this.post<AccountState>({ type: 'account_state', address });
+  /// `detail: "full"` (the default) returns equity, margins, tier, positions
+  /// and the whole token ledger. Positions are grouped by perp dex under
+  /// `clearinghouse_state`; the core dex key is `""`. `balances` is an ARRAY of
+  /// `{asset, name, total, hold, avg_entry_px}` rows, USDC first.
+  ///
+  /// `detail: "margin"` returns the margin scalars alone — it adds
+  /// `maint_margin` and skips the position walk and the balance scan, which is
+  /// the right ask for a frequent liquidation-health poll. Both depths compute
+  /// the scalars with one shared helper, so they can never disagree.
+  ///
+  /// The node accepts a third value, `detail: "overview"`. It answers with the
+  /// `AccountOverview` shape, which `AccountState` cannot describe, so
+  /// `accountOverview()` posts it and types the answer.
+  ///
+  /// `height` / `time` stamp the committed snapshot at either depth. The WS
+  /// `account_state` frame carries the DEFAULT depth only.
+  async accountState(
+    address: string,
+    detail?: AccountDetail,
+  ): Promise<AccountState> {
+    const body: { type: string; [k: string]: unknown } = {
+      type: 'account_state',
+      address,
+    };
+    if (detail !== undefined) body.detail = detail;
+    return this.post<AccountState>(body);
   }
 
-  /// `web_data` — the consolidated account snapshot keyed by `address` (0x
-  /// hex): vault equities and vault summaries, staking, sub-accounts, the
-  /// multisig signer set, and API-wallet agents.
+  /// The account's full NON-TRADING state, keyed by `address` (0x hex): vault
+  /// equities and vault summaries, staking, sub-accounts, the multisig signer
+  /// set, API-wallet agents, and the derived role.
   ///
-  /// It carries the account facets `account_state` does not. Use the two
-  /// together for a full account view, or subscribe to the matching WS
-  /// channels.
-  async webData(address: string): Promise<WebData> {
-    return this.post<WebData>({ type: 'web_data', address });
-  }
-
-  /// `market_info` — rich per-market snapshot keyed by `coin` (the market
-  /// symbol, e.g. `"BTC"`). Carries the inline `margin_tiers` ladder.
-  async marketInfo(coin: string): Promise<MarketInfo> {
-    return this.post<MarketInfo>({ type: 'market_info', coin });
+  /// It carries every facet the default `accountState` depth does not, in one
+  /// round trip. Every sub-object is honest-empty rather than absent.
+  ///
+  /// The standalone `account_overview` `/info` type was REMOVED server-side.
+  /// This posts `{type: 'account_state', detail: 'overview'}` and returns the
+  /// same `AccountOverview` shape.
+  async accountOverview(address: string): Promise<AccountOverview> {
+    return this.post<AccountOverview>({
+      type: 'account_state',
+      address,
+      detail: 'overview',
+    });
   }
 
   /// `markets` — the DYNAMIC market universe: `{perp: MarketDynamic[], spot:
@@ -138,15 +152,22 @@ export class InfoApi {
   /// This read serves NO precision grid, NO leverage ladder and NO
   /// trade-control flag. Reading `sz_decimals`, `tick_size`, `open` or `close`
   /// off one of these rows yields `undefined`; call `marketsMeta()` and merge
-  /// by `coin`, or call `marketInfo()` for the union on one market.
-  async markets(): Promise<Markets> {
-    return this.post<Markets>({ type: 'markets' });
+  /// by `coin`.
+  ///
+  /// `coin` narrows the answer to ONE market. It narrows the same rows and does
+  /// not change the shape, so a caller that wants one market pays one round
+  /// trip and parses one shape. An unknown symbol answers 404.
+  async markets(coin?: string): Promise<Markets> {
+    const body: { type: string; [k: string]: unknown } = { type: 'markets' };
+    if (coin !== undefined) body.coin = coin;
+    return this.post<Markets>(body);
   }
 
-  /// `markets_meta` — STATIC per-market metadata: the long-cacheable subset of
+  /// `markets_meta` — STATIC per-market metadata: the long-cacheable half of
   /// `markets` (precision grids `sz_decimals`/`tick_size`/`step_size`, leverage
   /// + `margin_tiers` ladder, `min_order`, trade-control flags, `mark_source`,
-  /// and the deprecated `asset_id` shim). Same `{perp, spot}` envelope as
+  /// the `signing_id` write handle and the `risk_override` governance
+  /// override). Same `{perp, spot}` envelope as
   /// `markets`, but the `perp[]` records OMIT the dynamic price/funding/OI
   /// fields (`mark_px`/`oracle_px`/`open_interest`/`funding`/…) — those live on
   /// `markets`. Merge the two by `coin` when a view needs both live prices AND
@@ -158,8 +179,14 @@ export class InfoApi {
   /// spot `tokens[]` rows carry `total_supply` and an object `evm_contract`.
   /// This is also the source of the spot universe returned by `spotMeta()`
   /// (the standalone `spot_meta` /info type was removed server-side).
-  async marketsMeta(): Promise<MarketsMeta> {
-    return this.post<MarketsMeta>({ type: 'markets_meta' });
+  ///
+  /// `coin` narrows the answer to ONE market; an unknown symbol answers 404.
+  async marketsMeta(coin?: string): Promise<MarketsMeta> {
+    const body: { type: string; [k: string]: unknown } = {
+      type: 'markets_meta',
+    };
+    if (coin !== undefined) body.coin = coin;
+    return this.post<MarketsMeta>(body);
   }
 
   /// `vault_state` — per-vault snapshot keyed by vault `address` (0x hex).
@@ -179,22 +206,18 @@ export class InfoApi {
 
   // ── custody bridge reads ────────────────────────────────────────────────
 
-  /// `bridge_chain_configs` — every committed bridge deployment row.
-  ///
-  /// Each field is independently verifiable against the deployed contract on
-  /// Base or Arbitrum. Read the `effective_*` fields, not the raw ones: the raw
-  /// values are 0-as-unset sentinels.
-  async bridgeChainConfigs(): Promise<BridgeChainConfigs> {
-    return this.post<BridgeChainConfigs>({ type: 'bridge_chain_configs' });
-  }
-
-  /// `bridge_user_outbox` — one account's pending bridge withdrawals, keyed by
-  /// `address` (0x hex). `chain` restricts to `1` (Base) or `2` (Arbitrum);
-  /// omit it to read every chain.
+  /// `bridge_user_outbox` — one account's pending bridge withdrawals AND the
+  /// committed deployment rows, keyed by `address` (0x hex). `chain` restricts
+  /// to `1` (Base) or `2` (Arbitrum); omit it to read every chain.
   ///
   /// Check `status` on each entry. `stranded_on_retired_domain` is TERMINAL and
   /// needs operator action, not a retry. `message_id` is the CURRENT-domain
   /// signing digest and it moves when governance rotates the deployment.
+  ///
+  /// `withdrawals_halted` and `configs` carry what the retired
+  /// `bridge_chain_configs` read served. An address with no withdrawal still
+  /// gets them, with an empty `entries`. Read the `effective_*` fields, not the
+  /// raw ones: the raw values are 0-as-unset sentinels.
   async bridgeUserOutbox(
     address: string,
     chain?: number,
@@ -239,61 +262,46 @@ export class InfoApi {
     return this.post<L2Book>(body);
   }
 
-  /// `recent_trades` — market-scoped trade tape, keyed by `coin`. Optional
-  /// `limit` caps the most-recent records returned (absent = the full ring).
-  async recentTrades(coin: string, limit?: number): Promise<RecentTrades> {
-    const body: { type: string; [k: string]: unknown } = {
-      type: 'recent_trades',
-      coin,
-    };
-    if (limit !== undefined) body.limit = limit;
-    return this.post<RecentTrades>(body);
-  }
-
-  /// `trades_by_time` — the trade tape filtered to an inclusive `[startTime,
-  /// endTime]` window (unix ms over each record's consensus `time`; an
-  /// omitted bound is open). Sent as `start_time` / `end_time` ONLY when
-  /// provided. Ring order (oldest first).
-  async tradesByTime(
+  /// `trades` — market-scoped public trade tape, keyed by `coin`.
+  ///
+  /// One read, two asks. Omit the window for the recent ring, newest first;
+  /// `limit` then caps the most-recent records (absent = the full ring). Pass
+  /// `startTime` / `endTime` (unix ms, sent as `start_time` / `end_time` ONLY
+  /// when provided) to filter on each record's consensus `time`; a RANGED ask
+  /// reaches the gateway archive and returns oldest first.
+  async trades(
     coin: string,
-    startTime?: number,
-    endTime?: number,
-  ): Promise<TradesByTime> {
+    opts?: { limit?: number; startTime?: number; endTime?: number },
+  ): Promise<Trades> {
     const body: { type: string; [k: string]: unknown } = {
-      type: 'trades_by_time',
+      type: 'trades',
       coin,
     };
-    if (startTime !== undefined) body.start_time = startTime;
-    if (endTime !== undefined) body.end_time = endTime;
-    return this.post<TradesByTime>(body);
+    if (opts?.limit !== undefined) body.limit = opts.limit;
+    if (opts?.startTime !== undefined) body.start_time = opts.startTime;
+    if (opts?.endTime !== undefined) body.end_time = opts.endTime;
+    return this.post<Trades>(body);
   }
 
   /// `user_fills` — account-scoped fill history, keyed by `address` (0x).
-  /// Optional `limit` caps the most-recent records returned.
-  async userFills(address: string, limit?: number): Promise<UserFills> {
+  ///
+  /// One read, two asks. Omit the window for the recent records, newest first;
+  /// `limit` then caps them. Pass `startTime` / `endTime` (unix ms, sent as
+  /// `start_time` / `end_time` ONLY when provided) to filter on each record's
+  /// consensus `time`, which returns them oldest first. The reply echoes both
+  /// bounds, `null` for one you omitted.
+  async userFills(
+    address: string,
+    opts?: { limit?: number; startTime?: number; endTime?: number },
+  ): Promise<UserFills> {
     const body: { type: string; [k: string]: unknown } = {
       type: 'user_fills',
       address,
     };
-    if (limit !== undefined) body.limit = limit;
+    if (opts?.limit !== undefined) body.limit = opts.limit;
+    if (opts?.startTime !== undefined) body.start_time = opts.startTime;
+    if (opts?.endTime !== undefined) body.end_time = opts.endTime;
     return this.post<UserFills>(body);
-  }
-
-  /// `user_fills_by_time` — fill history filtered to an inclusive
-  /// `[startTime, endTime]` window (unix ms; an omitted bound is open).
-  /// Oldest first; same record shape as `user_fills`.
-  async userFillsByTime(
-    address: string,
-    startTime?: number,
-    endTime?: number,
-  ): Promise<UserFillsByTime> {
-    const body: { type: string; [k: string]: unknown } = {
-      type: 'user_fills_by_time',
-      address,
-    };
-    if (startTime !== undefined) body.start_time = startTime;
-    if (endTime !== undefined) body.end_time = endTime;
-    return this.post<UserFillsByTime>(body);
   }
 
   /// `user_position_history` — one row per CLOSED position lifecycle, keyed by
@@ -342,12 +350,6 @@ export class InfoApi {
     return this.post<FundingHistory>({ type: 'funding_history', coin });
   }
 
-  /// `predicted_fundings` — per-market predicted funding rate (clamped — the
-  /// actually-charged rate) + the next aligned settlement boundary (ms).
-  async predictedFundings(): Promise<PredictedFunding[]> {
-    return this.post<PredictedFunding[]>({ type: 'predicted_fundings' });
-  }
-
   /// `candle_snapshot` — historical price bars for `(coin, interval,
   /// candleType)` over an optional window. The single candle query on this
   /// surface, and the REST companion to the live `candles` WS channel.
@@ -387,16 +389,6 @@ export class InfoApi {
   /// `block_info` — latest committed block metadata. No parameters.
   async blockInfo(): Promise<BlockInfo> {
     return this.post<BlockInfo>({ type: 'block_info' });
-  }
-
-  /// `agents` — approved agent / API wallets, keyed by `address` (0x).
-  async agents(address: string): Promise<Agents> {
-    return this.post<Agents>({ type: 'agents', address });
-  }
-
-  /// `sub_accounts` — sub-accounts of an account, keyed by `address` (0x).
-  async subAccounts(address: string): Promise<SubAccounts> {
-    return this.post<SubAccounts>({ type: 'sub_accounts', address });
   }
 
   /// `mip3_active_bids` — MIP-3 permissionless perp-deploy auction snapshot.
@@ -530,13 +522,6 @@ export class InfoApi {
     return this.post<EarnState>(body);
   }
 
-  /// `pm_summary` — one account's portfolio-margin summary, keyed by `address`
-  /// (0x). An unknown / non-enrolled address answers `enrolled:false` +
-  /// zeroed figures. The `*_cents` fields are USD-CENTS-plane integer strings.
-  async pmSummary(address: string): Promise<PmSummary> {
-    return this.post<PmSummary>({ type: 'pm_summary', address });
-  }
-
   /// `encode_action` — lower a wire action to its canonical core `Action` JSON.
   ///
   /// SDK-critical for `multi_sig`: the returned `action_json` STRING's exact
@@ -563,6 +548,9 @@ export class InfoApi {
   /// Each pair's `name` is derived as `{base}/{quote}` from the token
   /// registry; the numeric `id` is the compact `coin` label spot prints carry
   /// on the WS `trades` / `candles` / `fills` channels.
+  ///
+  /// Spot token BALANCES are not here: `accountState(address).balances` is the
+  /// account's whole token ledger, USDC and spot tokens alike.
   async spotMeta(): Promise<SpotMeta> {
     const d = await this.post<{ spot: SpotMeta }>({
       type: 'markets_meta',
@@ -571,22 +559,9 @@ export class InfoApi {
     return d.spot;
   }
 
-  /// `spot_clearinghouse_state` — per-account spot token balances by `address`.
-  async spotClearinghouseState(address: string): Promise<SpotClearinghouseState> {
-    return this.post<SpotClearinghouseState>({
-      type: 'spot_clearinghouse_state',
-      address,
-    });
-  }
-
   /// `exchange_status` — global trading status. No parameters.
   async exchangeStatus(): Promise<ExchangeStatus> {
     return this.post<ExchangeStatus>({ type: 'exchange_status' });
-  }
-
-  /// `liquidatable` — accounts currently flagged for liquidation. No params.
-  async liquidatable(): Promise<Liquidatable> {
-    return this.post<Liquidatable>({ type: 'liquidatable' });
   }
 
   /// `active_asset_data` — a user's per-asset leverage / margin-mode / max
@@ -599,24 +574,12 @@ export class InfoApi {
     });
   }
 
-  /// `max_market_order_ntls` — per-asset max market-order notional. No params.
-  async maxMarketOrderNtls(): Promise<MaxMarketOrderNtls> {
-    return this.post<MaxMarketOrderNtls>({ type: 'max_market_order_ntls' });
-  }
-
-  /// `vault_summaries` — all vaults summary. No parameters.
+  /// `vault_summaries` — every vault, in summary. No parameters.
+  ///
+  /// Each row names its `leader`. To list the vaults ONE address leads, filter
+  /// the rows on `leader`; there is no per-leader read.
   async vaultSummaries(): Promise<VaultSummaries> {
     return this.post<VaultSummaries>({ type: 'vault_summaries' });
-  }
-
-  /// `user_vault_equities` — vaults a user has deposited into by `address` (0x).
-  async userVaultEquities(address: string): Promise<UserVaultEquities> {
-    return this.post<UserVaultEquities>({ type: 'user_vault_equities', address });
-  }
-
-  /// `leading_vaults` — vaults led by the user by `address` (0x).
-  async leadingVaults(address: string): Promise<LeadingVaults> {
-    return this.post<LeadingVaults>({ type: 'leading_vaults', address });
   }
 
   /// `user_rate_limit` — a user's action stats / rate-limit budget by `address`.
@@ -624,38 +587,13 @@ export class InfoApi {
     return this.post<UserRateLimit>({ type: 'user_rate_limit', address });
   }
 
-  /// `spot_deploy_state` — MIP-1 spot-pair-deploy gas-auction state. No params.
-  async spotDeployState(): Promise<SpotDeployState> {
-    return this.post<SpotDeployState>({ type: 'spot_deploy_state' });
-  }
-
-  /// `delegator_summary` — staking summary for an `address` (0x).
-  async delegatorSummary(address: string): Promise<DelegatorSummary> {
-    return this.post<DelegatorSummary>({ type: 'delegator_summary', address });
-  }
-
-  /// `max_builder_fee` — approved builder-fee ceiling for `(address, builder)`,
-  /// both 0x.
-  async maxBuilderFee(address: string, builder: string): Promise<MaxBuilderFee> {
-    return this.post<MaxBuilderFee>({ type: 'max_builder_fee', address, builder });
-  }
-
-  /// `user_to_multi_sig_signers` — multisig config for an `address` (0x).
-  async userToMultiSigSigners(address: string): Promise<UserToMultiSigSigners> {
-    return this.post<UserToMultiSigSigners>({
-      type: 'user_to_multi_sig_signers',
-      address,
-    });
-  }
-
-  /// `user_role` — derived account role for an `address` (0x).
-  async userRole(address: string): Promise<UserRole> {
-    return this.post<UserRole>({ type: 'user_role', address });
-  }
-
-  /// `perps_at_open_interest_cap` — assets whose OI is at/over the cap. No params.
-  async perpsAtOpenInterestCap(): Promise<PerpsAtOpenInterestCap> {
-    return this.post<PerpsAtOpenInterestCap>({ type: 'perps_at_open_interest_cap' });
+  /// `spot_deploy_auction` — MIP-1 spot-pair-deploy gas-auction state. No
+  /// params.
+  ///
+  /// UPGRADE NOTICE: the node answers this read under the older name
+  /// `spot_deploy_state` until the release that ships the rename.
+  async spotDeployAuction(): Promise<SpotDeployAuction> {
+    return this.post<SpotDeployAuction>({ type: 'spot_deploy_auction' });
   }
 
   /// `validator_l1_votes` — current validator L1 votes. No parameters.
@@ -663,7 +601,8 @@ export class InfoApi {
     return this.post<ValidatorL1Votes>({ type: 'validator_l1_votes' });
   }
 
-  /// `perp_dexs` — list the perp DEX(es). No parameters.
+  /// `perp_dexs` — the perp DEX(es) plus the governed MIP-3 deploy and
+  /// per-market limits, under `limits`. No parameters.
   async perpDexs(): Promise<PerpDexs> {
     return this.post<PerpDexs>({ type: 'perp_dexs' });
   }
@@ -682,8 +621,11 @@ export class InfoApi {
 
   /// Raw escape hatch — POST an arbitrary `{type, ...}` body to `/info`,
   /// validate the envelope, and return the unwrapped `data` typed. For request
-  /// shapes the SDK doesn't yet model (e.g. `oracle_sources`,
-  /// `fba_batch_state`, `rfq_open`, governance reads).
+  /// shapes the SDK doesn't yet model (e.g. `validator_votes`).
+  ///
+  /// It does NOT reach an operator-lane read. `protocol_metrics`,
+  /// `mip3_deployer_oracle`, `rfq_open`, `rfq_user` and `fba_batch_state` are
+  /// refused on the public API with the same error an unknown type gets.
   async raw<T = unknown>(body: { type: string; [k: string]: unknown }): Promise<T> {
     return this.post<T>(body);
   }

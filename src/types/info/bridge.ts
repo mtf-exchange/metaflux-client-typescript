@@ -4,8 +4,9 @@
 // Field names are the exact snake_case keys the node emits inside
 // `{type, data}.data`. Money magnitudes that can exceed 2^53 are typed `string`.
 //
-// Two PUBLIC queries are typed here: `bridge_chain_configs` and
-// `bridge_user_outbox`. The node also serves `bridge_outbox` and
+// ONE PUBLIC query is typed here: `bridge_user_outbox`. It serves a user's own
+// in-flight withdrawals AND the committed deployment rows, because the rows
+// DEFINE the id the entries carry. The node also serves `bridge_outbox` and
 // `bridge_finalized_cosignatures`, but the public gateway REFUSES both (they
 // are operator reads), so this SDK does not type them.
 //
@@ -67,13 +68,26 @@ export interface BridgeOutboxEntry {
   released_at_ms: number | null;
 }
 
-/// One user's pending bridge withdrawals (`bridge_user_outbox`).
+/// One user's pending bridge withdrawals, plus the deployment rows that define
+/// their ids (`bridge_user_outbox`).
+///
+/// An address that holds no withdrawal still gets the rows, with an empty
+/// `entries`. NEVER freeze a row into config: an `mbConfigureChain` vote
+/// replaces the whole row, and a stale `evm_contract_address` computes a wrong
+/// `message_id` and points deposits at a retired custody contract.
 export interface BridgeUserOutbox {
   /// Pending withdrawals, oldest first. Empty means no withdrawal is in flight
   /// — it does NOT mean a past withdrawal failed.
   entries: BridgeOutboxEntry[];
   /// `true` if the 256-entry cap truncated the list.
   truncated: boolean;
+  /// Chain-wide refusal of NEW withdrawals, all chains, until governance clears
+  /// it. A bridge can be unable to PAY while still able to ACCEPT; this flag
+  /// stops the accept.
+  withdrawals_halted: boolean;
+  /// One committed deployment row per configured chain. Read the `effective_*`
+  /// fields, not the raw ones: the raw values are 0-as-unset sentinels.
+  configs: BridgeChainConfigRow[];
 }
 
 /// The governed deposit-scan policy on one chain.
@@ -129,12 +143,3 @@ export interface BridgeChainConfigRow {
   scan_policy: BridgeScanPolicy;
 }
 
-/// Every committed bridge deployment row (`bridge_chain_configs`).
-export interface BridgeChainConfigs {
-  /// Chain-wide refusal of NEW withdrawals, all chains, until governance clears
-  /// it. A bridge can be unable to PAY while still able to ACCEPT; this flag
-  /// stops the accept.
-  withdrawals_halted: boolean;
-  /// One row per configured chain.
-  configs: BridgeChainConfigRow[];
-}

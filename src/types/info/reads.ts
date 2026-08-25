@@ -127,7 +127,7 @@ export interface L2Book {
   asks: L2Level[];
 }
 
-/// One public trade record (shared by `recent_trades` / `trades_by_time`; the
+/// One public trade record on the `trades` read (ranged or not; the
 /// WS `trades` channel adds `users`).
 export interface TradeRecord {
   /// Market symbol (e.g. `"BTC"`).
@@ -152,32 +152,30 @@ export interface TradeRecord {
   hash?: string;
 }
 
-/// `recent_trades` — market-scoped trade tape, keyed by `coin`. Newest first.
-export interface RecentTrades {
+/// `trades` — market-scoped public trade tape, keyed by `coin`.
+///
+/// One read, two asks. An UN-RANGED ask returns the recent ring, newest first,
+/// and always answers from the node. A RANGED ask (one that carries
+/// `start_time` or `end_time`) filters on each record's consensus `time` and
+/// reaches the gateway archive, oldest first.
+///
+/// An archive-served print OMITS `hash` rather than sending `""`: absent is
+/// "not recorded", `""` is "recorded, and there was no signed taker action".
+export interface Trades {
   /// Echoed market symbol.
   coin: string;
-  /// Timestamp of the last trade (consensus ms; `0` if none).
+  /// Timestamp of the newest trade in this answer (consensus ms; `0` if none).
   last_trade: number;
-  /// Recent trades (bounded ring; deep history is the indexer's job).
-  trades: TradeRecord[];
-}
-
-/// `trades_by_time` — the trade tape filtered to an inclusive `[start_time,
-/// end_time]` window over each record's consensus `time`. Ring order
-/// (oldest first). Same bounded ring as `recent_trades`.
-export interface TradesByTime {
-  /// Echoed market symbol.
-  coin: string;
   /// Echoed window start (ms), `null` when the request omitted it.
   start_time: number | null;
   /// Echoed window end (ms), `null` when the request omitted it.
   end_time: number | null;
-  /// In-window trades.
+  /// The trades.
   trades: TradeRecord[];
 }
 
-/// One fill inside a `UserFills` / `UserFillsByTime` history. Also the `filled`
-/// branch of an `OrderStatusInfo`.
+/// One fill inside a `UserFills` history. Also the `filled` branch of an
+/// `OrderStatusInfo`.
 export interface UserFill {
   /// Market the fill executed on — the coin SYMBOL. A perp symbol (`"MTF"`) or
   /// a spot pair NAME (`"MTF/USDC"`). The node fill serializer renders the
@@ -240,26 +238,19 @@ export interface UserFill {
   twap_id?: number;
 }
 
-/// `user_fills` — account-scoped fill history, keyed by `address`. Newest
-/// first; a bounded recent window (the gateway merges deep archive history
-/// when available).
+/// `user_fills` — account-scoped fill history, keyed by `address`.
+///
+/// One read, two asks. An UN-RANGED ask returns the recent ring, newest first
+/// (the gateway merges deep archive history when available). A RANGED ask
+/// filters on each record's consensus `time` and returns oldest first.
 export interface UserFills {
-  /// Resolved account address (0x).
-  address: string;
-  /// Fills.
-  fills: UserFill[];
-}
-
-/// `user_fills_by_time` — fill history filtered to an inclusive `[start_time,
-/// end_time]` window over each record's consensus `time`. Oldest first.
-export interface UserFillsByTime {
   /// Resolved account address (0x).
   address: string;
   /// Echoed window start (ms), `null` when the request omitted it.
   start_time: number | null;
   /// Echoed window end (ms), `null` when the request omitted it.
   end_time: number | null;
-  /// In-window fills (same record shape as `user_fills`).
+  /// Fills.
   fills: UserFill[];
 }
 
@@ -371,18 +362,6 @@ export interface FundingHistory {
   samples: FundingSample[];
 }
 
-/// One `predicted_fundings` entry — per-market predicted funding.
-export interface PredictedFunding {
-  /// Market symbol.
-  coin: string;
-  /// Predicted rate for the next settlement (clamped — the rate that will
-  /// actually be charged), decimal string.
-  predicted_rate: string;
-  /// Next settlement boundary (unix ms, aligned to the per-asset funding
-  /// interval; `0` only when no block is committed yet).
-  next_funding_ts: number;
-}
-
 /// The price series a candle folds — the `candle_type` request field.
 ///
 /// `"mark"` is the DEFAULT and serves perp and spot markets. `"oracle"` serves
@@ -475,7 +454,7 @@ export interface BlockInfo {
   block_hash: string;
 }
 
-/// One approved agent inside an `Agents` response.
+/// One approved agent inside `AccountOverview.agents`.
 export interface AgentEntry {
   /// Approved agent wallet address (0x).
   agent: string;
@@ -485,15 +464,7 @@ export interface AgentEntry {
   expires_at: number | null;
 }
 
-/// `agents` — approved agent / API wallets for an account, keyed by `address`.
-export interface Agents {
-  /// Resolved master address (0x).
-  address: string;
-  /// Approved agents.
-  agents: AgentEntry[];
-}
-
-/// One sub-account inside a `SubAccounts` response.
+/// One sub-account inside `AccountOverview.sub_accounts`.
 export interface SubAccountEntry {
   /// Sub-account index under the parent.
   index: number;
@@ -501,14 +472,6 @@ export interface SubAccountEntry {
   address: string;
   /// Sub-account equity, whole-USDC decimal string (`"0"` when uncommitted).
   equity: string;
-}
-
-/// `sub_accounts` — sub-accounts of an account, keyed by `address`.
-export interface SubAccounts {
-  /// Resolved parent address (0x).
-  address: string;
-  /// Sub-accounts.
-  sub_accounts: SubAccountEntry[];
 }
 
 /// One MIP-3 auction bid.

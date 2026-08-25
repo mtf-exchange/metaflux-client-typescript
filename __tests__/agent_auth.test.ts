@@ -51,6 +51,9 @@ describe.skipIf(!wasmBuilt)('Client agent authorization', () => {
   let agentsReply: () => { ok: boolean; status: number; body: string };
   let savedFetch: typeof globalThis.fetch;
 
+  /// The `account_state` overview envelope the client reads `agents` from.
+  /// The echoed `type` is load-bearing: `InfoApi.post` refuses a mismatch, so a
+  /// stale name here would make every authorization check fail open.
   function approved(agents: AgentEntry[]): {
     ok: boolean;
     status: number;
@@ -60,8 +63,25 @@ describe.skipIf(!wasmBuilt)('Client agent authorization', () => {
       ok: true,
       status: 200,
       body: JSON.stringify({
-        type: 'agents',
-        data: { address: '0x0', agents },
+        type: 'account_state',
+        data: {
+          address: '0x0',
+          vault: { equities: [], vaults: [] },
+          staking: {
+            state: { total_staked: '0', delegations: [], pending_unstakes: [] },
+            summary: {
+              total_delegated: '0',
+              pending_withdrawal: '0',
+              claimable_rewards: '0',
+              n_delegations: 0,
+            },
+          },
+          sub_accounts: [],
+          multisig: { is_multi_sig: false, threshold: 0, signers: [] },
+          agents,
+          height: 1,
+          time: 1,
+        },
       }),
     };
   }
@@ -137,8 +157,9 @@ describe.skipIf(!wasmBuilt)('Client agent authorization', () => {
     expect(exchangeBodies[0]).toContain(master.toLowerCase());
     expect(infoBodies.length).toBe(1);
     expect(JSON.parse(infoBodies[0]!)).toEqual({
-      type: 'agents',
+      type: 'account_state',
       address: master,
+      detail: 'overview',
     });
   });
 

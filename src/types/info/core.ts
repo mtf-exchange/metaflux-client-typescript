@@ -17,8 +17,6 @@
 // within safe range stay `number`. Optional fields the node only emits
 // conditionally are `?`.
 
-import type { Raw1e18 } from '../vault.js';
-
 /// `node_info` — static node identity + protocol version.
 export interface NodeInfo {
   /// Network variant: `"devnet"`, `"testnet"`, or `"mainnet"`.
@@ -103,8 +101,12 @@ export interface DexPositions {
   positions: AccountPosition[];
 }
 
-/// One token balance row. The shape is shared by `account_state.balances` and
-/// `spot_clearinghouse_state.balances`.
+/// One token balance row of `account_state.balances` — the account's WHOLE
+/// token ledger, the unified USDC pool in row 0 and every spot token after it.
+///
+/// `total - hold` is NOT the spendable amount. `hold` counts spot order escrow
+/// only: USDC that margins an open perpetual position stays in `total` and
+/// never enters `hold`. Read `AccountState.withdrawable` for the budget.
 export interface TokenBalance {
   /// Token asset id.
   asset: number;
@@ -114,12 +116,31 @@ export interface TokenBalance {
   total: string;
   /// Amount reserved by resting spot orders, whole-token decimal string.
   hold: string;
+  /// Weighted-average acquisition cost, whole USDC PER WHOLE TOKEN. A price,
+  /// not a total: `(mark_px - avg_entry_px) * total` is the unrealized spot
+  /// PnL. `total` includes the part held behind resting orders, so multiply by
+  /// the quantity you mean rather than one the server picked for you.
+  ///
+  /// `null` means UNKNOWN, never zero. The chain rolls the basis on spot BUYS
+  /// only — a sell keeps the standing per-unit average, and a deposit (bridge
+  /// credit, Core-EVM credit, spot transfer, governance adjustment) writes no
+  /// basis at all. Render nothing rather than a PnL against a `null` basis:
+  /// that error is the whole notional reported as gain.
+  ///
+  /// The USDC row always reads `null` — a cost basis on the quote asset in
+  /// terms of itself has no meaning.
+  avg_entry_px?: string | null;
 }
 
-/// `account_state` — rich per-account snapshot keyed by `address`.
+/// `account_state` — the account's full TRADING state, keyed by `address`.
 ///
-/// Margin scalars are whole-USDC decimal strings. This read (with
-/// `spot_clearinghouse_state`) replaces the removed `web_data2` composite.
+/// Margin scalars are whole-USDC decimal strings. `balances` is the WHOLE token
+/// ledger, so there is no second balance read to merge in. The non-trading
+/// facets (vaults, staking, sub-accounts, multisig, agents) are on the
+/// companion `detail: "overview"` depth.
+///
+/// The `detail: "margin"` depth answers the scalars alone: it adds
+/// `maint_margin` and omits `clearinghouse_state` and `balances`.
 export interface AccountState {
   /// Echo of the requested 0x address.
   address: string;
@@ -136,7 +157,7 @@ export interface AccountState {
   /// Initial margin requirement, decimal string.
   init_margin: string;
   /// `account_value - maint_margin` (signed decimal string). Read the
-  /// maintenance margin itself from the `margin_summary` read.
+  /// maintenance margin itself with `detail: "margin"`.
   health: string;
   /// Liquidation tier.
   tier: Tier;
@@ -148,13 +169,18 @@ export interface AccountState {
   health_deferred?: boolean;
   /// Margin abstraction class (`abstraction === 'portfolio'` = PM enrolled).
   abstraction: Abstraction;
+  /// Maintenance margin, whole-USDC decimal string. Served ONLY at
+  /// `detail: "margin"`; the full depth carries the per-leg `maint_margin` on
+  /// each position row instead.
+  maint_margin?: string;
   /// Open positions grouped by perp dex. The core dex key is the empty string
   /// `""` and is always present; a MIP-3 deployer dex key is the deployer's
-  /// lowercase 0x address.
-  clearinghouse_state: Record<string, DexPositions>;
-  /// Token balances. The USDC row is always first; an all-zero token row is
-  /// skipped.
-  balances: TokenBalance[];
+  /// lowercase 0x address. ABSENT at `detail: "margin"`, which skips the walk.
+  clearinghouse_state?: Record<string, DexPositions>;
+  /// The account's whole token ledger. The USDC row is always first; an
+  /// all-zero token row is skipped. ABSENT at `detail: "margin"`, which skips
+  /// the scan.
+  balances?: TokenBalance[];
   /// Portfolio-margin maintenance requirement, whole-USDC decimal string.
   /// Always present — `"0"` when the account is not PM-enrolled. Gate the
   /// meaning on `abstraction === 'portfolio'`.
@@ -174,7 +200,7 @@ export interface AccountState {
   time: number;
 }
 
-/// Per-market funding parameters inside a `MarketInfo`.
+/// Per-market funding parameters on a market row.
 export interface Funding {
   /// Latest funding premium sample, bps string.
   rate_per_hr: string;
@@ -189,7 +215,7 @@ export interface Funding {
 /// Market kind. The gateway emits lowercase `"perp"` / `"spot"`.
 export type MarketKind = 'perp' | 'spot';
 
-/// One margin-tier band inside `MarketInfo.margin_tiers`.
+/// One margin-tier band inside `MarketStatic.margin_tiers`.
 ///
 /// Bands are keyed by their UPPER open-interest bound: a position whose
 /// notional open interest falls at or below `max_open_interest` gets that
@@ -216,10 +242,14 @@ export interface TokenEvmContract {
   /// Deployer-declared offset, signed. It does NOT change a credit: a credit
   /// lands in the token's sibling `wei_decimals`. Treat this as metadata.
   evm_extra_wei_decimals: number;
+  /// Binding-registry variant tag, folded in from the retired
+  /// `evm_contract_bindings` read. Absent for the built-in USDC binding, which
+  /// the credit path answers with no registry row behind it.
+  variant?: number;
 }
 
 /// The registered underlying token of a perp market, surfaced inline on a
-/// `MarketInfo` (`markets_meta` / `market_info` perp rows) as the `token`
+/// `MarketStatic` (the `markets_meta` perp rows) as the `token`
 /// block. OMITTED (absent, never `null`) when the perp has no registered
 /// underlying token. Note the issuance field is `circulating_supply` here,
 /// whereas a spot token registry row (`SpotToken`) carries `total_supply` —
@@ -252,10 +282,14 @@ export interface PerpUnderlyingToken {
 export interface MarketStatic {
   /// Market symbol (e.g. `"BTC"`) — the canonical market key on this surface.
   coin: string;
-  /// @deprecated Numeric asset id shim. Do NOT build on this — key by `coin`.
-  /// It remains only for the signed `/exchange` action plane (numeric `asset`
-  /// stays u32 there) and may be dropped from this read without notice.
-  asset_id: number;
+  /// The uint32 to put in the EIP-712 `market` field when SIGNING an order for
+  /// this market. It has no other meaning: every read keys by `coin`, so never
+  /// sort, join or identify a market by this number.
+  ///
+  /// The signing type string is consensus-frozen at `uint32 market`, so a
+  /// signer needs a number. Publishing it here keeps that number on the wire
+  /// instead of making it knowledge the client carries out of band.
+  signing_id: number;
   /// Market kind — lowercase `"perp"` / `"spot"`.
   kind: MarketKind;
   /// Size precision: raw order/position `size` = `whole_units × 10^sz_decimals`.
@@ -299,6 +333,30 @@ export interface MarketStatic {
   /// The registered underlying token block, when the perp has one. OMITTED
   /// (absent) when there is no registered underlying token — never `null`.
   token?: PerpUnderlyingToken;
+  /// The governance risk override in force on this market.
+  ///
+  /// `null` means NO override exists. An OBJECT with every field absent means
+  /// an override record exists and overrides nothing — a different fact, and
+  /// the one that used to be invisible.
+  risk_override?: RiskOverride | null;
+}
+
+/// A governance risk override on one market, from `MarketStatic.risk_override`.
+///
+/// Every field is optional: an override that moves only `max_leverage` carries
+/// only `max_leverage`. An absent field is NOT overridden — the market's
+/// default (the sibling field on the same `MarketStatic`) applies.
+export interface RiskOverride {
+  /// Overridden maximum leverage multiple.
+  max_leverage?: number;
+  /// Overridden maintenance margin ratio, decimal bps string.
+  maint_margin_ratio?: string;
+  /// Overridden initial margin ratio, decimal bps string.
+  init_margin_ratio?: string;
+  /// Overridden per-period funding-rate cap, decimal fraction string.
+  funding_rate_cap?: string;
+  /// Overridden open-interest cap, whole base units as a decimal string.
+  oi_cap?: string;
 }
 
 /// The DYNAMIC half of a market — the `markets` perp row.
@@ -306,8 +364,7 @@ export interface MarketStatic {
 /// Live price, funding, open interest and the 24h ticker. It carries NO
 /// precision grid, NO leverage ladder and NO trade-control flag: reading
 /// `sz_decimals`, `tick_size`, `open` or `close` off this row yields
-/// `undefined`. Read `MarketsMeta.perp` for those and merge by `coin`, or read
-/// `market_info` for the union on one market.
+/// `undefined`. Read `MarketsMeta.perp` for those and merge by `coin`.
 export interface MarketDynamic {
   /// Market symbol (e.g. `"BTC"`) — the join key onto `MarketStatic`.
   coin: string;
@@ -349,12 +406,6 @@ export interface MarketDynamic {
   /// Whether the market is halted.
   halted: boolean;
 }
-
-/// `market_info` — the UNION of both halves for one market.
-///
-/// Only this read serves every field. `markets` serves `MarketDynamic` and
-/// `markets_meta` serves `MarketStatic`; neither serves the other's fields.
-export interface MarketInfo extends MarketStatic, MarketDynamic {}
 
 /// `vault_state` — per-vault snapshot keyed by vault `address`.
 export interface VaultState {
@@ -423,68 +474,24 @@ export interface StakingState {
   delegations: Delegation[];
   /// Pending unbond entries.
   pending_unstakes: PendingUnstake[];
+  /// What funds the staking reward. Absent on a node that predates the field.
+  reward_pool?: RewardPool;
 }
 
-/// A per-asset row inside `ProtocolMetrics`. Rows arrive as an ARRAY in
-/// ascending `asset`, not as an object, because a JSON object gives no ordering
-/// guarantee across clients and these rows must stay ordered.
-export interface AssetAmount {
-  /// Asset id.
-  asset: number;
-  /// The amount for this asset, decimal string.
-  amount: string;
-}
-
-/// A per-asset signed-position-sum row inside `ProtocolMetrics`.
-export interface AssetSignedSum {
-  /// Asset id.
-  asset: number;
-  /// Sum of `size_signed` over every position row on this market, as a signed
-  /// decimal string on the market's own raw committed lot plane.
-  sum_signed: string;
-}
-
-/// Native MTF held on the EVM side, inside `ProtocolMetrics`. This mirrors the
-/// Core view only; the authoritative EVM state root is separate.
-export interface ProtocolMetricsEvm {
-  /// Total native balance in WEI, as a decimal string on the RAW 10^18 plane.
-  ///
-  /// The node sums the `u128` wei field and serves it unconverted, so this is
-  /// the one read magnitude that is NOT already whole units. It is typed
-  /// [`Raw1e18`], which stops it reaching a whole-plane field such as
-  /// `vault_withdraw.shares`. Divide the plane first with `rawSharesToWhole`.
-  native_balance_wei: Raw1e18;
-  /// EVM accounts holding a non-zero native balance.
-  n_nonzero_holders: number;
-  /// EVM accounts with any committed state.
-  n_accounts: number;
-}
-
-/// `protocol_metrics` — protocol-wide committed accumulators.
+/// What funds the staking reward — the committed inputs, and NO rate.
 ///
-/// Only the fields this SDK types are listed. The read serves more, so treat
-/// this as a partial view and read unlisted keys off the raw payload.
-export interface ProtocolMetrics {
-  /// Native-MTF-on-EVM mirror.
-  evm?: ProtocolMetricsEvm;
-  /// Per-market open interest as a WHOLE-UNIT size string on that market's own
-  /// size plane, ascending `asset`.
-  ///
-  /// There is deliberately no cross-market total. Each market keeps its own
-  /// `sz_decimals` lot plane, so summing raw lots across markets adds
-  /// quantities with no common unit — which is what the removed
-  /// `open_interest_total_1e8` did. To get a protocol-wide figure, convert each
-  /// market to notional first.
-  ///
-  /// Optional because a node that predates the field omits it, and answers the
-  /// removed total instead.
-  open_interest_by_asset?: AssetAmount[];
-  /// Per market, the sum of `size_signed` over EVERY position row.
-  ///
-  /// Every long leg has a short leg, so the honest value is `"0"` on each
-  /// asset. A non-zero entry marks a committed one-sided write to a position
-  /// row, which the open-interest figure cannot show.
-  position_size_signed_sum_by_asset?: AssetSignedSum[];
+/// The emission era is over: rewards come from fees, not from a curve, so there
+/// is no annual rate to publish and none to derive. The pending pool is a
+/// snapshot of accrued fees, and it depends on volume that has not happened
+/// yet. A plausible-looking wrong APR is worse than an honest absence.
+export interface RewardPool {
+  /// Total staked MTF across the chain, decimal string.
+  total_stake: string;
+  /// Fees accrued to the validator pool and not yet distributed, whole USDC.
+  pending_validator_pool_usdc: string;
+  /// Always `"fee_funded_on_book_buy"` — a constant that tells a fee-funded
+  /// chain from an emission-funded one without inferring it.
+  reward_source: string;
 }
 
 /// One fee tier inside a `FeeSchedule`.
@@ -603,34 +610,6 @@ export interface EarnPool {
 export interface EarnState {
   /// Pools, in committed order.
   pools: EarnPool[];
-}
-
-/// `pm_summary` — one account's portfolio-margin summary.
-///
-/// REQUEST KEY is `address` (0x hex); an `account_id` is rejected. An unknown /
-/// non-enrolled address answers 200 with `enrolled:false` and zeroed figures.
-///
-/// PLANE: the three money figures are WHOLE-USDC decimal strings — the same
-/// plane, and now the same names, as the `account_state` twins. They were once
-/// USD-cents integers called `pm_maint_margin_cents` / `net_value_cents` /
-/// `concentration_penalty_cents`; the node serves NEITHER those names NOR that
-/// plane. The rename carried a 100x plane change with it, so a caller still
-/// reading an old name gets `undefined`, not a number that is merely stale.
-export interface PmSummary {
-  /// Resolved account address (0x).
-  address: string;
-  /// Whether the account is enrolled in portfolio margin.
-  enrolled: boolean;
-  /// Enrollment timestamp (consensus ms); `0` when not enrolled.
-  enrolled_at: number;
-  /// Block height of the last PM computation; `0` when not enrolled.
-  last_computed_block: number;
-  /// Maintenance-margin requirement, WHOLE-USDC decimal string.
-  pm_maint_margin: string;
-  /// Net account value, WHOLE-USDC decimal string.
-  pm_net_value: string;
-  /// Concentration penalty, WHOLE-USDC decimal string.
-  pm_concentration_penalty: string;
 }
 
 /// `encode_action` — the canonical core `Action` JSON for a wire action.

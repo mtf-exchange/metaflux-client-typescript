@@ -92,7 +92,7 @@ describe('InfoApi request shapes', () => {
     });
   });
 
-  it('webData is keyed by 0x address and unwraps the consolidated facets', async () => {
+  it('accountOverview posts account_state detail:overview and unwraps every facet', async () => {
     const api = new InfoApi(BASE);
     nextData = {
       address: ADDR,
@@ -112,10 +112,11 @@ describe('InfoApi request shapes', () => {
       height: 8_416_000,
       time: 1_784_820_001_000,
     };
-    const res = await api.webData(ADDR);
+    const res = await api.accountOverview(ADDR);
     expect(JSON.parse(captured!.body)).toEqual({
-      type: 'web_data',
+      type: 'account_state',
       address: ADDR,
+      detail: 'overview',
     });
     // Each nested facet drops its own `address`; the snapshot carries it once.
     expect(res.address).toBe(ADDR);
@@ -126,17 +127,29 @@ describe('InfoApi request shapes', () => {
     expect(res.agents[0]?.expires_at).toBe(1_784_800_000_000);
   });
 
-  it('marketInfo is keyed by coin SYMBOL (NOT asset_id)', async () => {
+  it('markets narrows to one market by coin SYMBOL, same shape', async () => {
     const api = new InfoApi(BASE);
-    nextData = { coin: 'BTC', asset_id: 0, mark_px: '0', open_interest: '0' };
-    const res = await api.marketInfo('BTC');
+    nextData = {
+      perp: [{ coin: 'BTC', mark_px: '0', open_interest: '0' }],
+      spot: { pairs: [], tokens: [] },
+    };
+    const res = await api.markets('BTC');
     expect(JSON.parse(captured!.body)).toEqual({
-      type: 'market_info',
+      type: 'markets',
       coin: 'BTC',
     });
+    // A `coin` filter narrows the rows; it does NOT change the shape.
+    expect(res.perp).toHaveLength(1);
     // Money magnitudes that can exceed 2^53 are decimal strings on the wire.
-    expect(typeof res.mark_px).toBe('string');
-    expect(typeof res.open_interest).toBe('string');
+    expect(typeof res.perp[0]?.mark_px).toBe('string');
+    expect(typeof res.perp[0]?.open_interest).toBe('string');
+  });
+
+  it('markets omits `coin` entirely when no filter is asked for', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { perp: [], spot: { pairs: [], tokens: [] } };
+    await api.markets();
+    expect(JSON.parse(captured!.body)).toEqual({ type: 'markets' });
   });
 
   it('markets returns the DYNAMIC {perp, spot} universe object', async () => {
@@ -304,43 +317,39 @@ describe('InfoApi request shapes', () => {
     });
   });
 
-  it('recentTrades is keyed by coin; limit rides ONLY when provided', async () => {
+  it('trades is keyed by coin; limit and window ride ONLY when provided', async () => {
     const api = new InfoApi(BASE);
-    nextData = { coin: 'BTC', last_trade_ms: 0, trades: [] };
-    await api.recentTrades('BTC');
+    nextData = { coin: 'BTC', last_trade: 0, start_time: null, end_time: null, trades: [] };
+    // Un-ranged: the recent ring, and nothing but `coin` on the wire.
+    await api.trades('BTC');
     expect(JSON.parse(captured!.body)).toEqual({
-      type: 'recent_trades',
+      type: 'trades',
       coin: 'BTC',
     });
-    await api.recentTrades('BTC', 50);
+    await api.trades('BTC', { limit: 50 });
     expect(JSON.parse(captured!.body)).toEqual({
-      type: 'recent_trades',
+      type: 'trades',
       coin: 'BTC',
       limit: 50,
     });
-  });
-
-  it('tradesByTime sends coin + start_time/end_time ONLY when provided', async () => {
-    const api = new InfoApi(BASE);
-    nextData = { coin: 'BTC', start_time: null, end_time: null, trades: [] };
-    await api.tradesByTime('BTC');
-    expect(JSON.parse(captured!.body)).toEqual({
-      type: 'trades_by_time',
-      coin: 'BTC',
+    // Ranged: the window makes it an archive-reaching ask.
+    await api.trades('BTC', {
+      startTime: 1_700_000_000_000,
+      endTime: 1_700_000_999_999,
     });
-    await api.tradesByTime('BTC', 1_700_000_000_000, 1_700_000_999_999);
     expect(JSON.parse(captured!.body)).toEqual({
-      type: 'trades_by_time',
+      type: 'trades',
       coin: 'BTC',
       start_time: 1_700_000_000_000,
       end_time: 1_700_000_999_999,
     });
   });
 
-  it('tradesByTime decodes symbol-keyed trade records', async () => {
+  it('trades decodes symbol-keyed trade records', async () => {
     const api = new InfoApi(BASE);
     nextData = {
       coin: 'BTC',
+      last_trade: 1_700_000_000_555,
       start_time: 1_700_000_000_000,
       end_time: null,
       trades: [
@@ -356,7 +365,7 @@ describe('InfoApi request shapes', () => {
         },
       ],
     };
-    const res = await api.tradesByTime('BTC', 1_700_000_000_000);
+    const res = await api.trades('BTC', { startTime: 1_700_000_000_000 });
     expect(res.trades[0]?.coin).toBe('BTC');
     expect(res.trades[0]?.side).toBe('A');
     expect(typeof res.trades[0]?.px).toBe('string');
@@ -366,7 +375,7 @@ describe('InfoApi request shapes', () => {
 
   it('userFills is keyed by 0x address only', async () => {
     const api = new InfoApi(BASE);
-    nextData = { address: ADDR, fills: [] };
+    nextData = { address: ADDR, start_time: null, end_time: null, fills: [] };
     await api.userFills(ADDR);
     expect(JSON.parse(captured!.body)).toEqual({
       type: 'user_fills',
@@ -374,12 +383,12 @@ describe('InfoApi request shapes', () => {
     });
   });
 
-  it('userFillsByTime sends address + optional window bounds', async () => {
+  it('userFills sends the window bounds ONLY when provided', async () => {
     const api = new InfoApi(BASE);
     nextData = { address: ADDR, start_time: 5, end_time: null, fills: [] };
-    await api.userFillsByTime(ADDR, 5);
+    await api.userFills(ADDR, { startTime: 5 });
     expect(JSON.parse(captured!.body)).toEqual({
-      type: 'user_fills_by_time',
+      type: 'user_fills',
       address: ADDR,
       start_time: 5,
     });
@@ -464,19 +473,6 @@ describe('InfoApi request shapes', () => {
     expect(res.samples[0]?.ts).toBe(1);
     expect(res.samples[0]?.premium).toBe('0.0057');
     expect(res.samples[0]?.funding_rate).toBe('0.0057');
-  });
-
-  it('predictedFundings unwraps the per-market array', async () => {
-    const api = new InfoApi(BASE);
-    nextData = [
-      { coin: 'BTC', predicted_rate: '0.0037', next_funding_ts: 1_783_011_600_000 },
-    ];
-    const res = await api.predictedFundings();
-    expect(JSON.parse(captured!.body)).toEqual({ type: 'predicted_fundings' });
-    expect(res[0]?.coin).toBe('BTC');
-    // Clamped, actually-charged rate as a decimal string; boundary is ms.
-    expect(typeof res[0]?.predicted_rate).toBe('string');
-    expect(res[0]?.next_funding_ts).toBe(1_783_011_600_000);
   });
 
   it('candleSnapshot is keyed by coin + interval (the single candle query)', async () => {
@@ -575,17 +571,43 @@ describe('InfoApi request shapes', () => {
     expect(bar.t).toBe(1_700_000_040_000);
   });
 
-  it('agents / subAccounts are keyed by 0x address only', async () => {
-    const api = new InfoApi(BASE);
-    nextData = { address: ADDR, agents: [] };
-    await api.agents(ADDR);
-    expect(JSON.parse(captured!.body)).toEqual({ type: 'agents', address: ADDR });
-    nextData = { address: ADDR, sub_accounts: [] };
-    await api.subAccounts(ADDR);
-    expect(JSON.parse(captured!.body)).toEqual({
-      type: 'sub_accounts',
-      address: ADDR,
-    });
+  it('the agents and sub-accounts facets ride accountOverview', async () => {
+    const api = new InfoApi(BASE) as unknown as Record<string, unknown>;
+    // Each was a strict subset of the aggregate, so each merged into it. A
+    // stale method here would make an unreachable call look reachable.
+    expect(api.agents).toBeUndefined();
+    expect(api.subAccounts).toBeUndefined();
+    expect(api.userToMultiSigSigners).toBeUndefined();
+    expect(api.userVaultEquities).toBeUndefined();
+    expect(api.delegatorSummary).toBeUndefined();
+    expect(api.userRole).toBeUndefined();
+    expect(api.webData).toBeUndefined();
+    expect(typeof api.accountOverview).toBe('function');
+  });
+
+  it('drops every read the surface cut removed', () => {
+    const api = new InfoApi(BASE) as unknown as Record<string, unknown>;
+    for (const gone of [
+      'marketInfo',
+      'recentTrades',
+      'tradesByTime',
+      'userFillsByTime',
+      'predictedFundings',
+      'spotClearinghouseState',
+      'maxMarketOrderNtls',
+      'perpsAtOpenInterestCap',
+      'leadingVaults',
+      'maxBuilderFee',
+      'spotDeployState',
+      // Operator lane: refused on the public API.
+      'protocolMetrics',
+      'rfqOpen',
+      'rfqUser',
+      'fbaBatchState',
+      'mip3DeployerOracle',
+    ]) {
+      expect(api[gone]).toBeUndefined();
+    }
   });
 
   it('activeAssetData is keyed by address + coin SYMBOL', async () => {
@@ -609,17 +631,6 @@ describe('InfoApi request shapes', () => {
     });
     expect(res.available_to_trade).toHaveLength(2);
     expect(res.max_trade_szs).toHaveLength(2);
-  });
-
-  it('maxBuilderFee is keyed by (address, builder)', async () => {
-    const api = new InfoApi(BASE);
-    nextData = { address: ADDR, builder: VAULT, max_fee_bps: 0, approved: false };
-    await api.maxBuilderFee(ADDR, VAULT);
-    expect(JSON.parse(captured!.body)).toEqual({
-      type: 'max_builder_fee',
-      address: ADDR,
-      builder: VAULT,
-    });
   });
 
   it('spotMeta re-routes to markets_meta kind=spot and unwraps its `spot`', async () => {
@@ -657,6 +668,7 @@ describe('InfoApi request shapes', () => {
             evm_contract: {
               address: '0x2222222222222222222222222222222222222222',
               evm_extra_wei_decimals: 0,
+              variant: 2,
             },
             is_canonical: true,
             system_address: '0x80abd3bd8c42d2a279e4fa00f20bb30637734371',
@@ -680,7 +692,9 @@ describe('InfoApi request shapes', () => {
     expect(res.pairs[0]?.taker_fee_bps).toBe('5');
     expect(res.tokens[0]?.wei_decimals).toBe(8);
     expect(res.tokens[0]?.is_canonical).toBe(true);
-    // evm_contract is the {address, evm_extra_wei_decimals} object.
+    // `variant` folds in from the retired `evm_contract_bindings` read.
+    expect(res.tokens[0]?.evm_contract?.variant).toBe(2);
+    // evm_contract is the {address, evm_extra_wei_decimals, variant} object.
     expect(res.tokens[0]?.evm_contract?.address).toBe(
       '0x2222222222222222222222222222222222222222',
     );
@@ -688,24 +702,6 @@ describe('InfoApi request shapes', () => {
     // spot token rows carry total_supply (perp `token` blocks carry
     // circulating_supply instead — distinct key).
     expect(res.tokens[0]?.total_supply).toBe('21000000');
-  });
-
-  it('spotClearinghouseState is keyed by 0x address (NOT `user`)', async () => {
-    const api = new InfoApi(BASE);
-    nextData = {
-      address: ADDR,
-      balances: [{ asset: 101, name: 'BTC', total: '500', hold: '10' }],
-    };
-    const res = await api.spotClearinghouseState(ADDR);
-    expect(JSON.parse(captured!.body)).toEqual({
-      type: 'spot_clearinghouse_state',
-      address: ADDR,
-    });
-    expect(res.address).toBe(ADDR);
-    expect(res.balances[0]?.asset).toBe(101);
-    // total/hold are decimal strings on the wire.
-    expect(res.balances[0]?.total).toBe('500');
-    expect(res.balances[0]?.hold).toBe('10');
   });
 
   it('raw passes an arbitrary typed body through and unwraps `data`', async () => {
@@ -724,21 +720,22 @@ describe('InfoApi request shapes', () => {
 
   it('rawEnvelope returns the full {type, data} envelope', async () => {
     const api = new InfoApi(BASE);
-    nextType = 'liquidatable';
-    nextData = { accounts: [] };
-    const env = await api.rawEnvelope({ type: 'liquidatable' });
-    expect(env.type).toBe('liquidatable');
-    expect(env.data).toEqual({ accounts: [] });
+    nextType = 'exchange_status';
+    nextData = { accepting_orders: true };
+    const env = await api.rawEnvelope({ type: 'exchange_status' });
+    expect(env.type).toBe('exchange_status');
+    expect(env.data).toEqual({ accepting_orders: true });
   });
 });
 
 describe('InfoApi deployed-gateway read shapes', () => {
-  it('marketInfo decodes coin key + margin_tiers ladder', async () => {
+  it('marketsMeta decodes coin key + margin_tiers ladder + signing_id', async () => {
     const api = new InfoApi(BASE);
-    nextType = 'market_info';
+    nextType = 'markets_meta';
     nextData = {
+      perp: [{
       coin: 'BTC',
-      asset_id: 0,
+      signing_id: 0,
       kind: 'perp',
       sz_decimals: 5,
       mark_px: '61443.6',
@@ -770,10 +767,11 @@ describe('InfoApi deployed-gateway read shapes', () => {
       open: true,
       close: true,
       strict_isolated: false,
-      halted: false,
-      impact_pxs: ['61440.2', '61446.9'],
+      risk_override: null,
+      }],
+      spot: { pairs: [], tokens: [] },
     };
-    const m = await api.marketInfo('BTC');
+    const m = (await api.marketsMeta('BTC')).perp[0]!;
     expect(m.coin).toBe('BTC');
     // sz_decimals is load-bearing for raw-lot size encoding.
     expect(m.sz_decimals).toBe(5);
@@ -784,11 +782,11 @@ describe('InfoApi deployed-gateway read shapes', () => {
     expect(m.margin_tiers[0]?.max_leverage).toBe(50);
     // maint_margin_ratio bands are bps STRINGS.
     expect(m.margin_tiers[0]?.maint_margin_ratio).toBe('100');
-    // A one-sided book DROPS the key; `mid_px` never arrives as null.
-    expect(m.mid_px).toBeUndefined();
-    // `halted` and `impact_pxs` are served here -- the union read carries both.
-    expect(m.halted).toBe(false);
-    expect(m.impact_pxs).toEqual(['61440.2', '61446.9']);
+    // The write handle is the ONE number on the read plane.
+    expect(m.signing_id).toBe(0);
+    // `null` means NO override; an object with no keys would mean an override
+    // record that overrides nothing. The two are different facts.
+    expect(m.risk_override).toBeNull();
     // Uncapped OI omits the key; an absent cap is not a cap of zero.
     expect(m.oi_cap).toBeUndefined();
   });
@@ -950,7 +948,7 @@ describe('InfoApi deployed-gateway read shapes', () => {
 
 // P2 wave-1 typed reads. Fixture VALUES mirror the node canonical wire shapes:
 // the perp fill / order / funding / ledger-union records, the account-history
-// empty-shape pins, and the pm_summary zeroed / enrolled shapes.
+// empty-shape pins.
 describe('InfoApi P2 wave-1 reads', () => {
   it('orderStatus sends exactly one of oid | cloid, and rejects neither/both', async () => {
     const api = new InfoApi(BASE);
@@ -1245,44 +1243,49 @@ describe('InfoApi P2 wave-1 reads', () => {
     expect(p.user_value).toBe('250');
   });
 
-  it('pmSummary is keyed by address; decodes enrolled + zeroed shapes', async () => {
+  it('bridgeUserOutbox carries the folded deployment rows', async () => {
     const api = new InfoApi(BASE);
-    // Enrolled: WHOLE-USDC decimal strings. The `*_cents` names this read once
-    // used are gone from the node, and the plane moved with them.
+    // A depositor with no in-flight withdrawal still gets the rows, so the
+    // retired `bridge_chain_configs` ask costs one round trip here too.
     nextData = {
-      address: ADDR,
-      enrolled: true,
-      enrolled_at: 1_784_800_000_000,
-      last_computed_block: 8_416_000,
-      pm_maint_margin: '1250',
-      pm_net_value: '5000',
-      pm_concentration_penalty: '0',
+      entries: [],
+      truncated: false,
+      withdrawals_halted: true,
+      configs: [
+        {
+          chain: 1,
+          contract_address: `0x${'0'.repeat(61)}abc`,
+          validator_quorum_threshold_bps: '6700',
+          replay_nonce: 42,
+          paused: false,
+          evm_chain_id: 8453,
+          evm_contract_address: `0x${'0'.repeat(37)}abc`,
+          validator_set_epoch: 7,
+          release_retention_ms: 0,
+          effective_release_retention_ms: 86_400_000,
+          scan_policy: {
+            confirmations_only: false,
+            confirmations: 0,
+            effective_confirmations: 5,
+            confirmations_only_depth: 0,
+            usdc_token: `0x${'0'.repeat(37)}def`,
+            raw_transfer_credit: true,
+          },
+        },
+      ],
     };
-    const res = await api.pmSummary(ADDR);
+    const res = await api.bridgeUserOutbox(ADDR);
     expect(JSON.parse(captured!.body)).toEqual({
-      type: 'pm_summary',
+      type: 'bridge_user_outbox',
       address: ADDR,
     });
-    expect(res.enrolled).toBe(true);
-    expect(res.enrolled_at).toBe(1_784_800_000_000);
-    // pm_summary and the folded `account_state` twins render the SAME three
-    // figures under the SAME names on the SAME whole-USDC plane.
-    expect(res.pm_maint_margin).toBe('1250');
-    expect(res.pm_net_value).toBe('5000');
-    expect(typeof res.pm_concentration_penalty).toBe('string');
-    // Unknown / non-enrolled → 200 zeroed with enrolled:false.
-    nextData = {
-      address: ADDR,
-      enrolled: false,
-      enrolled_at: 0,
-      last_computed_block: 0,
-      pm_maint_margin: '0',
-      pm_net_value: '0',
-      pm_concentration_penalty: '0',
-    };
-    const zero = await api.pmSummary(ADDR);
-    expect(zero.enrolled).toBe(false);
-    expect(zero.enrolled_at).toBe(0);
+    expect(res.entries).toEqual([]);
+    expect(res.withdrawals_halted).toBe(true);
+    expect(res.configs[0]?.evm_chain_id).toBe(8453);
+    expect(res.configs[0]?.validator_set_epoch).toBe(7);
+    // Read the effective window, never the 0-as-unset raw one.
+    expect(res.configs[0]?.effective_release_retention_ms).toBe(86_400_000);
+    expect(res.configs[0]?.scan_policy.effective_confirmations).toBe(5);
   });
 
   it('encodeAction posts the wire action + returns the canonical action_json', async () => {
@@ -1372,8 +1375,8 @@ describe('InfoApi realigned read shapes', () => {
       time: 1_784_820_001_000,
     };
     const res = await api.accountState(ADDR);
-    // The core dex key is the empty string and is always present.
-    const core = res.clearinghouse_state['']!;
+    // The core dex key is the empty string and is always present at full depth.
+    const core = res.clearinghouse_state!['']!;
     const pos = core.positions[0]!;
     // A POSITION size key is `size` and is SIGNED. Order / book / trade rows
     // use `sz` instead — the two are deliberately different.
@@ -1383,11 +1386,11 @@ describe('InfoApi realigned read shapes', () => {
     expect(pos.side).toBeUndefined();
     // A MIP-3 deployer dex keys by the deployer address.
     expect(
-      res.clearinghouse_state['0x00000000000000000000000000000000000000cc'],
+      res.clearinghouse_state!['0x00000000000000000000000000000000000000cc'],
     ).toBeDefined();
-    // Balances are an ARRAY of token rows, USDC first.
-    expect(res.balances[0]?.name).toBe('USDC');
-    expect(res.balances[1]?.asset).toBe(7);
+    // Balances are the WHOLE token ledger, an ARRAY of rows, USDC first.
+    expect(res.balances![0]?.name).toBe('USDC');
+    expect(res.balances![1]?.asset).toBe(7);
     // The folded PM figures are whole-USDC and always present.
     expect(res.pm_maint_margin).toBe('0');
     expect(res.pm_net_value).toBe('0');
@@ -1459,7 +1462,7 @@ describe('InfoApi realigned read shapes', () => {
     };
     const res = await api.accountState(ADDR);
     // A hedge leg label is "long" / "short" — NOT the "B" / "A" side token.
-    expect(res.clearinghouse_state['']?.positions[0]?.side).toBe('long');
+    expect(res.clearinghouse_state?.['']?.positions[0]?.side).toBe('long');
   });
 
   it('vaultState renders share_price on the human plane and keeps lock_period_ms', async () => {
@@ -1489,18 +1492,22 @@ describe('InfoApi realigned read shapes', () => {
     expect(res.lock_period_ms).toBe(86_400_000);
   });
 
-  it('marketInfo keeps the funding interval_ms duration and the _ts boundary', async () => {
+  it('markets keeps the funding interval_ms duration and the _ts boundary', async () => {
     const api = new InfoApi(BASE);
+    nextType = 'markets';
     nextData = {
-      coin: 'BTC',
-      funding: {
-        rate_per_hr: '1',
-        cap_per_hr: '4',
-        interval_ms: 3_600_000,
-        next_payment_ts: 1_783_011_600_000,
-      },
+      perp: [{
+        coin: 'BTC',
+        funding: {
+          rate_per_hr: '1',
+          cap_per_hr: '4',
+          interval_ms: 3_600_000,
+          next_payment_ts: 1_783_011_600_000,
+        },
+      }],
+      spot: { pairs: [], tokens: [] },
     };
-    const res = await api.marketInfo('BTC');
+    const res = (await api.markets('BTC')).perp[0]!;
     // A DURATION keeps `_ms`; only timestamps dropped the suffix.
     expect(res.funding.interval_ms).toBe(3_600_000);
     expect(res.funding.next_payment_ts).toBe(1_783_011_600_000);
@@ -1520,16 +1527,32 @@ describe('InfoApi realigned read shapes', () => {
 
     nextData = {
       address: ADDR,
+      vault: { equities: [], vaults: [] },
+      staking: {
+        state: { total_staked: '0', delegations: [], pending_unstakes: [] },
+        summary: {
+          total_delegated: '0',
+          pending_withdrawal: '0',
+          claimable_rewards: '0',
+          n_delegations: 0,
+        },
+      },
+      sub_accounts: [],
+      multisig: { is_multi_sig: false, threshold: 0, signers: [] },
       agents: [{ agent: ADDR, name: 'bot', expires_at: null }],
+      height: 8_416_000,
+      time: 1_784_820_001_000,
     };
-    expect((await api.agents(ADDR)).agents[0]?.expires_at).toBeNull();
+    expect((await api.accountOverview(ADDR)).agents[0]?.expires_at).toBeNull();
 
     nextData = {
       coin: 'BTC',
       last_trade: 1_784_820_001_000,
+      start_time: null,
+      end_time: null,
       trades: [],
     };
-    expect((await api.recentTrades('BTC')).last_trade).toBe(1_784_820_001_000);
+    expect((await api.trades('BTC')).last_trade).toBe(1_784_820_001_000);
 
     nextData = {
       auction_round: 3,
@@ -1567,7 +1590,7 @@ describe('InfoApi realigned read shapes', () => {
       total_burned: '0',
       deposit: '0',
     };
-    const deploy = await api.spotDeployState();
+    const deploy = await api.spotDeployAuction();
     expect(deploy.auction_end).toBe(1_784_900_000_000);
     expect(deploy.started_at).toBe(1_784_800_000_000);
 
@@ -1599,36 +1622,64 @@ describe('InfoApi realigned read shapes', () => {
     expect(vs.validators[0]?.unjail_at).toBeNull();
   });
 
-  it('spotClearinghouseState still serves the REST read and carries the stamp', async () => {
+  it('accountState.balances carries the optional avg_entry_px cost basis', async () => {
     const api = new InfoApi(BASE);
     nextData = {
       address: ADDR,
-      balances: [{ asset: 0, name: 'USDC', total: '10', hold: '0' }],
-      height: 8_416_000,
-      time: 1_784_820_001_000,
-    };
-    const res = await api.spotClearinghouseState(ADDR);
-    // Only the WS `spot_state` CHANNEL was removed; this REST read stays.
-    expect(res.balances[0]?.name).toBe('USDC');
-    expect(res.height).toBe(8_416_000);
-  });
-
-  it('spotClearinghouseState carries the optional avg_entry_px cost basis', async () => {
-    const api = new InfoApi(BASE);
-    nextData = {
-      address: ADDR,
+      account_value: '0',
+      withdrawable: '0',
+      init_margin: '0',
+      health: '0',
+      tier: 'Safe',
+      abstraction: 'unified',
+      position_mode: 'one_way',
+      clearinghouse_state: { '': { positions: [] } },
       balances: [
         // Deposited / pre-basis holding: no entry recorded, so no key.
         { asset: 100, name: 'USDC', total: '390548', hold: '390548' },
         { asset: 104, name: 'MTF', total: '10000039.5196599', hold: '3000000', avg_entry_px: '412.5' },
       ],
+      pm_maint_margin: '0',
+      pm_net_value: '0',
+      pm_concentration_penalty: '0',
       height: 6_845_318,
       time: 1_786_164_224_330,
     };
-    const res = await api.spotClearinghouseState(ADDR);
+    const res = await api.accountState(ADDR);
     // Absent means UNKNOWN, never zero -- a deposit writes no basis at all.
-    expect(res.balances[0]?.avg_entry_px).toBeUndefined();
-    expect(res.balances[1]?.avg_entry_px).toBe('412.5');
+    expect(res.balances![0]?.avg_entry_px).toBeUndefined();
+    expect(res.balances![1]?.avg_entry_px).toBe('412.5');
+  });
+
+  it('accountState margin depth adds maint_margin and drops the walks', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      address: ADDR,
+      account_value: '100',
+      withdrawable: '10',
+      init_margin: '20',
+      maint_margin: '15',
+      health: '85',
+      tier: 'Safe',
+      abstraction: 'unified',
+      position_mode: 'one_way',
+      pm_maint_margin: '0',
+      pm_net_value: '0',
+      pm_concentration_penalty: '0',
+      height: 8_416_000,
+      time: 1_784_820_001_000,
+    };
+    const res = await api.accountState(ADDR, 'margin');
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'account_state',
+      address: ADDR,
+      detail: 'margin',
+    });
+    // `maint_margin` is served at THIS depth only.
+    expect(res.maint_margin).toBe('15');
+    // The walks are skipped, so both collections are absent, not empty-wrong.
+    expect(res.clearinghouse_state).toBeUndefined();
+    expect(res.balances).toBeUndefined();
   });
 
   it('drops the frontend_open_orders method', () => {

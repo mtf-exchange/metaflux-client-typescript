@@ -34,17 +34,23 @@ const client = new Client({
 // Market reads are keyed by `coin` (the market SYMBOL, e.g. "BTC"); account
 // reads by 0x `address`. Numeric market_id/asset_id/account_id params are gone
 // from the read surface (the signed /exchange action plane keeps numeric ids).
-const markets = await client.info.markets(); // { perp: MarketInfo[], spot: SpotMeta }
+const markets = await client.info.markets(); // { perp: MarketDynamic[], spot: SpotMeta }
 console.log(markets.perp.map((m) => `${m.coin} @ ${m.mark_px}`));
 
-// Per-market margin ladder is inline on markets / market_info as margin_tiers
+// Per-market margin ladder is inline on markets_meta as margin_tiers
 // (upper-bound OI bands; the top band has max_open_interest: null).
-const btc = await client.info.marketInfo('BTC');
+// One market, one round trip, same shape: `coin` narrows the rows.
+const btc = (await client.info.marketsMeta('BTC')).perp[0];
 console.log(btc.margin_tiers);
 
 const book = await client.info.l2Book('BTC');
-const trades = await client.info.tradesByTime('BTC', Date.now() - 3_600_000);
-const funding = await client.info.predictedFundings();
+// `trades` answers both asks: no window = the recent ring, a window reaches
+// the archive.
+const trades = await client.info.trades('BTC', {
+  startTime: Date.now() - 3_600_000,
+});
+// The charged funding rate and its next boundary ride each `markets` row.
+const funding = markets.perp.map((m) => m.funding);
 // Price bars. The 5th argument picks the series: 'mark' (the default, perp and
 // spot) or 'oracle' (perp only). The executed-trade candle is RETIRED — a bar
 // folds a PRICE series, so v/q are always "0" and n is a sample count.
@@ -173,7 +179,8 @@ id**. Prices ride the 1e8 plane. All three time-in-force values work: `ioc` drop
 the residual, `gtc` and `alo` rest it with escrow. Discover pairs with
 `client.info.spotMeta()`, trade with `submitSpotOrderNative` /
 `cancelSpotOrderNative`, and read balances back with
-`client.info.spotClearinghouseState(address)`.
+`client.info.accountState(address)` — its `balances` array is the whole token
+ledger, USDC and spot tokens alike.
 
 Both spot actions take an optional `owner`. Set it and an **approved agent** of
 that account places or cancels AS the owner; leave it off and the signer trades
@@ -197,11 +204,11 @@ const spotAck = await client.submitSpotOrderNative({
   stp_mode: 'cancel_oldest',
 });
 
-// 3. Read balances back.
-const spotBals = await client.info.spotClearinghouseState(
+// 3. Read balances back — one read for the whole token ledger.
+const acct = await client.info.accountState(
   '0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025',
 );
-for (const b of spotBals.balances) console.log(b.name, b.asset, b.balance);
+for (const b of acct.balances ?? []) console.log(b.name, b.asset, b.total);
 
 // 4. Cancel a resting order by oid.
 await client.cancelSpotOrderNative({ pair: pair.id, oid: 7 });
@@ -329,18 +336,21 @@ out-of-band signing.
 
 ### WebSocket streams
 
-The gateway serves 22 native snake_case channels: `l2_book`, `bbo`, `trades`,
-`active_asset_ctx`, `all_mids`, `markets`, `explorer_block`, `explorer_txs`,
-`candles`, `fills`, `user_events`, `order_updates`, `open_orders`,
-`notifications`, `ledger_updates`, `user_fundings`, `user_twap_slice_fills`,
-`user_twap_history`, `account_state`, `web_data`, `spot_margin_state`, and
-`active_asset_data`. Per-market channels take `coin` (the market symbol);
-per-account channels take `user` (0x address).
+The gateway serves 18 native snake_case channels: `l2_book`, `bbo`, `trades`,
+`markets`, `explorer_block`, `explorer_txs`, `candles`, `fills`,
+`order_updates`, `open_orders`, `notifications`, `ledger_updates`,
+`user_fundings`, `user_twap_slice_fills`, `user_twap_history`,
+`account_state`, `spot_margin_state`, and `active_asset_data`. Per-market
+channels take `coin` (the market symbol); per-account channels take `user`
+(0x address).
 
-`web_data2` and `spot_state` were both removed. Compose `account_state` +
-`web_data` instead. The REST `spot_clearinghouse_state` read still works, but
-note that `account_state.balances` skips an all-zero token row, which
-`spot_state` used to emit.
+RETIRED, and refused with the error envelope: `web_data2`, `spot_state`,
+`web_data`, `all_mids`, `active_asset_ctx` and `user_events`. Each duplicated
+a channel that is still here, so a client had to pick and a wrong pick was
+silent. Subscribe to `markets` for what `all_mids` and `active_asset_ctx`
+carried; to `fills` / `order_updates` / `ledger_updates` / `notifications` for
+what `user_events` carried; poll the REST `account_state` `detail: "overview"`
+read for what `web_data` carried.
 
 Each frame carries an `is_snapshot` flag: `true` marks an on-subscribe full
 snapshot, `false` or absent marks a delta. The `candles` channel is the
@@ -374,9 +384,6 @@ list; the notes below cover the shapes that most often surprise people.
 - `user_fundings` records are `{coin, usdc, szi, funding_rate, time}`. `coin` is
   the market SYMBOL and `usdc` is the signed payment — the SAME key the REST
   `user_funding` history uses, so you can seed from REST and merge live deltas.
-- `active_asset_ctx` nests every metric under `ctx`: `{coin, ctx: {mark_px,
-  oracle_px, mid_px?, premium, day_ntl_vlm, prev_day_px, change_24h, funding,
-  open_interest, px_stale?}}`.
 - `l2_book` carries `{coin, levels: [bids, asks], time}` and spells the
   per-level order count `n`. The REST `l2_book` read instead returns flat
   `bids` / `asks` and spells that count `n_orders`.

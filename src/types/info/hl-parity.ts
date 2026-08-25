@@ -7,7 +7,6 @@
 import type {
   MarketDynamic,
   MarketStatic,
-  TokenBalance,
   TokenEvmContract,
 } from './core.js';
 
@@ -81,7 +80,7 @@ export interface SpotMeta {
 /// `markets` — the DYNAMIC market universe: live price / funding / OI for every
 /// perp, plus the spot pair/token registry.
 ///
-/// The perp rows are `MarketDynamic`, NOT `MarketInfo`. This read serves no
+/// The perp rows are `MarketDynamic`, NOT `MarketStatic`. This read serves no
 /// precision grid, no leverage ladder and no trade-control flag; read
 /// `marketsMeta()` for those and merge by `coin`. The `spot` sub-object is
 /// identical in both reads.
@@ -100,41 +99,6 @@ export interface MarketsMeta {
   perp: MarketStatic[];
   /// Spot universe (same object as the `markets` read).
   spot: SpotMeta;
-}
-
-/// One spot balance inside `SpotClearinghouseState`.
-///
-/// The `{asset, name, total, hold}` row `account_state.balances` carries, plus
-/// the spot cost basis — which `account_state` does NOT serve.
-export interface SpotBalance extends TokenBalance {
-  /// Weighted-average acquisition cost, whole USDC PER WHOLE TOKEN. A price,
-  /// not a total: `(mark_px - avg_entry_px) * total` is the unrealized spot
-  /// PnL. `total` includes the part held behind resting orders, so multiply by
-  /// the quantity you mean rather than one the server picked for you.
-  ///
-  /// `null` means UNKNOWN, never zero. The chain rolls the basis on spot BUYS
-  /// only — a sell keeps the standing per-unit average, and a deposit (bridge
-  /// credit, Core⇄EVM credit, spot transfer, governance adjustment) writes no
-  /// basis at all. A holding that arrived by any of those paths has no entry,
-  /// and the wire says `null` rather than a plausible wrong number.
-  avg_entry_px?: string | null;
-}
-
-/// `spot_clearinghouse_state` — per-account spot token balances. With
-/// `account_state` this replaces the removed `web_data2` composite.
-///
-/// The WS `spot_state` channel that used to mirror this read is GONE. Read the
-/// balances from `account_state` instead; note that `account_state.balances`
-/// skips an all-zero token row, which `spot_state` used to emit.
-export interface SpotClearinghouseState {
-  /// Echo of the requested 0x address.
-  address: string;
-  /// Spot balances.
-  balances: SpotBalance[];
-  /// Committed block height of the snapshot.
-  height: number;
-  /// Consensus timestamp of that block (unix ms).
-  time: number;
 }
 
 /// `exchange_status` — global trading status.
@@ -164,22 +128,10 @@ export interface ExchangeStatus {
   replay_complete?: boolean;
 }
 
-/// One account flagged for liquidation.
-export interface LiquidatableAccount {
-  /// Needs-action account address (0x).
-  address: string;
-  /// BOLE tier.
-  tier: 'YellowCard' | 'PartialMarket50' | 'FullMarket' | 'BackstopTakeover';
-}
 
-/// `liquidatable` — accounts currently flagged for liquidation.
-export interface Liquidatable {
-  /// Flagged accounts.
-  accounts: LiquidatableAccount[];
-}
 
 /// `active_asset_data` — a user's per-asset leverage / margin-mode / tradeable
-/// size, keyed by `(address, coin)`. The WS `active_asset_ctx` sibling carries
+/// size, keyed by `(address, coin)`. The WS `markets` channel carries
 /// market-wide context; this read is account-scoped.
 ///
 /// The `[buy, sell]` pairs: `available_to_trade` is the per-side NOTIONAL
@@ -211,23 +163,10 @@ export interface ActiveAssetData {
   has_position: boolean;
 }
 
-/// One per-asset max market-order notional entry.
-export interface MaxMarketOrderNtl {
-  /// Market symbol.
-  coin: string;
-  /// OI-cap-derived size ceiling, decimal string.
-  /// Max market-order notional, or `null` when uncapped. Same sentinel change as
-  /// `max_trade_size`.
-  max_market_order_ntl: string | null;
-}
-
-/// `max_market_order_ntls` — per-asset max market-order notional.
-export interface MaxMarketOrderNtls {
-  /// Per-asset ceilings.
-  ntls: MaxMarketOrderNtl[];
-}
-
-/// One vault summary row (shared by `vault_summaries` / `leading_vaults`).
+/// One vault summary row of `vault_summaries`.
+///
+/// Every vault appears, and each row names its `leader`. To list the vaults ONE
+/// address leads, filter these rows on `leader`; there is no per-leader read.
 export interface VaultSummary {
   /// Vault id.
   id: number;
@@ -251,7 +190,7 @@ export interface VaultSummaries {
   vaults: VaultSummary[];
 }
 
-/// One vault equity entry inside `UserVaultEquities`.
+/// One vault equity entry inside `AccountOverview.vault.equities`.
 export interface VaultEquity {
   /// Vault id.
   vault_id: number;
@@ -266,22 +205,6 @@ export interface VaultEquity {
   equity: string;
 }
 
-/// `user_vault_equities` — vaults a user has deposited into + share / equity.
-export interface UserVaultEquities {
-  /// Echo of the requested 0x address.
-  address: string;
-  /// Per-vault equities.
-  equities: VaultEquity[];
-}
-
-/// `leading_vaults` — vaults led by the user (reuses `VaultSummary` rows).
-export interface LeadingVaults {
-  /// Echo of the requested 0x address.
-  address: string;
-  /// Vault summary rows led by the user.
-  vaults: VaultSummary[];
-}
-
 /// `user_rate_limit` — a user's action stats / rate-limit budget.
 export interface UserRateLimit {
   /// Echo of the requested 0x address.
@@ -294,8 +217,11 @@ export interface UserRateLimit {
   lifetime_count: number;
 }
 
-/// `spot_deploy_state` — MIP-1 spot-pair-deploy gas-auction state.
-export interface SpotDeployState {
+/// `spot_deploy_auction` — MIP-1 spot-pair-deploy gas-auction state.
+///
+/// The node answers this read under the older name `spot_deploy_state` until
+/// the release that ships the rename. Same body either way.
+export interface SpotDeployAuction {
   /// Current round.
   auction_round: number;
   /// Leading bid, decimal string.
@@ -312,7 +238,12 @@ export interface SpotDeployState {
   deposit: string;
 }
 
-/// `delegator_summary` — staking summary for an address.
+/// The aggregate staking totals inside `AccountOverview.staking.summary`.
+///
+/// The three balances are DISJOINT — add them for the whole staked holding.
+/// `undelegated` (on `StakingState`) is the free pool a `token_delegate` draws
+/// from, and the only one `staking_withdraw` returns to spot with no unbonding
+/// window.
 export interface DelegatorSummary {
   /// Echo of the requested 0x address.
   address: string;
@@ -324,45 +255,6 @@ export interface DelegatorSummary {
   claimable_rewards: string;
   /// Number of active delegations.
   n_delegations: number;
-}
-
-/// `max_builder_fee` — approved builder-fee ceiling for `(address, builder)`.
-export interface MaxBuilderFee {
-  /// Echo of the requested 0x address.
-  address: string;
-  /// Echo of the requested builder 0x address.
-  builder: string;
-  /// Approved bps ceiling; `0` if not approved.
-  /** Approved bps ceiling, whole basis points as a decimal string. */
-  max_fee_bps: string;
-  /// Whether `(address, builder)` is an approved pair.
-  approved: boolean;
-}
-
-/// `user_to_multi_sig_signers` — multisig config for an address.
-export interface UserToMultiSigSigners {
-  /// Echo of the requested 0x address.
-  address: string;
-  /// Whether the account is multisig.
-  is_multi_sig: boolean;
-  /// M-of-N threshold; `0` if not multisig.
-  threshold: number;
-  /// Signer set (0x addresses); empty if not multisig.
-  signers: string[];
-}
-
-/// `user_role` — derived account role.
-export interface UserRole {
-  /// Echo of the requested 0x address.
-  address: string;
-  /// Derived role.
-  role: 'missing' | 'user' | 'agent' | 'vault' | 'sub_account';
-}
-
-/// `perps_at_open_interest_cap` — assets whose OI is at/over the cap.
-export interface PerpsAtOpenInterestCap {
-  /// Market symbols at/over their OI cap.
-  assets: string[];
 }
 
 /// One validator L1 vote.
@@ -383,7 +275,7 @@ export interface ValidatorL1Votes {
   votes: ValidatorL1Vote[];
 }
 
-/// One perp DEX entry.
+/// One perp DEX entry inside `PerpDexs.dexs`.
 export interface PerpDex {
   /// DEX index in the exchange's perp-dex list.
   index: number;
@@ -393,10 +285,49 @@ export interface PerpDex {
   assets: string[];
 }
 
-/// `perp_dexs` — list the perp DEX(es).
+/// `perp_dexs` — the perp DEX(es) plus the governed deploy limits.
 export interface PerpDexs {
   /// Perp DEXes.
   dexs: PerpDex[];
+  /// The governance-set MIP-3 deploy and per-market limits. Absent on a node
+  /// that predates the merge of the old `perp_dex_limits` read.
+  limits?: PerpDexLimits;
+}
+
+/// The governance-set MIP-3 deploy and per-market limits, inside `PerpDexs`.
+///
+/// The unit planes are load-bearing and deliberately explicit in the names.
+export interface PerpDexLimits {
+  /// Permissionless (MIP-3) perp deploy enabled.
+  mip3_enabled: boolean;
+  /// Deployer SELF-STAKE floor, MTF base units as a decimal string.
+  min_deploy_stake_base: string;
+  /// Permissionless-deploy staking BOND, whole-MTF decimal string. An
+  /// independent governance knob from `min_deploy_stake_base` — two
+  /// thresholds, not one value on two planes.
+  min_deploy_stake_mtf: string;
+  /// Deploy gas-auction minimum bid, whole-USDC decimal string.
+  gas_auction_min_bid: string;
+  /// Gas-auction window length, in blocks.
+  auction_duration_blocks: number;
+  /// Ceiling on the per-market deployer fee share, whole bps decimal string.
+  deployer_fee_cap_bps: string;
+  /// Dutch-auction start-price multiplier over the minimum bid.
+  dutch_start_multiplier: string;
+  /// Per-market ceilings.
+  per_market_limits: PerpDexPerMarketLimits;
+}
+
+/// The per-market ceilings inside `PerpDexLimits`.
+export interface PerpDexPerMarketLimits {
+  /// Per-market open-interest cap, size base units as a decimal string.
+  max_oi: string;
+  /// Max leverage a deployed market may offer.
+  max_leverage: number;
+  /// Per-market taker-fee ceiling, decimal bps string.
+  max_taker_fee_bps: string;
+  /// Per-market open-interest growth-rate cap, size base units per second.
+  max_oi_per_second: string;
 }
 
 /// One validator summary row.

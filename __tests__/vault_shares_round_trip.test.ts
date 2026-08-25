@@ -18,7 +18,6 @@ import {
   type VaultWithdraw,
 } from '../src/types/vault.js';
 import type { VaultEquity } from '../src/types/info/hl-parity.js';
-import type { ProtocolMetrics } from '../src/types/info/core.js';
 import type { Client } from '../src/client.js';
 import { InfoApi } from '../src/rest/info.js';
 
@@ -225,7 +224,19 @@ describe('a raw field parsed from a response carries its plane', () => {
     globalThis.fetch = realFetch;
   });
 
-  async function readMetrics(): Promise<ProtocolMetrics> {
+  /// The operator-lane `protocol_metrics` shape this test parses. It is NOT
+  /// exported by the SDK: the read is refused on the public API, so a caller
+  /// that reaches it goes through `raw<T>()` with its own type — which is
+  /// exactly what this test demonstrates.
+  interface OperatorMetrics {
+    evm?: {
+      native_balance_wei: Raw1e18;
+      n_nonzero_holders: number;
+      n_accounts: number;
+    };
+  }
+
+  async function readMetrics(): Promise<OperatorMetrics> {
     globalThis.fetch = (async (_url: string, init: RequestInit) => {
       const reqType = JSON.parse(String(init.body)).type as string;
       return {
@@ -245,7 +256,7 @@ describe('a raw field parsed from a response carries its plane', () => {
       } as Response;
     }) as typeof fetch;
     const api = new InfoApi('http://localhost:8080');
-    return api.raw<ProtocolMetrics>({ type: 'protocol_metrics' });
+    return api.raw<OperatorMetrics>({ type: 'protocol_metrics' });
   }
 
   it('brands the wei balance without the caller tagging it', async () => {

@@ -64,7 +64,7 @@ export function wireToPx(wirePx: U64Input): string {
 }
 
 /// Human decimal size -> wire `size` `bigint`, scaled by the market's
-/// `sz_decimals` (from /info `MarketInfo.sz_decimals`).
+/// `sz_decimals` (from /info `MarketStatic.sz_decimals`).
 export function szToWire(humanSize: string | number, szDecimals: number): bigint {
   return decimalToScaled(humanSize, szDecimals);
 }
@@ -84,7 +84,7 @@ export function wireToSz(wireSize: U64Input, szDecimals: number): string {
 // decimals but does NOT snap to the tick / lot grid — these helpers do, so a
 // human price/size becomes a grid-valid wire value the node accepts.
 //
-// PLANE BRIDGE. The market grid spec is read off `/info` `MarketInfo`:
+// PLANE BRIDGE. The market grid spec is read off `/info` `MarketStatic`:
 // `tick_size` is a whole-USDC decimal ("0.01"), while the wire `limit_px` rides
 // the 1e8 plane — so price snaps in the shared 1e8 integer plane. `step_size` /
 // `min_order` are size-plane decimals ("0.001"), matching the wire `size` plane
@@ -92,7 +92,7 @@ export function wireToSz(wireSize: U64Input, szDecimals: number): string {
 // the result never exceeds the input.
 
 /// The per-market precision grid the node enforces on order ingress. The shape
-/// is a structural subset of `/info` `MarketInfo`, so a `MarketInfo` can be
+/// is a structural subset of `/info` `MarketStatic`, so a `MarketStatic` can be
 /// passed directly.
 export interface MarketGrid {
   /// Price tick (smallest increment), whole-USDC decimal string ("0.01").

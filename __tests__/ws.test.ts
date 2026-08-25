@@ -192,19 +192,16 @@ describe('WsClient wire protocol', () => {
     ws.close();
   });
 
-  it('exposes the exact 21 native gateway channel names (spot_state GONE)', () => {
+  it('exposes the native gateway channel names, and no retired one', () => {
     expect([...WS_CHANNELS]).toEqual([
       'l2_book',
       'bbo',
       'trades',
-      'active_asset_ctx',
-      'all_mids',
       'markets',
       'explorer_block',
       'explorer_txs',
       'candles',
       'fills',
-      'user_events',
       'order_updates',
       'open_orders',
       'notifications',
@@ -216,13 +213,25 @@ describe('WsClient wire protocol', () => {
       'spot_margin_state',
       'active_asset_data',
     ]);
-    expect(WS_CHANNELS).toHaveLength(21);
+    expect(WS_CHANNELS).toHaveLength(18);
     expect(WS_CHANNELS).toContain('spot_margin_state');
     // All removed server-side: a subscribe answers with the error envelope.
-    // The REST `web_data` read keeps serving.
-    expect(WS_CHANNELS).not.toContain('web_data');
-    expect(WS_CHANNELS).not.toContain('web_data2');
-    expect(WS_CHANNELS).not.toContain('spot_state');
+    // Each retired one duplicated a channel above, so a client had to pick and
+    // a wrong pick was silent. `markets` carries what `all_mids` and
+    // `active_asset_ctx` carried; `fills` / `order_updates` / `ledger_updates`
+    // / `notifications` carry what `user_events` carried; the REST
+    // `account_state` `detail: "overview"` read carries what `web_data`
+    // carried.
+    for (const retired of [
+      'web_data',
+      'web_data2',
+      'spot_state',
+      'all_mids',
+      'active_asset_ctx',
+      'user_events',
+    ]) {
+      expect(WS_CHANNELS).not.toContain(retired);
+    }
   });
 
   it('subscribes to the per-account spot_margin_state channel by `user`', async () => {
@@ -279,10 +288,6 @@ describe('WsClient wire protocol', () => {
     await ws.subscribeCandles('ETH', '5m', 'oracle');
     expect(sock.sent).toContain(
       '{"method":"subscribe","subscription":{"type":"candles","coin":"ETH","interval":"5m","candle_type":"oracle"}}',
-    );
-    await ws.subscribeAllMids();
-    expect(sock.sent).toContain(
-      '{"method":"subscribe","subscription":{"type":"all_mids"}}',
     );
     await ws.subscribeExplorerBlock();
     expect(sock.sent).toContain(
@@ -567,50 +572,6 @@ describe('WS channel body decode', () => {
     expect(r.time).toBe(1_784_820_001_998);
   });
 
-  it('active_asset_ctx nests every metric under `ctx`', async () => {
-    const f = await inbound(
-      '{"channel":"active_asset_ctx","data":{"coin":"BTC","ctx":{' +
-        '"mark_px":"25000.00","oracle_px":"24999.50","mid_px":"25000.25",' +
-        '"premium":"0.00012500","day_ntl_vlm":"1250000.5",' +
-        '"prev_day_px":"24000.00","change_24h":"0.0416",' +
-        '"funding":{"rate_per_hr":"1.25","cap_per_hr":"400",' +
-        '"interval_ms":3600000,"next_payment_ts":1784823600000},' +
-        '"open_interest":"812.35"}}}',
-    );
-    if (!isChannelFrame(f, 'active_asset_ctx')) throw new Error('narrow failed');
-    expect(f.data.coin).toBe('BTC');
-    // Flat reads are gone — every metric hangs off `ctx`.
-    expect(f.data.ctx.mark_px).toBe('25000.00');
-    expect(f.data.ctx.oracle_px).toBe('24999.50');
-    expect(f.data.ctx.mid_px).toBe('25000.25');
-    expect(f.data.ctx.premium).toBe('0.00012500');
-    expect(f.data.ctx.day_ntl_vlm).toBe('1250000.5');
-    expect(f.data.ctx.prev_day_px).toBe('24000.00');
-    expect(f.data.ctx.change_24h).toBe('0.0416');
-    expect(f.data.ctx.open_interest).toBe('812.35');
-    expect(f.data.ctx.funding?.interval_ms).toBe(3_600_000);
-    // A healthy market omits the staleness marker.
-    expect(f.data.ctx.px_stale).toBeUndefined();
-  });
-
-  it('active_asset_ctx keeps the nullable + conditional ctx members', async () => {
-    // Unknown / one-sided market: null funding, null mid, null 24h reference,
-    // and the stale marker present.
-    const f = await inbound(
-      '{"channel":"active_asset_ctx","data":{"coin":"NEW","ctx":{' +
-        '"mark_px":"0","oracle_px":"0","px_stale":true,"mid_px":null,' +
-        '"premium":null,"day_ntl_vlm":"0","prev_day_px":null,' +
-        '"change_24h":null,"funding":null,"open_interest":"0"}}}',
-    );
-    if (!isChannelFrame(f, 'active_asset_ctx')) throw new Error('narrow failed');
-    expect(f.data.ctx.px_stale).toBe(true);
-    expect(f.data.ctx.mid_px).toBeNull();
-    expect(f.data.ctx.premium).toBeNull();
-    expect(f.data.ctx.prev_day_px).toBeNull();
-    expect(f.data.ctx.change_24h).toBeNull();
-    expect(f.data.ctx.funding).toBeNull();
-  });
-
   it('candles decodes the gateway envelope and the node bar separately', async () => {
     const gw = await inbound(
       '{"channel":"candles","data":{"snapshot":true,"candles":[{' +
@@ -671,7 +632,7 @@ describe('WS channel body decode', () => {
     );
     if (!isChannelFrame(f, 'account_state')) throw new Error('narrow failed');
     // The core dex key is the EMPTY STRING; positions are grouped by dex.
-    expect(f.data.clearinghouse_state['']?.positions).toEqual([]);
+    expect(f.data.clearinghouse_state?.['']?.positions).toEqual([]);
     // A deferred account reports maint 0 for want of a price — `tier` and
     // `health` are then not solvency statements.
     expect(f.data.health_deferred).toBe(true);
@@ -746,17 +707,6 @@ describe('WS channel body decode', () => {
     expect(spot!.prev_day_px).toBe('0.11');
     expect(spot!.oracle_px).toBeUndefined();
     expect(spot!.funding).toBeUndefined();
-  });
-
-  it('user_events wraps the fill legs under a tagged `fills` key', async () => {
-    const f = await inbound(
-      '{"channel":"user_events","data":{"fills":[{"coin":"BTC","side":"B",' +
-        '"px":"25000","sz":"0.5","time":1784820001000,"oid":42,"cloid":null,' +
-        '"tid":7,"crossed":true,"block":8416000,"hash":"0xabc"}]}}',
-    );
-    if (!isChannelFrame(f, 'user_events')) throw new Error('narrow failed');
-    expect(f.data.fills[0]!.crossed).toBe(true);
-    expect(f.data.fills[0]!.oid).toBe(42);
   });
 
   it('notifications tags each record by `kind`', async () => {
@@ -910,12 +860,6 @@ describe('WS channel body decode', () => {
 
   it('WsChannelData wires the channels that reuse an existing DTO', async () => {
     // One read per channel, so a wrong map entry fails the typecheck gate.
-    const mids = await inbound(
-      '{"channel":"all_mids","data":{"mids":{"BTC":"25000","MTF":"0.12126"}}}',
-    );
-    if (!isChannelFrame(mids, 'all_mids')) throw new Error('narrow failed');
-    expect(mids.data.mids['BTC']).toBe('25000');
-
     const trades = await inbound(
       '{"channel":"trades","data":[{"coin":"BTC","side":"B","px":"25000",' +
         '"sz":"0.5","time":1784820001000,"tid":7,' +

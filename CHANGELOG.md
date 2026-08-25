@@ -6,6 +6,26 @@ All notable changes to the TypeScript SDK are documented here.
 
 ### Removed
 
+- **Breaking: five `/info` reads are deleted.** The official surface gives each
+  question exactly ONE read, so a read that duplicated or narrowed another is
+  gone. There is no deprecation window.
+
+  - `pm_summary` / `info().pmSummary()` / the `PmSummary` type — read
+    `accountState()`. It serves `pm_maint_margin`, `pm_net_value` and
+    `pm_concentration_penalty` on the same plane. The figures are meaningful
+    when `abstraction === 'portfolio'`.
+  - `bridge_chain_configs` / `info().bridgeChainConfigs()` / the
+    `BridgeChainConfigs` type — read `info().bridgeUserOutbox()`.
+    `BridgeUserOutbox` now carries `withdrawals_halted` and `configs`. The rows
+    DEFINE the `message_id` the entries carry, so one read serves both. An
+    address with no withdrawal gets the rows and an empty `entries`.
+  - `account_overview` — `info().accountOverview()` keeps its name and its
+    `AccountOverview` shape, but now posts `account_state` with
+    `detail: 'overview'`.
+  - `evm_contract_bindings` — the SDK never typed it. Its `variant` tag folds
+    into `TokenEvmContract` on the `markets_meta` token rows.
+  - `oracle_sources` — the SDK never typed it.
+
 - **Breaking: the WS `web_data` channel is retired.** `WsChannel` no longer
   names it, `WS_CHANNELS` no longer lists it, `subscribeWebData()` is gone, and
   the `WsWebData` payload type is gone. `WS_CHANNELS` now holds 21 names.

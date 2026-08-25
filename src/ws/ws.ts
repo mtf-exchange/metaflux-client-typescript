@@ -13,8 +13,8 @@
 //     {"channel":"l2_book","data":{...}} | {"channel":"error","data":{"error":"..."}}
 //
 // Channel names are the EXACT server wire strings — snake_case MTF-native
-// (`l2_book`, `user_events`); this SDK speaks the MTF-native surface only.
-// `coin` is the market symbol string and is optional (`user_events` carries none).
+// (`l2_book`, `order_updates`); this SDK speaks the MTF-native surface only.
+// `coin` is the market symbol string and is optional (account channels carry none).
 //
 // Transport: the standard `WebSocket` global (browser-native; Node ≥ 22 ships
 // it globally, which is the SDK's floor). No `ws` npm dependency — keeping the
@@ -52,22 +52,21 @@ import type {
 } from '../types/index.js';
 
 /// Channel names exactly as the gateway's native `/ws` surface accepts them
-/// (snake_case MTF-native) — the 21 channels the gateway serves natively.
+/// (snake_case MTF-native) — the channels the gateway serves natively.
 ///
-/// `web_data2` was REMOVED. So was `spot_state`: a subscribe to it now answers
-/// with the error envelope. Compose `account_state` + the REST
-/// `spot_clearinghouse_state` read instead.
-///
-/// The WS `web_data` channel is RETIRED. Poll the REST `web_data` read; it
-/// keeps serving the same body.
+/// RETIRED, and refused with the error envelope: `web_data2`, `spot_state`,
+/// `web_data`, `all_mids`, `active_asset_ctx` and `user_events`. Each
+/// duplicated a channel that is still here, so a client had to pick and a wrong
+/// pick was silent. Subscribe to `markets` for what `all_mids` and
+/// `active_asset_ctx` carried; to `fills` / `order_updates` / `ledger_updates`
+/// / `notifications` for what `user_events` carried; poll the REST
+/// `account_state` `detail: "overview"` read for what `web_data` carried.
 export type WsChannel =
   // per-market (require `coin` — the market SYMBOL, e.g. "BTC")
   | 'l2_book'
   | 'bbo'
   | 'trades'
-  | 'active_asset_ctx'
   // global (no params)
-  | 'all_mids'
   | 'markets'
   | 'explorer_block'
   | 'explorer_txs'
@@ -75,7 +74,6 @@ export type WsChannel =
   | 'candles'
   // per-account (require `user`)
   | 'fills'
-  | 'user_events'
   | 'order_updates'
   | 'open_orders'
   | 'notifications'
@@ -88,20 +86,16 @@ export type WsChannel =
   // per-account + market (`active_asset_data` needs `user` + `coin`)
   | 'active_asset_data';
 
-/// All known channels — handy for callers that want to subscribe broadly. The
-/// exact 21 native gateway channels.
+/// All known channels — handy for callers that want to subscribe broadly.
 export const WS_CHANNELS: readonly WsChannel[] = [
   'l2_book',
   'bbo',
   'trades',
-  'active_asset_ctx',
-  'all_mids',
   'markets',
   'explorer_block',
   'explorer_txs',
   'candles',
   'fills',
-  'user_events',
   'order_updates',
   'open_orders',
   'notifications',
@@ -118,18 +112,16 @@ export const WS_CHANNELS: readonly WsChannel[] = [
 /// subscribe / unsubscribe frame. The routing key is the combination of the
 /// fields a channel uses:
 ///   - `coin`     — per-market channels (`l2_book`, `bbo`, `trades`,
-///                  `active_asset_ctx`, `candles`, `active_asset_data`). The
-///                  market SYMBOL string (`"BTC"`); a decimal asset-id string
-///                  is also accepted.
-///   - `user`     — per-account channels (`fills`, `user_events`,
-///                  `order_updates`, `open_orders`, `notifications`,
-///                  `ledger_updates`, `user_fundings`, `user_twap_slice_fills`,
+///                  `candles`, `active_asset_data`). The market SYMBOL string
+///                  (`"BTC"`); a decimal asset-id string is also accepted.
+///   - `user`     — per-account channels (`fills`, `order_updates`,
+///                  `open_orders`, `notifications`, `ledger_updates`,
+///                  `user_fundings`, `user_twap_slice_fills`,
 ///                  `user_twap_history`, `account_state`,
 ///                  `spot_margin_state`, `active_asset_data`); the 0x address.
 ///   - `interval` — `candles` only (`1m`/`5m`/`15m`/`1h`/`4h`/`1d`)
 ///   - `candle_type` — `candles` only (`mark` / `oracle`)
-/// Global channels (`all_mids`, `markets`, `explorer_block`, `explorer_txs`)
-/// take none.
+/// Global channels (`markets`, `explorer_block`, `explorer_txs`) take none.
 ///
 /// `candles` routes on all three of `coin`, `interval` and `candle_type`, so
 /// `mark` and `oracle` at one interval are independent subscriptions.
@@ -157,56 +149,6 @@ export interface WsSubscription {
   mantissa?: number;
   /// `l2_book` only — max levels per side (≥ 1); the load-reduction lever.
   n_levels?: number;
-}
-
-/// `all_mids` payload — every market's tick-snapped whole-USDC mark, keyed by
-/// coin (same plane as the REST `markets` read; no 1e8 scaling).
-export interface AllMids {
-  mids: Record<string, string>;
-}
-
-/// The metric block nested under `ActiveAssetCtx.ctx`.
-///
-/// Every price and money field is a whole-USDC decimal string — the same plane
-/// and the same builder the REST `market_info` read uses, so the two never
-/// drift. Sizes are whole units.
-export interface ActiveAssetCtxBody {
-  /// Mark price, tick-snapped.
-  mark_px: string;
-  /// Latest committed oracle price, tick-snapped; `"0"` when no sample exists.
-  oracle_px: string;
-  /// Present and `true` ONLY when the oracle index is stale. The market still
-  /// advertises a price, but every risk path defers on it. A healthy market
-  /// omits the key.
-  px_stale?: boolean;
-  /// Real book mid, tick-snapped. The live body OMITS the key when the book is
-  /// one-sided; the fallback snapshot for an unknown market sends `null`.
-  mid_px?: string | null;
-  /// Latest funding premium sample, 8-dp decimal string; `null` when none.
-  premium: string | null;
-  /// Rolling 24h notional volume, decimal string.
-  day_ntl_vlm: string;
-  /// Mark price 24h ago, tick-snapped; `null` when no 24h reference exists.
-  prev_day_px: string | null;
-  /// 24h price change as a decimal fraction; `null` when no reference exists.
-  change_24h: string | null;
-  /// Funding parameters; `null` for an unknown market.
-  funding: Funding | null;
-  /// True position open interest, whole units as a decimal string.
-  open_interest: string;
-}
-
-/// `active_asset_ctx` payload — one market's mark / oracle / premium / funding /
-/// OI / 24h ticker.
-///
-/// The metrics are NESTED under `ctx`; they are not flat on this object. The
-/// on-subscribe fallback for an unknown market sends a zeroed `ctx`, never
-/// `null`, so `ctx` is always an object.
-export interface ActiveAssetCtx {
-  /// Market symbol (e.g. `"BTC"`).
-  coin: string;
-  /// The metric block.
-  ctx: ActiveAssetCtxBody;
 }
 
 /// `active_asset_data` WS payload — a user's per-(user, coin) leverage /
@@ -445,16 +387,6 @@ export interface WsCandleFrame {
   candles: Candle[];
 }
 
-/// `user_events` channel payload — the account's tagged event body.
-///
-/// Today it carries exactly one fill per frame, in the SAME record shape the
-/// `fills` channel pushes. The object is tagged so the server can add sibling
-/// event keys without breaking the `fills` key.
-export interface WsUserEvent {
-  /// The fill legs this event carries.
-  fills: WsFill[];
-}
-
 /// The `kind` tag on a `notifications` record.
 export type WsNotificationKind =
   | 'yellow_card'
@@ -681,8 +613,6 @@ export interface WsChannelData {
   l2_book: WsL2Book;
   bbo: WsBbo;
   trades: WsTrade[];
-  active_asset_ctx: ActiveAssetCtx;
-  all_mids: AllMids;
   markets: WsMarketRow[];
   explorer_block: ExplorerBlock[];
   explorer_txs: ExplorerTx[];
@@ -690,7 +620,6 @@ export interface WsChannelData {
   /// node-direct subscribe is refused as an unknown channel.
   candles: WsCandleFrame;
   fills: WsFill[];
-  user_events: WsUserEvent;
   order_updates: WsOrderUpdate[];
   open_orders: WsOpenOrder[];
   notifications: WsNotification[];
@@ -942,11 +871,6 @@ export class WsClient {
     return this.subscribe({ type: 'bbo', coin });
   }
 
-  /// Subscribe to per-market mark / oracle / funding / OI context.
-  async subscribeActiveAssetCtx(coin: string): Promise<void> {
-    return this.subscribe({ type: 'active_asset_ctx', coin });
-  }
-
   /// Subscribe to price bars for a market + interval token. `candleType` picks
   /// the series and defaults to `mark`; it is sent ONLY when provided.
   async subscribeCandles(
@@ -959,12 +883,11 @@ export class WsClient {
     return this.subscribe(sub);
   }
 
-  /// Subscribe to the global all-market mids stream.
-  async subscribeAllMids(): Promise<void> {
-    return this.subscribe({ type: 'all_mids' });
-  }
-
   /// Subscribe to the global market-universe stream (`markets`). No params.
+  ///
+  /// Every row carries mid, mark, oracle, funding and open interest, so this
+  /// ONE subscription answers what the retired `all_mids` and
+  /// `active_asset_ctx` channels each answered in part.
   async subscribeMarkets(): Promise<void> {
     return this.subscribe({ type: 'markets' });
   }
@@ -996,11 +919,6 @@ export class WsClient {
     return this.subscribe({ type: 'open_orders', user });
   }
 
-  /// Subscribe to per-user account / margin events (0x address).
-  async subscribeUserEvents(user: string): Promise<void> {
-    return this.subscribe({ type: 'user_events', user });
-  }
-
   /// Subscribe to per-user money movement (deposit / withdraw / transfer).
   async subscribeLedgerUpdates(user: string): Promise<void> {
     return this.subscribe({ type: 'ledger_updates', user });
@@ -1011,9 +929,9 @@ export class WsClient {
     return this.subscribe({ type: 'user_fundings', user });
   }
 
-  /// Subscribe to the per-user live PERP account-state stream (0x address).
-  /// With the REST `web_data` read, this replaces the removed `web_data2`
-  /// composite.
+  /// Subscribe to the per-user live account-state stream (0x address). The
+  /// frame carries the DEFAULT depth. With the REST `detail: "overview"` read,
+  /// this covers the whole account.
   async subscribeAccountState(user: string): Promise<void> {
     return this.subscribe({ type: 'account_state', user });
   }

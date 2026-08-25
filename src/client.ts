@@ -1238,8 +1238,8 @@ export class Client {
   ///
   /// The chain admits two signers for an owner-carrying action: the owner
   /// itself, and any agent the owner approved. This reads the SAME committed
-  /// `/info` `agents` snapshot the node reads at admission, so the client is
-  /// never stricter than the chain. A mistyped owner has not approved this
+  /// `agents` facet of `/info` `account_state` the node reads at admission,
+  /// so the client is never stricter than the chain. A mistyped owner has not approved this
   /// signer, so it still throws here, before the action reaches the wire.
   ///
   /// Only a positive answer is cached: a stale negative would keep blocking an
@@ -1252,8 +1252,10 @@ export class Client {
     const pair = `${ownerKey}:${signerKey}`;
     if (this.agentApprovals.has(pair)) return;
     const approved = await this.info
-      .agents(owner)
-      .then(({ agents }) => agents.some((a) => a.agent.toLowerCase() === signerKey))
+      .accountOverview(owner)
+      .then(({ agents }) =>
+        agents.some((a) => a.agent.toLowerCase() === signerKey),
+      )
       .catch(() => undefined);
     if (approved === false) {
       throw new Error(
