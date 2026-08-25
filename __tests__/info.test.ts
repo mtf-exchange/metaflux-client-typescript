@@ -1213,8 +1213,8 @@ describe('InfoApi P2 wave-1 reads', () => {
     nextData = {
       pools: [
         {
-          asset: 0,
           name: 'USDC',
+          signing_id: 0,
           total_supplied: '10000',
           total_borrowed: '4000',
           idle: '6000',
@@ -1235,9 +1235,9 @@ describe('InfoApi P2 wave-1 reads', () => {
       user: ADDR,
     });
     const p = res.pools[0]!;
-    expect(p.asset).toBe(0);
-    // The token row is `{asset, name}` — a client never resolves a bare id.
+    // A pool row is keyed by `name`; `signing_id` is only for the write path.
     expect(p.name).toBe('USDC');
+    expect(p.signing_id).toBe(0);
     expect(p.idle).toBe('6000');
     expect(p.user_shares).toBe('250');
     expect(p.user_value).toBe('250');
@@ -1364,8 +1364,8 @@ describe('InfoApi realigned read shapes', () => {
         '0x00000000000000000000000000000000000000cc': { positions: [] },
       },
       balances: [
-        { asset: 0, name: 'USDC', total: '1000', hold: '25' },
-        { asset: 7, name: 'BTC', total: '0.5', hold: '0' },
+        { name: 'USDC', signing_id: 100, total: '1000', hold: '25' },
+        { name: 'BTC', signing_id: 101, total: '0.5', hold: '0' },
       ],
       pm_maint_margin: '0',
       pm_net_value: '0',
@@ -1390,7 +1390,7 @@ describe('InfoApi realigned read shapes', () => {
     ).toBeDefined();
     // Balances are the WHOLE token ledger, an ARRAY of rows, USDC first.
     expect(res.balances![0]?.name).toBe('USDC');
-    expect(res.balances![1]?.asset).toBe(7);
+    expect(res.balances![1]?.signing_id).toBe(101);
     // The folded PM figures are whole-USDC and always present.
     expect(res.pm_maint_margin).toBe('0');
     expect(res.pm_net_value).toBe('0');
@@ -1636,8 +1636,8 @@ describe('InfoApi realigned read shapes', () => {
       clearinghouse_state: { '': { positions: [] } },
       balances: [
         // Deposited / pre-basis holding: no entry recorded, so no key.
-        { asset: 100, name: 'USDC', total: '390548', hold: '390548' },
-        { asset: 104, name: 'MTF', total: '10000039.5196599', hold: '3000000', avg_entry_px: '412.5' },
+        { name: 'USDC', signing_id: 100, total: '390548', hold: '390548' },
+        { name: 'MTF', signing_id: 104, total: '10000039.5196599', hold: '3000000', avg_entry_px: '412.5' },
       ],
       pm_maint_margin: '0',
       pm_net_value: '0',

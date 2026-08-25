@@ -108,10 +108,12 @@ export interface DexPositions {
 /// only: USDC that margins an open perpetual position stays in `total` and
 /// never enters `hold`. Read `AccountState.withdrawable` for the budget.
 export interface TokenBalance {
-  /// Token asset id.
-  asset: number;
   /// Token symbol (e.g. `"USDC"`).
   name: string;
+  /// The uint32 to put in the `token` field of a signed `spotSend`, and in
+  /// `asset` of an `earnDeposit`. It has no other meaning: every row is keyed
+  /// and joined by `name`.
+  signing_id: number;
   /// Total balance (spendable + hold), whole-token decimal string.
   total: string;
   /// Amount reserved by resting spot orders, whole-token decimal string.
@@ -573,11 +575,11 @@ export interface SpotMarginState {
 /// appear ONLY when the request carried a `user`. All magnitudes are
 /// full-precision normalized decimal strings.
 export interface EarnPool {
-  /// Pool asset (token) id.
-  asset: number;
-  /// Token symbol beside the numeric `asset` — the same `{asset, name}` token
-  /// row `account_state.balances` carries.
+  /// Pool token symbol — the same row shape `account_state.balances` carries.
   name: string;
+  /// The uint32 to put in the `asset` field of a signed `earnDeposit` /
+  /// `earnWithdraw`. It has no other meaning: every row is keyed by `name`.
+  signing_id: number;
   /// Total supplied principal, decimal string.
   total_supplied: string;
   /// Total borrowed principal, decimal string.
