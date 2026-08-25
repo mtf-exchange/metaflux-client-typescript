@@ -149,6 +149,14 @@ export interface NativeOrder {
 /// MTF-native TP/SL trigger block attached to a [`NativeOrder`] — mirrors the
 /// server `NativeTrigger`. Selects the trigger price, market-vs-limit execution
 /// on the cross, and whether the leg is a take-profit or stop-loss.
+///
+/// There is deliberately NO `trail_px` here. The node serves `trail_px` on the
+/// read side (`OrderTrigger.trail_px`), but the frozen `SubmitOrder` /
+/// `BatchOrder` EIP-712 type strings do not bind it, so `/exchange` REJECTS any
+/// order that carries one: `trail_px is not bound by the order signing type
+/// yet; a trailing stop cannot be submitted over the typed path`. Adding the
+/// field here would only build orders the chain refuses. It arrives when a
+/// versioned type string binds it.
 export interface NativeTrigger {
   /// Trigger price in the 1e8 fixed-point plane (`u64` on the wire). Pass a
   /// `bigint`/string above 2^53, or use `pxToWire(humanPrice)` to convert.

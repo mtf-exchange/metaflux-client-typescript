@@ -14,7 +14,7 @@
 // NOT LIVE YET. The nine wire tags landed in the node (commit e04489363) but
 // that binary is not released. The live chain refuses all nine today, the same
 // way it refuses an action that does not exist. They start working at the
-// freeze-swap height of the release that carries them.
+// activation height of the release that carries them.
 //
 // NONE of them carries a `bid`. The legacy gas-auction lane is dead and the
 // handler rejects a non-zero bid, so the field is off this wire entirely.

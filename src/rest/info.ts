@@ -72,7 +72,7 @@ import type {
 } from '../types/info/index.js';
 
 /// Response depth for `InfoApi.accountState`.
-export type AccountDetail = 'full' | 'margin';
+export type AccountDetail = 'full' | 'margin' | 'adl';
 
 /// The committed `{type, data}` response envelope every `/info` query returns.
 interface InfoEnvelope<T> {
@@ -110,12 +110,18 @@ export class InfoApi {
   /// poll. The skipped walk also drops `total_ntl_pos`. Both depths compute
   /// the shared scalars with one helper, so they can never disagree.
   ///
-  /// The node accepts a third value, `detail: "overview"`. It answers with the
+  /// `detail: "adl"` returns the FULL body widened, not a different body: every
+  /// field of `"full"` plus `adl_lamps` on each position row. It is opt-in
+  /// because each lamp ranks the position against every other position in that
+  /// market, so ask for it only on a screen that shows the column.
+  ///
+  /// The node accepts a fourth value, `detail: "overview"`. It answers with the
   /// `AccountOverview` shape, which `AccountState` cannot describe, so
   /// `accountOverview()` posts it and types the answer.
   ///
-  /// `height` / `time` stamp the committed snapshot at either depth. The WS
-  /// `account_state` frame carries the DEFAULT depth only.
+  /// `height` / `time` stamp the committed snapshot at every depth. The WS
+  /// `account_state` frame carries the DEFAULT depth only, so it never carries
+  /// `adl_lamps`.
   async accountState(
     address: string,
     detail?: AccountDetail,

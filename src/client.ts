@@ -1708,7 +1708,7 @@ export class Client {
   //
   // NOT LIVE YET. The nine tags landed in the node but that binary is not
   // released, so the live chain refuses every one of them today. They start
-  // working at the freeze-swap height of the release that carries them.
+  // working at the activation height of the release that carries them.
 
   /// Allocate a fresh MIP-3 perp market (`perp_register_asset`). The signer
   /// becomes its deployer. `decimals` of `0` reads as the handler default of 8.

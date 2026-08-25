@@ -92,6 +92,21 @@ export interface AccountPosition {
   /// This `side` is a LEG LABEL. It is not the `"B"` / `"A"` side token that
   /// order, book, and trade rows carry.
   side?: 'long' | 'short';
+  /// ADL queue indicator, `0` to `4` lamps. Served ONLY at `detail: "adl"`;
+  /// absent at every other depth and on the WS frame.
+  ///
+  /// More lamps = sooner in the auto-deleveraging queue. It is a RANKING of
+  /// this seat against the other seats on the same side, NOT a probability:
+  /// four lamps with nobody being liquidated on the other side still means
+  /// nothing happens. Never render it as a risk percentage.
+  ///
+  /// `0` is a real answer and is not "unknown". Zero says the position is not
+  /// in the queue at all, which is the honest answer for a position ADL cannot
+  /// structurally reach — no committed mark, no profit, no cost basis, or
+  /// nobody on the opposite side to be deleveraged against. That last case
+  /// includes a hedge account whose only opposing leg is its OWN, because ADL
+  /// never nets an account against itself.
+  adl_lamps?: number;
 }
 
 /// The positions of one perp dex inside `AccountState.clearinghouse_state`.

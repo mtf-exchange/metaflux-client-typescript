@@ -21,6 +21,10 @@ export type OrderTif = 'alo' | 'ioc' | 'gtc' | 'trigger';
 /// A resting book order with an attached trigger carries `trigger_px` +
 /// `trigger_above` only. A PARKED (off-book) TP / SL / stop row also carries
 /// `is_parked` + `is_market` + `limit_px`.
+///
+/// `group` and `trail_px` are absent again on all of those. The node writes
+/// each key only on the leg that owns it, so a row that owns neither is
+/// byte-identical to the row this type described before the keys existed.
 export interface OrderTrigger {
   /// Trigger price, canonical decimal string (whole-USDC, tick-snapped).
   trigger_px: string;
@@ -35,6 +39,23 @@ export interface OrderTrigger {
   /// Limit price of a parked LIMIT trigger, decimal string; `null` on a market
   /// trigger.
   limit_px?: string | null;
+  /// Scaled-TP/SL LADDER handle, shared by every leg of one ladder.
+  ///
+  /// A `positionTpsl` batch of THREE or more protective legs parks a ladder.
+  /// Its legs share this handle, and they are NOT OCO: a fill of one leg does
+  /// not cancel the others. One or two legs are the older shapes — a lone
+  /// trigger, or an OCO pair — and omit the key. Group rows by this value to
+  /// render one ladder; the whole ladder retires together when the position it
+  /// protects closes.
+  group?: number;
+  /// TRAILING callback, an absolute price offset as a decimal string.
+  ///
+  /// Present means the parked level ratchets toward the mark by this offset and
+  /// never away from it. Read `trigger_px` as the RATCHETED level, NOT the
+  /// level the owner sent. Absent means a static level.
+  ///
+  /// READ ONLY today. No type in this SDK can send it — see `NativeTrigger`.
+  trail_px?: string;
 }
 
 /// One resting order inside an `OpenOrders` response.
@@ -545,6 +566,12 @@ export interface TriggerOrderStatus {
   /// Limit price for a limit trigger, normalized decimal string; `null` for a
   /// market trigger.
   limit_px: string | null;
+  /// Scaled-TP/SL ladder handle — same rule as `OrderTrigger.group`. Absent
+  /// unless this leg belongs to a ladder.
+  group?: number;
+  /// Trailing callback — same rule as `OrderTrigger.trail_px`. Absent on a
+  /// static level; when present, `trigger_px` is the RATCHETED level.
+  trail_px?: string;
 }
 
 /// `order_status` — single-order lifecycle lookup by `oid` or `cloid`. A

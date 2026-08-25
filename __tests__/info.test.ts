@@ -891,6 +891,46 @@ describe('InfoApi deployed-gateway read shapes', () => {
     expect(row.trigger?.is_parked).toBe(true);
     expect(row.trigger?.is_market).toBe(false);
     expect(row.trigger?.limit_px).toBe('0.10');
+    // An ordinary trigger owns neither key, so both must stay absent.
+    expect(row.trigger?.group).toBeUndefined();
+    expect(row.trigger?.trail_px).toBeUndefined();
+  });
+
+  it('openOrders reads the ladder handle and the trailing callback', async () => {
+    const api = new InfoApi(BASE);
+    const leg = (oid: number, extra: Record<string, unknown>) => ({
+      oid,
+      coin: 'MTF',
+      side: 'A',
+      px: '0.11',
+      sz: '5',
+      orig_sz: null,
+      cloid: null,
+      tif: 'trigger',
+      reduce_only: true,
+      trigger: {
+        trigger_px: '0.11',
+        trigger_above: false,
+        is_parked: true,
+        is_market: true,
+        limit_px: null,
+        ...extra,
+      },
+      inserted_at: oid,
+    });
+    nextData = {
+      address: ADDR,
+      orders: [
+        leg(21, { group: 21 }),
+        leg(22, { group: 21 }),
+        leg(23, { group: 21, trail_px: '0.005' }),
+      ],
+    };
+    const o = await api.openOrders(ADDR);
+    // Every leg of one ladder shares the handle of its first leg.
+    expect(o.orders.map((r) => r.trigger?.group)).toEqual([21, 21, 21]);
+    expect(o.orders[0]!.trigger?.trail_px).toBeUndefined();
+    expect(o.orders[2]!.trigger?.trail_px).toBe('0.005');
   });
 
   it('l2Book levels carry `sz`, not `size`', async () => {
@@ -1476,6 +1516,42 @@ describe('InfoApi realigned read shapes', () => {
     const res = await api.accountState(ADDR);
     // A hedge leg label is "long" / "short" — NOT the "B" / "A" side token.
     expect(res.clearinghouse_state?.['']?.positions[0]?.side).toBe('long');
+    // `adl_lamps` rides `detail: "adl"` only, so the default depth omits it.
+    expect(res.clearinghouse_state?.['']?.positions[0]?.adl_lamps).toBeUndefined();
+  });
+
+  it('accountState detail:adl posts the depth and reads adl_lamps, zero included', async () => {
+    const api = new InfoApi(BASE);
+    const pos = (coin: string, lamps: number) => ({
+      coin,
+      size: '0.5',
+      entry: '25000',
+      upnl: '10',
+      isolated: false,
+      lev: 5,
+      liq: null,
+      roe: '0',
+      funding: '0',
+      margin: '0',
+      maint_margin: '0',
+      notional: '12500',
+      adl_lamps: lamps,
+    });
+    nextData = {
+      address: ADDR,
+      clearinghouse_state: { '': { positions: [pos('BTC', 4), pos('ETH', 0)] } },
+      balances: [],
+    };
+    const res = await api.accountState(ADDR, 'adl');
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'account_state',
+      address: ADDR,
+      detail: 'adl',
+    });
+    const rows = res.clearinghouse_state?.['']?.positions ?? [];
+    expect(rows[0]?.adl_lamps).toBe(4);
+    // Zero is a real answer — not in the queue — never "unknown".
+    expect(rows[1]?.adl_lamps).toBe(0);
   });
 
   it('vaultState renders share_price on the human plane and keeps lock_period_ms', async () => {

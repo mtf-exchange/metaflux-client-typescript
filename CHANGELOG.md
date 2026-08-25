@@ -95,6 +95,28 @@ All notable changes to the TypeScript SDK are documented here.
 
 ### Added
 
+- **`OrderTrigger.group` / `TriggerOrderStatus.group`** — the scaled-TP/SL
+  LADDER handle, `number | undefined`. A `positionTpsl` batch of three or more
+  protective legs parks a ladder; its legs share this handle and are NOT OCO — a
+  fill of one leg does not cancel the others. One or two legs keep the older
+  shapes and omit the key.
+
+- **`OrderTrigger.trail_px` / `TriggerOrderStatus.trail_px`** — the TRAILING
+  callback as a decimal string. When it is present, `trigger_px` is the
+  RATCHETED level, not the level the owner sent.
+
+  READ ONLY. `NativeTrigger` deliberately has no `trail_px`: the frozen
+  `SubmitOrder` / `BatchOrder` EIP-712 type strings do not bind the field, so
+  `/exchange` refuses any order that carries it. The write side arrives when a
+  versioned type string binds it.
+
+- **`AccountDetail` gains `'adl'`, and `AccountPosition.adl_lamps`** — the ADL
+  queue indicator, `0` to `4` lamps, served only at that depth. More lamps =
+  sooner in the auto-deleveraging queue. It is a RANKING against the other seats
+  on the same side, not a probability. `0` is a real answer: the position is not
+  in the queue, which includes a hedge account whose only opposing leg is its
+  own.
+
 - `mip3SetOraclePx` and the `Mip3SetOraclePx` params type. A MIP-3 market
   deployer can push their market's index price from their own source. The chain
   has carried the action since its EIP-712 type was frozen, but no client could
@@ -220,7 +242,7 @@ legal whole-share count, so the separation has to be a compile-time fact.
 
 **The nine tags landed in the node but that binary is not released.** The live
 chain refuses all nine today, the same way it refuses an action that does not
-exist. They start working at the freeze-swap height of the release that carries
+exist. They start working at the activation height of the release that carries
 them. A signature you build today is correct and arrives early.
 
 All nine are sender-authorized: the recovered signer IS the deployer or one of
