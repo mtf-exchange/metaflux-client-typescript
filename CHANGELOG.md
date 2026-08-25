@@ -39,6 +39,27 @@ All notable changes to the TypeScript SDK are documented here.
 
 ### Changed
 
+- **Breaking: `AccountState` renames its two account-level margin scalars, and
+  gains two more.** `init_margin` is now `total_margin_used`, and the
+  `detail: 'margin'` scalar `maint_margin` is now
+  `cross_maintenance_margin_used`. The values are unchanged.
+
+  The POSITION row keeps its own `maint_margin` and `margin`; they are per-leg
+  and are NOT renamed. `maint_margin_ratio` / `init_margin_ratio` on the market
+  surfaces and the account's `pm_maint_margin` are different fields and are also
+  unchanged.
+
+  `cross_maintenance_margin_used` covers the CROSS legs only. An isolated
+  position carries its own margin bucket and liquidates on that bucket alone, so
+  never size an isolated position from it.
+
+  Two new fields:
+  - `total_raw_usd` — settled cash equity, decimal string. It EXCLUDES
+    unrealised PnL, unlike `account_value`. Served at both depths.
+  - `total_ntl_pos` — mark notional of the CROSS legs, decimal string. Optional,
+    because the FULL body carries it and `detail: 'margin'` does not: that depth
+    skips the position walk.
+
 - **Breaking: three read fields change type.** The node serializes every `*_bps`
   field on the public wire as a JSON string, so `max_fee_bps`,
   `performance_fee_bps` and `validator_quorum_threshold_bps` are now `string`.

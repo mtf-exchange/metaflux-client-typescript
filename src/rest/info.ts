@@ -105,9 +105,10 @@ export class InfoApi {
   /// `{asset, name, total, hold, avg_entry_px}` rows, USDC first.
   ///
   /// `detail: "margin"` returns the margin scalars alone — it adds
-  /// `maint_margin` and skips the position walk and the balance scan, which is
-  /// the right ask for a frequent liquidation-health poll. Both depths compute
-  /// the scalars with one shared helper, so they can never disagree.
+  /// `cross_maintenance_margin_used` and skips the position walk and the
+  /// balance scan, which is the right ask for a frequent liquidation-health
+  /// poll. The skipped walk also drops `total_ntl_pos`. Both depths compute
+  /// the shared scalars with one helper, so they can never disagree.
   ///
   /// The node accepts a third value, `detail: "overview"`. It answers with the
   /// `AccountOverview` shape, which `AccountState` cannot describe, so

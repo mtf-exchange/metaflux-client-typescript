@@ -1338,7 +1338,9 @@ describe('InfoApi realigned read shapes', () => {
       address: ADDR,
       account_value: '1000',
       withdrawable: '400',
-      init_margin: '600',
+      total_raw_usd: '987.5',
+      total_margin_used: '600',
+      total_ntl_pos: '12500',
       health: '850',
       tier: 'Safe',
       abstraction: 'unified',
@@ -1381,6 +1383,7 @@ describe('InfoApi realigned read shapes', () => {
     // A POSITION size key is `size` and is SIGNED. Order / book / trade rows
     // use `sz` instead — the two are deliberately different.
     expect(pos.size).toBe('-0.5');
+    // The POSITION row keeps its own `maint_margin`. The rename is account-level.
     expect(pos.maint_margin).toBe('150');
     // A one-way account omits the hedge leg label.
     expect(pos.side).toBeUndefined();
@@ -1399,6 +1402,14 @@ describe('InfoApi realigned read shapes', () => {
     // REST bodies carry a flat height/time stamp.
     expect(res.height).toBe(8_416_000);
     expect(res.time).toBe(1_784_820_001_000);
+    // Account-level scalars: the NEW names, and the old ones are gone.
+    expect(res.total_margin_used).toBe('600');
+    expect(res.total_raw_usd).toBe('987.5');
+    expect(res.total_ntl_pos).toBe('12500');
+    const raw = res as unknown as Record<string, unknown>;
+    expect(raw.init_margin).toBeUndefined();
+    expect(raw.maint_margin).toBeUndefined();
+    expect(res.cross_maintenance_margin_used).toBeUndefined();
   });
 
   it('accountState surfaces health_deferred, and omits it when priceable', async () => {
@@ -1407,7 +1418,9 @@ describe('InfoApi realigned read shapes', () => {
       address: ADDR,
       account_value: '1000',
       withdrawable: '1000',
-      init_margin: '0',
+      total_raw_usd: '1000',
+      total_margin_used: '0',
+      total_ntl_pos: '0',
       health: '1000',
       tier: 'Safe',
       abstraction: 'unified',
@@ -1628,7 +1641,9 @@ describe('InfoApi realigned read shapes', () => {
       address: ADDR,
       account_value: '0',
       withdrawable: '0',
-      init_margin: '0',
+      total_raw_usd: '0',
+      total_margin_used: '0',
+      total_ntl_pos: '0',
       health: '0',
       tier: 'Safe',
       abstraction: 'unified',
@@ -1651,14 +1666,15 @@ describe('InfoApi realigned read shapes', () => {
     expect(res.balances![1]?.avg_entry_px).toBe('412.5');
   });
 
-  it('accountState margin depth adds maint_margin and drops the walks', async () => {
+  it('accountState margin depth adds the cross maint scalar and drops the walks', async () => {
     const api = new InfoApi(BASE);
     nextData = {
       address: ADDR,
       account_value: '100',
       withdrawable: '10',
-      init_margin: '20',
-      maint_margin: '15',
+      total_raw_usd: '100',
+      total_margin_used: '20',
+      cross_maintenance_margin_used: '15',
       health: '85',
       tier: 'Safe',
       abstraction: 'unified',
@@ -1675,11 +1691,15 @@ describe('InfoApi realigned read shapes', () => {
       address: ADDR,
       detail: 'margin',
     });
-    // `maint_margin` is served at THIS depth only.
-    expect(res.maint_margin).toBe('15');
-    // The walks are skipped, so both collections are absent, not empty-wrong.
+    // `cross_maintenance_margin_used` is served at THIS depth only.
+    expect(res.cross_maintenance_margin_used).toBe('15');
+    expect(res.total_margin_used).toBe('20');
+    expect(res.total_raw_usd).toBe('100');
+    // The walks are skipped, so both collections and `total_ntl_pos` are
+    // absent, not empty-wrong.
     expect(res.clearinghouse_state).toBeUndefined();
     expect(res.balances).toBeUndefined();
+    expect(res.total_ntl_pos).toBeUndefined();
   });
 
   it('drops the frontend_open_orders method', () => {

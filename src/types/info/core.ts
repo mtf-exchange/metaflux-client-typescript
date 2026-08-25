@@ -142,7 +142,8 @@ export interface TokenBalance {
 /// companion `detail: "overview"` depth.
 ///
 /// The `detail: "margin"` depth answers the scalars alone: it adds
-/// `maint_margin` and omits `clearinghouse_state` and `balances`.
+/// `cross_maintenance_margin_used`, and omits `total_ntl_pos`,
+/// `clearinghouse_state` and `balances`.
 export interface AccountState {
   /// Echo of the requested 0x address.
   address: string;
@@ -150,16 +151,26 @@ export interface AccountState {
   account_value: string;
   /// Cash the account can take out, decimal string, CLAMPED at zero.
   ///
-  /// It is settled cash minus funding owed minus `init_margin`. It does NOT
-  /// count unrealised profit, so a healthy account whose margin is funded by
-  /// open profit reads `'0'` — that means "nothing to withdraw", not "broke".
-  /// The chain's admission gate uses the raw signed figure, which can go
-  /// negative; this read never does.
+  /// It is settled cash minus funding owed minus `total_margin_used`. It does
+  /// NOT count unrealised profit, so a healthy account whose margin is funded
+  /// by open profit reads `'0'` — that means "nothing to withdraw", not
+  /// "broke". The chain's admission gate uses the raw signed figure, which can
+  /// go negative; this read never does.
   withdrawable: string;
-  /// Initial margin requirement, decimal string.
-  init_margin: string;
-  /// `account_value - maint_margin` (signed decimal string). Read the
-  /// maintenance margin itself with `detail: "margin"`.
+  /// Settled cash equity, whole-USDC decimal string. It EXCLUDES unrealised
+  /// PnL, so a mark move alone never moves it. `account_value` is the same
+  /// equity WITH that PnL counted. Served at both depths.
+  total_raw_usd: string;
+  /// Initial margin requirement, whole-USDC decimal string. Served at both
+  /// depths.
+  total_margin_used: string;
+  /// Mark notional of the account's CROSS legs, whole-USDC decimal string. An
+  /// isolated leg is EXCLUDED, so this is not the account's whole exposure.
+  /// Served at the FULL depth only: `detail: "margin"` skips the position walk
+  /// and therefore omits this key.
+  total_ntl_pos?: string;
+  /// `account_value - cross_maintenance_margin_used` (signed decimal string).
+  /// Read the maintenance margin itself with `detail: "margin"`.
   health: string;
   /// Liquidation tier.
   tier: Tier;
@@ -171,10 +182,14 @@ export interface AccountState {
   health_deferred?: boolean;
   /// Margin abstraction class (`abstraction === 'portfolio'` = PM enrolled).
   abstraction: Abstraction;
-  /// Maintenance margin, whole-USDC decimal string. Served ONLY at
-  /// `detail: "margin"`; the full depth carries the per-leg `maint_margin` on
-  /// each position row instead.
-  maint_margin?: string;
+  /// Maintenance margin of the account's CROSS legs, whole-USDC decimal
+  /// string. Served ONLY at `detail: "margin"`; the full depth carries the
+  /// per-leg `maint_margin` on each position row instead.
+  ///
+  /// The scope is CROSS. An isolated position carries its own margin bucket
+  /// and liquidates on that bucket alone, so never size an isolated position
+  /// from this number. Read the position row's `maint_margin` for that leg.
+  cross_maintenance_margin_used?: string;
   /// Open positions grouped by perp dex. The core dex key is the empty string
   /// `""` and is always present; a MIP-3 deployer dex key is the deployer's
   /// lowercase 0x address. ABSENT at `detail: "margin"`, which skips the walk.
