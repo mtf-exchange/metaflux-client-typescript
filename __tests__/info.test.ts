@@ -1328,19 +1328,6 @@ describe('InfoApi P2 wave-1 reads', () => {
     expect(res.configs[0]?.scan_policy.effective_confirmations).toBe(5);
   });
 
-  it('encodeAction posts the wire action + returns the canonical action_json', async () => {
-    const api = new InfoApi(BASE);
-    const ACTION = { type: 'c_deposit', params: { amount: '100' } };
-    nextData = { action_json: '{"CDeposit":{"amount":"100"}}' };
-    const res = await api.encodeAction(ACTION);
-    expect(JSON.parse(captured!.body)).toEqual({
-      type: 'encode_action',
-      action: ACTION,
-    });
-    // The returned STRING's bytes are the multi_sig inner_action_blob.
-    expect(typeof res.action_json).toBe('string');
-    expect(res.action_json).toBe('{"CDeposit":{"amount":"100"}}');
-  });
 });
 
 describe('InfoApi envelope validation', () => {

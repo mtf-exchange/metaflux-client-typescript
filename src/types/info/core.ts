@@ -644,13 +644,3 @@ export interface EarnState {
   pools: EarnPool[];
 }
 
-/// `encode_action` — the canonical core `Action` JSON for a wire action.
-///
-/// SDK-critical for `multi_sig`: the returned STRING's exact bytes are the
-/// `inner_action_blob` every M-of-N member signs. The node lowers the wire
-/// action via the SAME `into_action` path admission uses, so the bytes a member
-/// signs match the bytes the `multi_sig` handler verifies and executes.
-export interface EncodeAction {
-  /// The canonical externally-tagged core `Action` JSON string (the blob).
-  action_json: string;
-}

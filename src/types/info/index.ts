@@ -34,7 +34,6 @@ export type {
   SpotMarginParams,
   EarnState,
   EarnPool,
-  EncodeAction,
 } from './core.js';
 export type {
   TradeSide,

@@ -6,6 +6,19 @@ All notable changes to the TypeScript SDK are documented here.
 
 ### Removed
 
+- **Breaking: `encodeAction` and the `EncodeAction` type are deleted.** The node
+  no longer serves the read, because the multisig inner blob now accepts the
+  ordinary `{type, params}` wire action. Build the blob by UTF-8 encoding the
+  action you would post to `/exchange`, and have every member sign those bytes.
+  Build it ONCE and distribute it: two members who each serialize their own copy
+  are trusting two JSON writers to agree on key order.
+
+  The node still accepts the core `Action` JSON, which is what older bundles
+  carry. Do not build that form by hand — its variant names live in the node and
+  move when actions move.
+
+### Removed
+
 - **Breaking: five `/info` reads are deleted.** The official surface gives each
   question exactly ONE read, so a read that duplicated or narrowed another is
   gone. There is no deprecation window.

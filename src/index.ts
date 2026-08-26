@@ -238,7 +238,6 @@ export type {
   SpotMarginParams,
   EarnState,
   EarnPool,
-  EncodeAction,
   // Node-snapshot parity shapes.
   Markets,
   MarketsMeta,

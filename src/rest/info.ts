@@ -39,7 +39,6 @@ import type {
   CandleSnapshot,
   CandleType,
   EarnState,
-  EncodeAction,
   ExchangeStatus,
   FeeSchedule,
   FundingHistory,
@@ -527,18 +526,6 @@ export class InfoApi {
     const body: { type: string; [k: string]: unknown } = { type: 'earn_state' };
     if (user !== undefined) body.user = user;
     return this.post<EarnState>(body);
-  }
-
-  /// `encode_action` — lower a wire action to its canonical core `Action` JSON.
-  ///
-  /// SDK-critical for `multi_sig`: the returned `action_json` STRING's exact
-  /// bytes are the `inner_action_blob` every M-of-N member signs (cross-ref
-  /// `native/multisig`). `action` is the familiar `{type, params}` wire form.
-  async encodeAction(action: {
-    type: string;
-    [k: string]: unknown;
-  }): Promise<EncodeAction> {
-    return this.post<EncodeAction>({ type: 'encode_action', action });
   }
 
   // ── node snapshot reads ─────────────────────────────────────────────────
