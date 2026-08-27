@@ -226,6 +226,12 @@ export class InfoApi {
   /// `bridge_chain_configs` read served. An address with no withdrawal still
   /// gets them, with an empty `entries`. Read the `effective_*` fields, not the
   /// raw ones: the raw values are 0-as-unset sentinels.
+  ///
+  /// Served by the historical archive, not by a validator: a validator prunes a
+  /// released entry out of its outbox, so it could only ever answer "in flight
+  /// right now". A deployment whose archive is unreachable answers `503` here.
+  /// It NEVER answers an empty `entries`, because that would say the withdrawal
+  /// is not in flight.
   async bridgeUserOutbox(
     address: string,
     chain?: number,

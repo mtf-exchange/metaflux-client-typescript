@@ -42,9 +42,8 @@ export type BridgeOutboxStatus =
 export interface BridgeOutboxEntry {
   /// Destination chain: `1` = Base, `2` = Arbitrum.
   chain: number;
-  /// MetaFlux asset id.
-  asset: number;
-  /// Spot-token symbol for `asset`.
+  /// Spot-token symbol, resolved when the withdrawal was admitted — a later
+  /// token rename never rewrites what the user asked for.
   token: string;
   /// Amount in the destination chain's BASE UNITS, not whole coins — USDC has 6
   /// decimals, so `"1000000"` is 1.0 USDC. A string because the value is a
