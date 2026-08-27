@@ -44,10 +44,11 @@ export type Tier = 'Safe' | 'T0' | 'T1' | 'T2' | 'T3';
 export type MarginMode = 'cross' | 'isolated' | 'strict_iso';
 
 /// Account margin abstraction class: `"unified"` (default cross-collateral
-/// account) or `"portfolio"` (portfolio-margin enrolled). Replaces the old
-/// account-level `pm_enabled` boolean — derive PM enrollment as
+/// account), `"standard"` (per-product reservations, set with
+/// `user_set_abstraction`) or `"portfolio"` (portfolio-margin enrolled).
+/// Replaces the old account-level `pm_enabled` boolean — derive PM enrollment as
 /// `abstraction === 'portfolio'`.
-export type Abstraction = 'unified' | 'portfolio';
+export type Abstraction = 'unified' | 'standard' | 'portfolio';
 
 /// One open position inside an `AccountState`.
 ///

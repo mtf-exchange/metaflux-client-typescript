@@ -150,13 +150,10 @@ export interface NativeOrder {
 /// server `NativeTrigger`. Selects the trigger price, market-vs-limit execution
 /// on the cross, and whether the leg is a take-profit or stop-loss.
 ///
-/// There is deliberately NO `trail_px` here. The node serves `trail_px` on the
-/// read side (`OrderTrigger.trail_px`), but the frozen `SubmitOrder` /
-/// `BatchOrder` EIP-712 type strings do not bind it, so `/exchange` REJECTS any
-/// order that carries one: `trail_px is not bound by the order signing type
-/// yet; a trailing stop cannot be submitted over the typed path`. Adding the
-/// field here would only build orders the chain refuses. It arrives when a
-/// versioned type string binds it.
+/// `trail_px` IS bound by the signing types now, so a trailing stop is
+/// submittable. It selects a longer type string on PRESENCE, not value: an
+/// order that omits it signs the frozen string and keeps a byte-identical
+/// digest, and an explicit `0` is a DIFFERENT digest from an absent key.
 export interface NativeTrigger {
   /// Trigger price in the 1e8 fixed-point plane (`u64` on the wire). Pass a
   /// `bigint`/string above 2^53, or use `pxToWire(humanPrice)` to convert.
@@ -173,6 +170,14 @@ export interface NativeTrigger {
   is_market: boolean;
   /// `"tp"` (take-profit) or `"sl"` (stop-loss).
   tpsl: NativeTpSl;
+  /// Optional TRAILING callback: an absolute price offset in the 1e8 plane
+  /// (`u64` on the wire). Present => the parked level ratchets toward the mark
+  /// by this offset every block; absent => a static level.
+  ///
+  /// It is a CONTROL field — it moves WHERE the position closes — so it is part
+  /// of the EIP-712 digest. Sending it selects the `trailPx` / `trailPxs`
+  /// signing type string; omitting it keeps the frozen digest byte-for-byte.
+  trail_px?: U64Input;
 }
 
 /// MTF-native TP/SL discriminator — mirrors the server `NativeTpSl`.

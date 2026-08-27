@@ -181,6 +181,31 @@ const ENCODE_TYPES_WITH_OWNER: Readonly<Record<string, string>> = Object.freeze(
     'MetaFluxTransaction:CancelChase(string metafluxChain,address owner,uint32 market,uint64 chaseOid,uint64 nonce)',
 });
 
+/// TRAILING-STOP encodeType strings — CONSENSUS-FROZEN, mirroring the node's
+/// `SUBMIT_ORDER_TRAIL_TYPE` / `BATCH_ORDER_TRAIL_TYPE` /
+/// `BATCH_ORDER_WITH_OWNER_TRAIL_TYPE` byte-for-byte.
+///
+/// Selection is on PRESENCE, not value. `submit_order` folds `,uint64 trailPx`
+/// in after `triggerTpsl` when the order's trigger carries a `trail_px`;
+/// `batch_order` folds `,bytes32 trailPxs` in after `grouping` when ANY leg
+/// carries one. No trail => the frozen string above, digest byte-identical.
+///
+/// `trailPx` MUST be signed: it moves WHERE the position closes, so an unsigned
+/// one would let a relay close at a level the owner never authorised.
+const ENCODE_TYPES_TRAIL: Readonly<Record<string, string>> = Object.freeze({
+  submit_order:
+    'MetaFluxTransaction:SubmitOrder(string metafluxChain,uint32 market,string side,string kind,uint64 size,uint64 limitPx,string tif,string stpMode,bool reduceOnly,string cloid,uint16 builderFee,address builderUser,string positionSide,uint64 triggerPx,bool triggerIsMarket,string triggerTpsl,uint64 trailPx,uint64 nonce)',
+  batch_order:
+    'MetaFluxTransaction:BatchOrder(string metafluxChain,bytes32 orders,string grouping,bytes32 trailPxs,uint64 nonce)',
+});
+
+/// The owner-carrying trailing variant. `batch_order` only — `submit_order` has
+/// no owner form.
+const ENCODE_TYPES_WITH_OWNER_TRAIL: Readonly<Record<string, string>> = Object.freeze({
+  batch_order:
+    'MetaFluxTransaction:BatchOrder(string metafluxChain,address owner,bytes32 orders,string grouping,bytes32 trailPxs,uint64 nonce)',
+});
+
 /// The trading actions that take a DIGEST-LEVEL agent-resolved `owner` (passed to
 /// [`buildTypedOrder`] / [`signTypedOrder`]). `batch_order` is excluded — it
 /// carries its owner inside its `BatchOrder.owner` params field — matching the
@@ -270,8 +295,20 @@ export function supportsOwner(actionType: string): boolean {
 /// Full encodeType string for a trading action. Pass `withOwner = true` to select
 /// the owner-carrying variant (the params-level `owner` address word at position
 /// 2) for an action that has one (`batch_order` + the seven owner-supporting
-/// actions); other actions ignore it and return the owner-less variant.
-export function encodeOrderType(actionType: string, withOwner = false): string {
+/// actions); other actions ignore it and return the owner-less variant. Pass
+/// `withTrail = true` to select the trailing-stop variant (`submit_order` /
+/// `batch_order`); other actions ignore it.
+export function encodeOrderType(
+  actionType: string,
+  withOwner = false,
+  withTrail = false,
+): string {
+  if (withTrail) {
+    const trailed = withOwner
+      ? ENCODE_TYPES_WITH_OWNER_TRAIL[actionType]
+      : ENCODE_TYPES_TRAIL[actionType];
+    if (trailed !== undefined) return trailed;
+  }
   if (withOwner) {
     const owned = ENCODE_TYPES_WITH_OWNER[actionType];
     if (owned !== undefined) return owned;
@@ -496,6 +533,37 @@ async function hashItems(items: Uint8Array[][]): Promise<Uint8Array> {
   return keccak256(concatWords(flat));
 }
 
+/// The trailing callback bound by one order's digest, or `undefined` when the
+/// order carries none. Absence and an explicit `0` are DIFFERENT digests.
+function trailOf(o: NativeOrder): bigint | undefined {
+  const t = o.trigger?.trail_px;
+  return t === undefined ? undefined : asBigInt(t, 'trigger.trail_px');
+}
+
+/// True when any leg of a batch carries a trailing callback — the `batch_order`
+/// type-string selector and the `trailPxs` word's presence condition.
+function anyTrail(orders: readonly NativeOrder[]): boolean {
+  return orders.some((o) => o.trigger?.trail_px !== undefined);
+}
+
+/// The `bytes32 trailPxs` word — mirrors the server `hash_trail_pxs`:
+/// `keccak256(concat(bool(present) || uint256(value_or_0)))`, TWO fixed-width
+/// words per leg, leg order significant. It is derived from the SAME leg slice
+/// `hashItems` reads and never rides the wire, so leg i of one hash cannot be
+/// permuted apart from leg i of the other. Fixed width is the point: a
+/// variable-length per-leg encoding inside a flat unprefixed concatenation is a
+/// malleability surface, so the trail word lives HERE and never inside
+/// `orderWords`.
+async function hashTrailPxs(orders: readonly NativeOrder[]): Promise<Uint8Array> {
+  const words: Uint8Array[] = [];
+  for (const o of orders) {
+    const t = trailOf(o);
+    words.push(encBool(t !== undefined));
+    words.push(encUint(t ?? 0n, 64, 'trigger.trail_px'));
+  }
+  return keccak256(concatWords(words));
+}
+
 /// The `bytes32 weights` word of a `scale_order` typed digest — mirrors the
 /// server `hash_scale_weights`. Only `dist === "custom"` binds a weight vector:
 /// `keccak256(concat(uint256(wᵢ)))`, each weight a big-endian zero-left-padded
@@ -542,7 +610,9 @@ async function encodeOrderData(
   switch (actionType) {
     case 'submit_order': {
       const order = payload.order as NativeOrder;
-      return [chainWord, ...(await orderWords(order)), nonceWord];
+      const trail = trailOf(order);
+      const trailWords = trail === undefined ? [] : [encUint(trail, 64, 'trigger.trail_px')];
+      return [chainWord, ...(await orderWords(order)), ...trailWords, nonceWord];
     }
     case 'cancel_order': {
       const c = payload.cancel as NativeCancel;
@@ -651,16 +721,19 @@ async function encodeOrderData(
       // position 2 (after metafluxChain, before the orders hash). Gated on
       // presence — an owner-less batch keeps the original owner-less layout so
       // existing signatures still verify. Matches the Rust SDK word order.
+      // The trailing hash rides AFTER grouping, present only when a leg trails.
+      const trailWords = anyTrail(p.orders) ? [await hashTrailPxs(p.orders)] : [];
       if (p.owner !== undefined) {
         return [
           chainWord,
           encAddr(p.owner, 'owner'),
           ordersWord,
           groupingWord,
+          ...trailWords,
           nonceWord,
         ];
       }
-      return [chainWord, ordersWord, groupingWord, nonceWord];
+      return [chainWord, ordersWord, groupingWord, ...trailWords, nonceWord];
     }
     case 'batch_cancel': {
       const p = payload.params as BatchCancel;
@@ -818,9 +891,27 @@ export interface BuiltTypedOrder {
   /// BYTE-IDENTICAL to the pre-existing form. Non-zero folds `,uint64 expiresAfter`
   /// into the encodeType and appends one trailing word after the nonce word.
   readonly expiresAfter: bigint;
+  /// True for a trailing-stop digest — selects the `trailPx` / `trailPxs`
+  /// variant of the encodeType string (matching the extra word in `words`). Set
+  /// when a `submit_order`'s trigger carries a `trail_px`, or when ANY leg of a
+  /// `batch_order` does. False otherwise, and the digest is byte-identical to
+  /// the pre-trailing form.
+  readonly withTrail: boolean;
   /// `twap_order` only: which of the three consensus-frozen signing strings the
   /// payload selected. `''` for every other action and for a base TWAP.
   readonly twapVariant?: '' | 'v2' | 'v3';
+}
+
+/// Whether this payload selects a trailing-stop type string. Presence of a
+/// `trigger.trail_px` decides it, never its value.
+function payloadHasTrail(actionType: string, payload: TypedOrderPayload): boolean {
+  if (actionType === 'submit_order') {
+    return (payload.order as NativeOrder | undefined)?.trigger?.trail_px !== undefined;
+  }
+  if (actionType === 'batch_order') {
+    return anyTrail((payload.params as BatchOrder).orders);
+  }
+  return false;
 }
 
 /// Build a typed trading action from its wire payload + the canonical action
@@ -861,6 +952,7 @@ export async function buildTypedOrder(
     actionJson,
     words,
     withOwner,
+    withTrail: payloadHasTrail(actionType, payload),
     owner: ownerBound ? bound : undefined,
     expiresAfter,
     twapVariant:
@@ -882,7 +974,7 @@ async function hashStructOrder(built: BuiltTypedOrder): Promise<Uint8Array> {
       foldExpiryTypeString(
         built.twapVariant !== undefined && built.twapVariant !== ''
           ? TWAP_ORDER_TYPE_VARIANTS[built.twapVariant]!
-          : encodeOrderType(built.actionType, built.withOwner),
+          : encodeOrderType(built.actionType, built.withOwner, built.withTrail),
         built.expiresAfter,
       ),
     ),

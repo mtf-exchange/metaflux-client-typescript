@@ -128,13 +128,19 @@ export function buildNativeOrderAction(orderIn: NativeOrder): string {
 }
 
 /// Serialize a TP/SL trigger block in the server-expected
-/// `{trigger_px, is_market, tpsl}` order. `tpsl` is `"tp"` / `"sl"`.
+/// `{trigger_px, is_market, tpsl, trail_px}` order. `tpsl` is `"tp"` / `"sl"`.
+/// `trail_px` is omitted when absent — the node reads its PRESENCE to pick the
+/// signing type string, so an absent trail must not serialize as `0`.
 function buildTrigger(t: NativeTrigger): string {
   validateU64(t.trigger_px, 'trigger.trigger_px');
   if (t.tpsl !== 'tp' && t.tpsl !== 'sl') {
     throw new RangeError('trigger.tpsl must be "tp" or "sl"');
   }
-  return `{${jsonStr('trigger_px')}:${toU64(t.trigger_px, 'trigger.trigger_px')},${jsonStr('is_market')}:${t.is_market ? 'true' : 'false'},${jsonStr('tpsl')}:${jsonStr(t.tpsl)}}`;
+  const trail =
+    t.trail_px === undefined
+      ? ''
+      : `,${jsonStr('trail_px')}:${toU64(t.trail_px, 'trigger.trail_px')}`;
+  return `{${jsonStr('trigger_px')}:${toU64(t.trigger_px, 'trigger.trigger_px')},${jsonStr('is_market')}:${t.is_market ? 'true' : 'false'},${jsonStr('tpsl')}:${jsonStr(t.tpsl)}${trail}}`;
 }
 
 /// Serialize a builder carve in the server-expected `{fee, user}` order.
