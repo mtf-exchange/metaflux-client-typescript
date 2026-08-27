@@ -52,6 +52,27 @@ All notable changes to the TypeScript SDK are documented here.
 
 ### Added
 
+- **`info().optionPositions()`, and the `OptionPositions` / `OptionPosition`
+  types.** One account's open option legs, by `address`. Each row carries the
+  series terms beside the position, so no second read is needed. An account
+  party to no series answers `200` with an empty `positions` list.
+
+  An option fill writes no ledger row of its own. Between the fill and expiry,
+  this is the only read where a WRITER sees the escrow it locked and a HOLDER
+  sees the units it owns.
+
+  **A row carries TWO planes.** `long` and `short` are UNIT counts on the series
+  size scale, already divided — `'2.5'` is two and a half whole units. `escrow`
+  is MONEY, a decimal USDC string. Both are typed `string`, so a caller that
+  reads `escrow` as a unit count, or `short` as a dollar figure, gets a wrong
+  number that still parses. Nothing in the type catches it.
+
+  `signing_id` is served whole here too. There is no formula, no base and no
+  arithmetic that derives it.
+
+  The row omits `cap`, `sz_decimals` and `escrow_per_unit` — those are
+  series-wide, on `optionSeries()`.
+
 - **`info().optionSeries()`, and the `OptionSeriesRegistry` / `OptionSeries` /
   `OptionKind` types.** The read serves every live option series: the
   `signing_id` an RFQ action signs against, the underlying, the kind, the
@@ -71,8 +92,7 @@ All notable changes to the TypeScript SDK are documented here.
   not an error.
 
   The read carries no option price and no implied volatility, because the chain
-  computes neither. There is still NO public read for an option position: the
-  visible effect of a fill is the USDC balance change on `accountState()`.
+  computes neither. For an account's own holding, read `optionPositions()`.
 
 ### Changed
 

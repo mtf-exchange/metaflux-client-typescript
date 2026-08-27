@@ -1804,6 +1804,47 @@ describe('InfoApi realigned read shapes', () => {
     expect(res.series[1]!.escrow_per_unit).toBe('30000');
   });
 
+  it('optionPositions sends the address and keeps the two planes apart', async () => {
+    const api = new InfoApi(BASE);
+    const who = '0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1';
+    nextData = {
+      address: who,
+      positions: [
+        {
+          signing_id: 2_147_483_650,
+          underlying: 'BTC',
+          kind: 'capped_call',
+          strike: '100000',
+          expiry: 1_735_689_600_000,
+          long: '0',
+          short: '1.5',
+          escrow: '45000',
+        },
+      ],
+    };
+    const res = await api.optionPositions(who);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'option_positions',
+      address: who,
+    });
+    expect(res.positions).toHaveLength(1);
+    expect(res.positions[0]!.signing_id).toBe(2_147_483_650);
+    // `short` is a UNIT count on the series size scale ...
+    expect(res.positions[0]!.short).toBe('1.5');
+    expect(res.positions[0]!.long).toBe('0');
+    // ... and `escrow` is USDC. Reading one as the other is the failure this
+    // read warns about; both are strings, so only the name separates them.
+    expect(res.positions[0]!.escrow).toBe('45000');
+  });
+
+  it('optionPositions returns an empty list for an account party to nothing', async () => {
+    const api = new InfoApi(BASE);
+    const who = '0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2';
+    nextData = { address: who, positions: [] };
+    const res = await api.optionPositions(who);
+    expect(res.positions).toEqual([]);
+  });
+
   it('drops the frontend_open_orders method', () => {
     const api = new InfoApi(BASE) as unknown as Record<string, unknown>;
     // The kind has no dispatch arm on the node; a request 400s.

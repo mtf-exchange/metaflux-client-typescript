@@ -267,8 +267,10 @@ export type {
   AccountOverviewStaking,
   AccountOverviewVault,
   AccountRole,
-  // The live option series registry.
+  // The live option series registry, and an account's legs in it.
   OptionKind,
+  OptionPosition,
+  OptionPositions,
   OptionSeries,
   OptionSeriesRegistry,
   // Custody-bridge deployment rows + the withdrawal outbox.

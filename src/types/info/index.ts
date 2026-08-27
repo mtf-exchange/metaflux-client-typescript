@@ -104,6 +104,8 @@ export type {
 } from './account-overview.js';
 export type {
   OptionKind,
+  OptionPosition,
+  OptionPositions,
   OptionSeries,
   OptionSeriesRegistry,
 } from './options.js';

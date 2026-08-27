@@ -4,9 +4,9 @@
 // Field names are the exact snake_case keys the node emits inside
 // `{type, data}.data`. Money magnitudes are typed `string`.
 //
-// ONE PUBLIC query is typed here: `option_series`. It answers the two questions
-// a caller has about the option lane — which series are live, and which number
-// to sign against.
+// TWO PUBLIC queries are typed here. `option_series` answers which series are
+// live and which number to sign against. `option_positions` answers what one
+// account holds in them.
 //
 // SIGN `signing_id`, DO NOT COMPUTE IT. The registry serves the number an RFQ
 // action puts in its `market` field. There is no public formula, no base and no
@@ -19,10 +19,16 @@
 // $30,000 per unit. Reading `strike` as the lock overstates it by the whole
 // strike.
 //
+// A POSITION ROW CARRIES TWO PLANES. `long` and `short` are UNIT counts on the
+// series size scale. The node already divides by `sz_decimals`, so `'2.5'` is
+// two and a half whole units. `escrow` is MONEY: a decimal USDC string.
+//
+// Both planes are typed `string`, so a caller that reads `escrow` as a unit
+// count, or `short` as a dollar figure, gets a wrong number that still parses.
+// The type cannot catch it. Read the field name.
+//
 // The registry carries no option price and no implied volatility, because the
 // chain computes neither: the premium is what two accounts agree on in an RFQ.
-// There is also no public read for an option POSITION — the visible effect of a
-// fill is the USDC balance change on `account_state`.
 
 /// Option kind. A call is always CAPPED: an uncapped call has no finite worst
 /// case, so cash cannot fully collateralize it.
@@ -61,4 +67,44 @@ export interface OptionSeriesRegistry {
   /// settled or expired series LEAVES the registry, and the RFQ actions then
   /// refuse its id.
   series: OptionSeries[];
+}
+
+/// One account's open leg in one option series.
+///
+/// The row mixes two planes: `long` / `short` are UNIT counts and `escrow` is
+/// USDC. See the file header.
+export interface OptionPosition {
+  /// The number an RFQ action puts in its `market` field. Served whole — never
+  /// derive it.
+  signing_id: number;
+  /// Symbol of the underlying market the settlement price comes from.
+  underlying: string;
+  /// Put, or capped call.
+  kind: OptionKind;
+  /// Strike `K`, whole-USDC decimal string.
+  strike: string;
+  /// Expiry (consensus ms).
+  expiry: number;
+  /// Units HELD, on the series size scale. Already whole units, NOT money.
+  long: string;
+  /// Units WRITTEN, on the series size scale. Already whole units, NOT money.
+  short: string;
+  /// USDC this account has locked in the series pot. MONEY, not a unit count.
+  /// It is what the writer takes back if the series settles worthless.
+  escrow: string;
+}
+
+/// `option_positions` — one account's open option legs.
+///
+/// A row carries no `cap`, no `sz_decimals` and no `escrow_per_unit`. Those are
+/// series-wide, on `OptionSeries`.
+///
+/// One of `long` / `short` is always `'0'`. A fill consumes the opposite leg
+/// before it opens a new one, so a row is either a holding or a written
+/// position, never both.
+export interface OptionPositions {
+  /// The account the rows belong to, `0x` hex.
+  address: string;
+  /// One row per open leg. Empty when the account is party to no series.
+  positions: OptionPosition[];
 }

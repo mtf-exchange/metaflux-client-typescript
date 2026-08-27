@@ -51,6 +51,7 @@ import type {
   Mip3ActiveBids,
   NodeInfo,
   OpenOrders,
+  OptionPositions,
   OptionSeriesRegistry,
   OrderStatusInfo,
   PerpDexs,
@@ -412,6 +413,23 @@ export class InfoApi {
   /// On a `capped_call`, `escrow_per_unit` is `cap - strike`, not `strike`.
   async optionSeries(): Promise<OptionSeriesRegistry> {
     return this.post<OptionSeriesRegistry>({ type: 'option_series' });
+  }
+
+  /// `option_positions` — one account's open option legs, by `address`.
+  ///
+  /// Each row carries the series terms beside the position, so no second read
+  /// is needed. An account party to no series answers `200` with an empty
+  /// `positions` list.
+  ///
+  /// An option fill writes no ledger row of its own. Between the fill and
+  /// expiry, this is the only read where a WRITER sees the escrow it locked and
+  /// a HOLDER sees the units it owns.
+  ///
+  /// TWO PLANES ON ONE ROW: `long` / `short` are UNIT counts on the series size
+  /// scale, already divided. `escrow` is MONEY, a decimal USDC string. Both are
+  /// typed `string` — only the field name separates them.
+  async optionPositions(address: string): Promise<OptionPositions> {
+    return this.post<OptionPositions>({ type: 'option_positions', address });
   }
 
   // ── P2 wave-1 typed reads (order / history / spot-margin / earn / pm) ────
