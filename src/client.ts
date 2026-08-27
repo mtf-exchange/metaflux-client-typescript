@@ -1078,14 +1078,24 @@ export class Client {
   // are RAW `u64` wire values; `side` POSTs the core PascalCase name and signs
   // the uint8 code; `limit_px` / `stp_group` are optional (omit when absent).
 
-  /// **RFQ IS OPTIONS-ONLY, AND EVERY MARKET IS REFUSED TODAY.** All three RFQ
-  /// methods reach the node and are rejected with
-  /// `rfq is options-only: market <n> is not an option series`. No market is an
-  /// option series, so the refusal is total. A request-for-quote lane beside a
-  /// public order book lets size trade away from the price everyone else posts
-  /// against, so MetaFlux offers RFQ only where there is no continuous book to
-  /// undercut — options, which are not built. These methods keep this shape for
-  /// when option series land. Do not build against them yet.
+  /// **RFQ IS THE OPTION TRADE PATH.** All three methods clear OPTION series
+  /// and nothing else. A market that is not a LIVE series is rejected with
+  /// `rfq is options-only: market <n> is not an option series`. A
+  /// request-for-quote lane beside a public order book lets size trade away
+  /// from the price everyone else posts against, so MetaFlux offers RFQ only
+  /// where there is no continuous book to undercut. Options have none.
+  ///
+  /// `market` takes the `signing_id` of a live series, from
+  /// `InfoApi.optionSeries`. Serve that number; never derive it.
+  ///
+  /// An accept moves the premium from the buyer to the writer and locks the
+  /// writer's escrow. It opens no perpetual position, charges no fee, and
+  /// reserves no margin. An option position cannot be liquidated.
+  ///
+  /// The session reads `rfq_open` and `rfq_user` are public, and this SDK does
+  /// not type them yet, so read them raw to find your own `rfq_id` and the
+  /// `quote_idx` an accept must name. No WS channel carries an RFQ event, so
+  /// both are polled.
 
   /// Open an RFQ session as a taker (`rfq_request`, typed scheme).
   async rfqRequest(

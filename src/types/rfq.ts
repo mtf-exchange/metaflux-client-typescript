@@ -19,13 +19,18 @@ export type CoreSide = 'Bid' | 'Ask';
 /// `rfq_request` — a taker opens an RFQ session asking MMs to quote. Mirrors the
 /// node's frozen `RfqRequest` typed struct.
 ///
+/// `market` is the `signing_id` of a LIVE option series, from
+/// `InfoApi.optionSeries`. RFQ clears options and nothing else, and the number
+/// is served whole — never derive it.
+///
 /// All numeric fields are RAW `u64` wire values (fixed-point lots / price), NOT
 /// decimal-scaled — pass a `number` or `bigint`. `limit_px` and `stp_group` are
 /// `Option<u64>`: the typed digest flattens each to a presence bool + a value
 /// word, and the POST `params` carries the key ONLY when present (omit, or pass
 /// `null`, to leave it absent).
 export interface RfqRequest {
-  /// Market to request a quote on (`u32`).
+  /// The `signing_id` of a live option series (`u32`), from
+  /// `InfoApi.optionSeries`. Any other market is refused.
   market: number;
   /// Taker side — POSTs PascalCase (`"Bid"`/`"Ask"`), signs the uint8 code.
   side: CoreSide;

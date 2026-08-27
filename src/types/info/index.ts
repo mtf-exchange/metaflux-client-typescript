@@ -103,6 +103,11 @@ export type {
   AccountRole,
 } from './account-overview.js';
 export type {
+  OptionKind,
+  OptionSeries,
+  OptionSeriesRegistry,
+} from './options.js';
+export type {
   BridgeChainConfigRow,
   BridgeOutboxEntry,
   BridgeOutboxStatus,

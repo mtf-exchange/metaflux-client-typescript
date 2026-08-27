@@ -1765,6 +1765,45 @@ describe('InfoApi realigned read shapes', () => {
     expect(res.total_ntl_pos).toBeUndefined();
   });
 
+  it('optionSeries POSTs the bare type and keeps both kinds apart', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      series: [
+        {
+          signing_id: 2_147_483_649,
+          underlying: 'BTC',
+          kind: 'put',
+          strike: '100000',
+          expiry: 1_735_689_600_000,
+          sz_decimals: 5,
+          escrow_per_unit: '100000',
+        },
+        {
+          signing_id: 2_147_483_650,
+          underlying: 'BTC',
+          kind: 'capped_call',
+          strike: '100000',
+          cap: '130000',
+          expiry: 1_735_689_600_000,
+          sz_decimals: 5,
+          escrow_per_unit: '30000',
+        },
+      ],
+    };
+    const res = await api.optionSeries();
+    expect(JSON.parse(captured!.body)).toEqual({ type: 'option_series' });
+    expect(res.series).toHaveLength(2);
+    // The signing id is served whole — it is the number an RFQ action carries.
+    expect(res.series[0]!.signing_id).toBe(2_147_483_649);
+    // A put carries no cap, and locks the strike.
+    expect(res.series[0]!.cap).toBeUndefined();
+    expect(res.series[0]!.escrow_per_unit).toBe('100000');
+    // A capped call locks the WIDTH, not the strike.
+    expect(res.series[1]!.kind).toBe('capped_call');
+    expect(res.series[1]!.cap).toBe('130000');
+    expect(res.series[1]!.escrow_per_unit).toBe('30000');
+  });
+
   it('drops the frontend_open_orders method', () => {
     const api = new InfoApi(BASE) as unknown as Record<string, unknown>;
     // The kind has no dispatch arm on the node; a request 400s.

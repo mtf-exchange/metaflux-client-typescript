@@ -51,6 +51,7 @@ import type {
   Mip3ActiveBids,
   NodeInfo,
   OpenOrders,
+  OptionSeriesRegistry,
   OrderStatusInfo,
   PerpDexs,
   SpotDeployAuction,
@@ -400,6 +401,17 @@ export class InfoApi {
   /// `mip3_active_bids` — MIP-3 permissionless perp-deploy auction snapshot.
   async mip3ActiveBids(): Promise<Mip3ActiveBids> {
     return this.post<Mip3ActiveBids>({ type: 'mip3_active_bids' });
+  }
+
+  /// `option_series` — every live option series, oldest first. No parameters.
+  ///
+  /// Each row carries the `signing_id` an RFQ action signs against, and the
+  /// `escrow_per_unit` a writer locks. SIGN `signing_id`; never derive it —
+  /// the encoding behind the number is internal to the node.
+  ///
+  /// On a `capped_call`, `escrow_per_unit` is `cap - strike`, not `strike`.
+  async optionSeries(): Promise<OptionSeriesRegistry> {
+    return this.post<OptionSeriesRegistry>({ type: 'option_series' });
   }
 
   // ── P2 wave-1 typed reads (order / history / spot-margin / earn / pm) ────

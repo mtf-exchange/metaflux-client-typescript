@@ -50,7 +50,43 @@ All notable changes to the TypeScript SDK are documented here.
   `staking_state`, `delegator_summary`, `sub_accounts`,
   `user_to_multi_sig_signers` and `agents`.
 
+### Added
+
+- **`info().optionSeries()`, and the `OptionSeriesRegistry` / `OptionSeries` /
+  `OptionKind` types.** The read serves every live option series: the
+  `signing_id` an RFQ action signs against, the underlying, the kind, the
+  strike, the cap, the expiry, the size precision, and the escrow a writer
+  locks.
+
+  `signing_id` goes straight into `RfqRequest.market`. The registry serves it
+  WHOLE. There is no formula, no base and no arithmetic that derives it — the
+  encoding behind the number is internal to the node and may move.
+
+  `escrow_per_unit` is what a WRITER locks per whole unit. On a `capped_call` it
+  is `cap - strike`, not `strike`: a $100,000 strike capped at $130,000 locks
+  $30,000 per unit. Reading `strike` as the lock overstates it by the whole
+  strike.
+
+  `cap` is ABSENT on a put. An empty registry is a `200` with an empty `series`,
+  not an error.
+
+  The read carries no option price and no implied volatility, because the chain
+  computes neither. There is still NO public read for an option position: the
+  visible effect of a fill is the USDC balance change on `accountState()`.
+
 ### Changed
+
+- **RFQ is live as the option trade path.** The `rfqRequest` / `rfqQuote` /
+  `rfqAccept` doc comments said every market was refused because no option
+  series existed. Series exist now, so the three methods clear them. A market
+  that is not a LIVE series is still refused with
+  `rfq is options-only: market <n> is not an option series`. **No signing type
+  changed** — the RFQ EIP-712 structs are untouched.
+
+  The session reads `rfq_open` and `rfq_user` are PUBLIC, which is what makes an
+  accept completable: a taker finds its own `rfq_id` there and a maker finds a
+  request to answer. This SDK does not type them yet — read them raw. No WS
+  channel carries an RFQ event, so both are polled.
 
 - **Breaking: `AccountState` renames its two account-level margin scalars, and
   gains two more.** `init_margin` is now `total_margin_used`, and the
