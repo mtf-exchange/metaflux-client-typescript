@@ -18,8 +18,6 @@
 // conditionally are `?`.
 
 /// `node_info` — static node identity + protocol version.
-import type { BridgeOutboxEntry } from './bridge';
-
 export interface NodeInfo {
   /// Network variant: `"devnet"`, `"testnet"`, or `"mainnet"`.
   network: string;
@@ -216,17 +214,6 @@ export interface AccountState {
   /// all-zero token row is skipped. ABSENT at `detail: "margin"`, which skips
   /// the scan.
   balances?: TokenBalance[];
-  /// Bridge withdrawals still IN FLIGHT — a withdrawal in flight is account
-  /// state. Empty for almost every account.
-  ///
-  /// This answers "is my withdrawal moving", never "where did it go": an entry
-  /// leaves once its retention window expires after release. The released
-  /// history is `bridge_withdrawal_history`, served by the archive.
-  ///
-  /// No `economic_id` here on purpose — it is not a signing digest, and pairing
-  /// it with `message_id` on a public read is the confusion that stranded a live
-  /// withdrawal.
-  bridge_withdrawals?: BridgeOutboxEntry[];
   /// Portfolio-margin maintenance requirement, whole-USDC decimal string.
   /// Always present — `"0"` when the account is not PM-enrolled. Gate the
   /// meaning on `abstraction === 'portfolio'`.

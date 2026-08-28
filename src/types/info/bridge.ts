@@ -65,6 +65,14 @@ export interface BridgeOutboxEntry {
   pending_cosigner_count: number;
   /// Release ts (ms) for a `released` entry; `null` for every other status.
   released_at_ms: number | null;
+  /// `true` while the withdrawal is still in the validator's queue, `false` once
+  /// it has left — released, or pruned when its retention window expired.
+  ///
+  /// `released_at_ms` cannot answer this on its own: a pruned entry also leaves
+  /// the queue and carries no release stamp. This is the field that separates
+  /// "still moving" from "finished". Absent on a row from an archive built
+  /// before the field existed; treat absent as still in flight.
+  open?: boolean;
 }
 
 /// One user's pending bridge withdrawals, plus the deployment rows that define
