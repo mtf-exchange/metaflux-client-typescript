@@ -35,7 +35,7 @@ import type {
   AccountState,
   ActiveAssetData,
   BlockInfo,
-  BridgeUserOutbox,
+  BridgeWithdrawalHistory,
   CandleSnapshot,
   CandleType,
   EarnState,
@@ -214,7 +214,7 @@ export class InfoApi {
 
   // ── custody bridge reads ────────────────────────────────────────────────
 
-  /// `bridge_user_outbox` — one account's pending bridge withdrawals AND the
+  /// `bridge_withdrawal_history` — one account's pending bridge withdrawals AND the
   /// committed deployment rows, keyed by `address` (0x hex). `chain` restricts
   /// to `1` (Base) or `2` (Arbitrum); omit it to read every chain.
   ///
@@ -232,16 +232,16 @@ export class InfoApi {
   /// right now". A deployment whose archive is unreachable answers `503` here.
   /// It NEVER answers an empty `entries`, because that would say the withdrawal
   /// is not in flight.
-  async bridgeUserOutbox(
+  async bridgeWithdrawalHistory(
     address: string,
     chain?: number,
-  ): Promise<BridgeUserOutbox> {
+  ): Promise<BridgeWithdrawalHistory> {
     const body: { type: string; [k: string]: unknown } = {
-      type: 'bridge_user_outbox',
+      type: 'bridge_withdrawal_history',
       address,
     };
     if (chain !== undefined) body.chain = chain;
-    return this.post<BridgeUserOutbox>(body);
+    return this.post<BridgeWithdrawalHistory>(body);
   }
 
   // ── book / trade / account-history reads ────────────────────────────────

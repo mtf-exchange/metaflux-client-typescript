@@ -4,7 +4,7 @@
 // Field names are the exact snake_case keys the node emits inside
 // `{type, data}.data`. Money magnitudes that can exceed 2^53 are typed `string`.
 //
-// ONE PUBLIC query is typed here: `bridge_user_outbox`. It serves a user's own
+// ONE PUBLIC query is typed here: `bridge_withdrawal_history`. It serves a user's own
 // in-flight withdrawals AND the committed deployment rows, because the rows
 // DEFINE the id the entries carry. The node also serves `bridge_outbox` and
 // `bridge_finalized_cosignatures`, but the public gateway REFUSES both (they
@@ -68,13 +68,13 @@ export interface BridgeOutboxEntry {
 }
 
 /// One user's pending bridge withdrawals, plus the deployment rows that define
-/// their ids (`bridge_user_outbox`).
+/// their ids (`bridge_withdrawal_history`).
 ///
 /// An address that holds no withdrawal still gets the rows, with an empty
 /// `entries`. NEVER freeze a row into config: an `mbConfigureChain` vote
 /// replaces the whole row, and a stale `evm_contract_address` computes a wrong
 /// `message_id` and points deposits at a retired custody contract.
-export interface BridgeUserOutbox {
+export interface BridgeWithdrawalHistory {
   /// Pending withdrawals, oldest first. Empty means no withdrawal is in flight
   /// — it does NOT mean a past withdrawal failed.
   entries: BridgeOutboxEntry[];

@@ -114,5 +114,5 @@ export type {
   BridgeOutboxEntry,
   BridgeOutboxStatus,
   BridgeScanPolicy,
-  BridgeUserOutbox,
+  BridgeWithdrawalHistory,
 } from './bridge.js';

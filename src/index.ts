@@ -278,7 +278,7 @@ export type {
   BridgeOutboxEntry,
   BridgeOutboxStatus,
   BridgeScanPolicy,
-  BridgeUserOutbox,
+  BridgeWithdrawalHistory,
 } from './types/info/index.js';
 export {
   // MTF-native WebSocket client + subscription/channel types.

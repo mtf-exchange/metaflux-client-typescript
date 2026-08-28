@@ -1283,7 +1283,7 @@ describe('InfoApi P2 wave-1 reads', () => {
     expect(p.user_value).toBe('250');
   });
 
-  it('bridgeUserOutbox carries the folded deployment rows', async () => {
+  it('bridgeWithdrawalHistory carries the folded deployment rows', async () => {
     const api = new InfoApi(BASE);
     // A depositor with no in-flight withdrawal still gets the rows, so the
     // retired `bridge_chain_configs` ask costs one round trip here too.
@@ -1314,9 +1314,9 @@ describe('InfoApi P2 wave-1 reads', () => {
         },
       ],
     };
-    const res = await api.bridgeUserOutbox(ADDR);
+    const res = await api.bridgeWithdrawalHistory(ADDR);
     expect(JSON.parse(captured!.body)).toEqual({
-      type: 'bridge_user_outbox',
+      type: 'bridge_withdrawal_history',
       address: ADDR,
     });
     expect(res.entries).toEqual([]);
