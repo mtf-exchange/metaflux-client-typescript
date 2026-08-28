@@ -7,6 +7,8 @@
 
 import type { NativeSpotOrder } from './spot.js';
 import type {
+  ApiErrorCode,
+  ApiErrorDetails,
   BatchOrder,
   NativeExchangeAck,
   NativeOrder,
@@ -113,7 +115,16 @@ export type SpotSubmission =
   /// The action reached the node and the node answered.
   | (SpotSubmissionBase & { state: 'sent'; ack: NativeExchangeAck })
   /// The action failed. Earlier actions may already be committed.
-  | (SpotSubmissionBase & { state: 'failed'; error: string })
+  ///
+  /// `error` is prose and MAY change in any release. `code` is the stable
+  /// contract — branch on it. Both `code` and `details` are absent when the
+  /// failure carried no error envelope (a transport fault, say).
+  | (SpotSubmissionBase & {
+      state: 'failed';
+      error: string;
+      code?: ApiErrorCode;
+      details?: ApiErrorDetails;
+    })
   /// The action was never sent, because an earlier one failed first.
   | (SpotSubmissionBase & { state: 'not_sent' });
 

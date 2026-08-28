@@ -508,8 +508,9 @@ export type OrderStatus =
   /// Crossed for `total_sz` at `avg_px`.
   | { filled: { oid: number; total_sz: string; avg_px: string } }
   /// This entry was rejected at admission/commit (the rest of a batch may still
-  /// have succeeded).
-  | { error: string }
+  /// have succeeded). Carries the SAME `{code, message, details?}` object the
+  /// envelope's `error` half uses.
+  | { error: ApiError }
   /// Admitted, but no commit observed within the wait window — track via
   /// `/info` / WS. NOT a fabricated oid.
   | { pending: { action_hash: string; nonce: number } }
@@ -522,28 +523,40 @@ export type OrderStatus =
 /// Server response to `POST /exchange`. Mirrors the node `ExchangeResponse`
 /// (per the KB spec metaflux-knowledges/api/rest/exchange.md).
 ///
+/// This is the `data` half of a SUCCESS envelope only. A rejection never uses
+/// this type — it rides the envelope `error` half, so the old
+/// `accepted: false` + prose `error` pair is gone. The client raises it as a
+/// `MetaFluxApiError`.
+///
 /// Two shapes share this struct (the node omits the absent keys):
 /// - **Order-type actions** (`submit_order` / `batch_order` / `cancel_order` /
 ///   …) carry `statuses` — the per-order union array. There is NO top-level
-///   `oid`; the order id rides inside each status entry.
-/// - **Every other action** (and admission-time rejections) carries the
-///   admission envelope: `accepted` + `mempool_depth` + (`nonce` / `action_hash`
-///   on success, `error` on rejection).
+///   `oid`; the order id rides inside each status entry. A single leg can still
+///   fail inside a `statuses` entry while the request as a whole succeeds.
+/// - **Every other action** carries the admission summary: `accepted` +
+///   `mempool_depth` + `nonce` + `action_hash` + `committed`.
 export interface NativeExchangeAck {
   /// Per-order status union — present only for order-type actions.
   statuses?: OrderStatus[];
-  /// Whether the action was admitted to the mempool (admission envelope; omitted
+  /// Whether the action was admitted to the mempool (admission summary; omitted
   /// on the order path).
   accepted?: boolean;
-  /// Rejection reason, when `accepted` is false.
-  error?: string;
-  /// Mempool depth observed at admission time (diagnostic; admission envelope).
+  /// Whether the action COMMITTED, as distinct from being admitted. `accepted`
+  /// alone reads as a success it does not promise: an action can be admitted
+  /// and then rejected at commit. `committed: false` reports admission and
+  /// nothing more — re-read the state the action changes.
+  committed?: boolean;
+  /// Mempool depth observed at admission time (diagnostic; admission summary).
   mempool_depth?: number;
-  /// Echoed replay nonce (admission envelope).
+  /// Echoed replay nonce (admission summary).
   nonce?: number;
   /// Deterministic action identifier — `0x` + keccak256 of the action bytes;
-  /// matches against commit events (admission envelope).
+  /// matches against commit events (admission summary).
   action_hash?: string;
+  /// Echoed client order id (`0x`-hex) on the async-confirm ack, when the order
+  /// carried one. Correlates the later WS fill by cloid. Absent on the sync
+  /// path and on cloid-less actions.
+  cloid?: string;
 }
 
 /// Acknowledgement from `submitOrder`. Mirrors `Order` from the gateway's
@@ -602,9 +615,94 @@ export interface Position {
   timestamp: number;
 }
 
-/// Error envelope every CCXT 4xx/5xx response carries. The Client
-/// throws `MetaFluxApiError` (defined in http.ts) when the gateway
-/// returns this shape.
+/// Legacy prose-only error body. The faucet (`POST /faucet`) still answers with
+/// it; `/info` and `/exchange` do NOT — they answer `ApiEnvelope`.
 export interface ErrorEnvelope {
   error: string;
 }
+
+/// Stable machine-readable rejection code. `code` is the contract a caller may
+/// branch on. It is namespaced by prefix: `ORDER_`, `MARGIN_`, `AUTH_`,
+/// `MARKET_`, `ASSET_`, `RATE_`, plus the generic request-shape codes.
+///
+/// The union lists every code this release knows. `(string & {})` widens it, so
+/// a code minted by a NEWER node still type-checks and still parses — an
+/// unknown code is never a client-side failure. Keep the literal branches for
+/// the codes you handle and a default for the rest.
+export type ApiErrorCode =
+  | 'ORDER_NOT_FOUND'
+  | 'ORDER_ZERO_SIZE'
+  | 'ORDER_INVALID_PRICE'
+  | 'ORDER_INVALID_SIZE'
+  | 'ORDER_BELOW_MIN_NOTIONAL'
+  | 'ORDER_SELF_TRADE'
+  | 'ORDER_DUPLICATE_CLOID'
+  | 'MARGIN_INSUFFICIENT'
+  | 'AUTH_UNAUTHORIZED'
+  | 'AUTH_BAD_SIGNATURE'
+  | 'AUTH_AGENT_FORBIDDEN'
+  | 'MARKET_NOT_FOUND'
+  | 'MARKET_INACTIVE'
+  | 'MARKET_OI_CAP'
+  | 'ASSET_INSUFFICIENT_BALANCE'
+  | 'RATE_LIMITED'
+  | 'INVALID_REQUEST'
+  | 'UNKNOWN_TYPE'
+  | 'NOT_FOUND'
+  | 'ACTION_UNSUPPORTED'
+  | 'PRECONDITION_FAILED'
+  | 'INTERNAL'
+  | 'UNAVAILABLE'
+  | (string & {});
+
+/// The bound a rejection violated. `limit` is the bound, `actual` is what the
+/// request carried; both are decimal STRINGS, because a size or a price can
+/// exceed `Number.MAX_SAFE_INTEGER`.
+export interface ApiErrorDetails {
+  /// The request field the bound applies to, e.g. `"px"`, `"sz"`, `"margin"`.
+  field: string;
+  /// The permitted bound.
+  limit: string;
+  /// The value the request carried.
+  actual: string;
+}
+
+/// The `error` half of the response envelope, and the per-leg rejection shape
+/// inside `statuses`. One error shape covers a whole request and one leg of it.
+export interface ApiError {
+  /// Stable code. Branch on THIS.
+  code: ApiErrorCode;
+  /// Human sentence. Prose — it MAY change in any release, so never match on
+  /// it. Use `code`.
+  message: string;
+  /// The violated bound. ABSENT when the rejection carries none — never `{}`.
+  details?: ApiErrorDetails;
+}
+
+/// A successful `/info` or `/exchange` response. `error` is ABSENT, never null.
+///
+/// `data` MAY be null: a read can succeed with no content.
+export interface ApiSuccess<T> {
+  data: T;
+}
+
+/// A failed `/info` or `/exchange` response. `data` is ABSENT.
+export interface ApiFailure {
+  error: ApiError;
+}
+
+/// The one response envelope `/info` and `/exchange` answer with.
+///
+/// The two keys are ASYMMETRIC on purpose: a success carries `data` alone, so a
+/// hot market-data read carries no dead `error` field. The presence of `error`
+/// is the discriminant — narrow with `'error' in body` before you read either
+/// half. `data` does not exist on the failure branch, so reading it there is a
+/// type error.
+///
+/// The HTTP status keeps its real meaning; the envelope does not replace it. A
+/// rejection at COMMIT time still answers `200`, because the request itself was
+/// well-formed and admitted — so test for `error`, not for the status.
+///
+/// `/info` keeps its `type` discriminator INSIDE `data`, next to the payload
+/// fields: `{"data": {"type": "user_fills", "fills": [...]}}`.
+export type ApiEnvelope<T> = ApiSuccess<T> | ApiFailure;

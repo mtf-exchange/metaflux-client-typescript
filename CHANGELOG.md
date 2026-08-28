@@ -4,7 +4,54 @@ All notable changes to the TypeScript SDK are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking: `/info` and `/exchange` answer ONE response envelope.** A success
+  is `{"data": <payload>}` with NO `error` key; a failure is
+  `{"error": {"code", "message", "details"?}}` with NO `data` key. `data` may
+  itself be `null`, because a read can succeed with no content.
+
+  `/info`'s `type` discriminator moved INSIDE `data`, beside the payload fields.
+  A field read at `body.data.fills` is still at `body.data.fills`. Every typed
+  `info()` method already unwraps `data`, so most callers see no change — but a
+  method now returns `type` alongside the payload keys.
+
+  New exported types: `ApiEnvelope`, `ApiSuccess`, `ApiFailure`, `ApiError`,
+  `ApiErrorCode`, `ApiErrorDetails`. `ApiEnvelope` is a discriminated union on
+  the presence of `error`, so `data` cannot be read on the failure branch.
+
+- **Breaking: `MetaFluxApiError` carries `code` and `details`.** `code` is the
+  stable contract — branch on it. `message` is prose and MAY change in any
+  release, so never match on it. `details` is `{field, limit, actual}` and is
+  `undefined` when the rejection names no bound. `code` and `details` are
+  `undefined` when the response carried no error envelope.
+
+  `ApiErrorCode` is the union of the 23 codes this release knows, widened with
+  `(string & {})`. A code minted by a NEWER node still type-checks and still
+  parses.
+
+- **Breaking: a rejection is no longer found by the HTTP status.** A COMMIT-time
+  rejection answers `200` with an `error` body, because the request was
+  well-formed and admitted. The client raises `MetaFluxApiError` on the error
+  body, whatever the status.
+
+- **Breaking: the `OrderStatus` error entry is an object.** `{ error: string }`
+  became `{ error: ApiError }` — the same `{code, message, details?}` object the
+  envelope uses. One error shape covers a whole request and one leg of it.
+
+- **Breaking: `NativeExchangeAck.error` is deleted.** The old
+  `accepted: false` + prose `error` pair is gone: a rejection rides the envelope
+  `error` half instead. `committed` and `cloid` are added. Read `committed`, not
+  `accepted`: `accepted` alone means "admitted to the mempool", and an admitted
+  action can still be rejected at commit.
+
+- A failed spot submission (`SpotSubmission`, `state: 'failed'`) adds `code` and
+  `details`, so the spot route no longer reports prose alone.
+
 ### Removed
+
+- **Breaking: `info().rawEnvelope()` is deleted.** It existed to expose the
+  echoed `type`, which now rides inside `data`. Use `info().raw()`.
 
 - **Breaking: `info().nodeInfo()`, `info().blockInfo()`, and the `NodeInfo` and
   `BlockInfo` types are deleted.** Neither read is served any more, so both

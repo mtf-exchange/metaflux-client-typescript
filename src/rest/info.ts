@@ -5,10 +5,12 @@
 // is a `POST /info` whose body is `{"type": "<discriminator>", ...params}` —
 // snake_case field names, the exact convention the node decodes.
 //
-// ENVELOPE. Every successful response is `{"type": "<query>", "data": {...}}`.
-// `post` validates the echoed `type` and returns the unwrapped `data` typed —
-// the unwrap lives in exactly one place (`post`). The `raw<T>()` escape hatch
-// returns the unwrapped `data` too (use `rawEnvelope` for the full envelope).
+// ENVELOPE. Every successful response is `{"data": {...}}`, and the `type`
+// discriminator rides INSIDE `data` next to the payload fields:
+// `{"data": {"type": "<query>", ...payload}}`. A rejection answers
+// `{"error": {"code", "message", "details"?}}` instead and is raised as a
+// `MetaFluxApiError`. `post` validates the echoed `type` and returns the
+// unwrapped `data` typed; the `raw<T>()` escape hatch returns it too.
 //
 // ONE QUESTION, ONE READ. A read that merely filtered or projected another was
 // removed, and its ask became a PARAMETER on the read it duplicated:
@@ -29,7 +31,7 @@
 // typed `string` in `../types/info/index.js` to match the node's decimal-string
 // encoding; ids / counts stay `number`.
 
-import { httpRequest } from './http.js';
+import { envelopeRequest } from './http.js';
 import type {
   AccountOverview,
   AccountState,
@@ -73,15 +75,9 @@ import type {
 /// Response depth for `InfoApi.accountState`.
 export type AccountDetail = 'full' | 'margin' | 'adl';
 
-/// The committed `{type, data}` response envelope every `/info` query returns.
-interface InfoEnvelope<T> {
-  type: string;
-  data: T;
-}
-
 /// `/info` namespace handle. Each method POSTs a typed `{"type": ...}` body to
-/// `POST <baseUrl>/info`, validates the `{type, data}` envelope, and returns
-/// the unwrapped `data`.
+/// `POST <baseUrl>/info`, validates the `{data}` envelope, and returns the
+/// unwrapped `data`.
 ///
 /// No signing required — these are read-only queries. Construct via
 /// `Client.info` or directly with a base URL.
@@ -649,36 +645,22 @@ export class InfoApi {
     return this.post<T>(body);
   }
 
-  /// Like `raw`, but returns the full `{type, data}` envelope rather than just
-  /// the unwrapped `data` — for callers that want to inspect the echoed `type`.
-  async rawEnvelope<T = unknown>(body: {
-    type: string;
-    [k: string]: unknown;
-  }): Promise<InfoEnvelope<T>> {
-    return httpRequest<InfoEnvelope<T>>(this.baseUrl, '/info', {
-      method: 'POST',
-      json: body,
-    });
-  }
-
-  /// POST a typed body, validate the `{type, data}` envelope echoes the request
-  /// `type`, and return the unwrapped `data`. The single place the envelope is
-  /// peeled — every typed method routes through here.
+  /// POST a typed body, check the `type` echoed inside `data` matches the
+  /// request, and return `data`. The single place the envelope is peeled —
+  /// every typed method routes through here.
+  ///
+  /// `data` keeps its `type` key, so a payload field stays exactly where it was.
   private async post<T>(body: { type: string; [k: string]: unknown }): Promise<T> {
-    const env = await httpRequest<InfoEnvelope<T>>(this.baseUrl, '/info', {
+    const data = await envelopeRequest<T>(this.baseUrl, '/info', {
       method: 'POST',
       json: body,
     });
-    if (env === null || typeof env !== 'object' || !('data' in env)) {
+    const echoed = (data as { type?: unknown } | null)?.type;
+    if (echoed !== body.type) {
       throw new TypeError(
-        `/info ${body.type}: response is not a {type, data} envelope`,
+        `/info ${body.type}: response type mismatch — got '${String(echoed)}'`,
       );
     }
-    if (env.type !== body.type) {
-      throw new TypeError(
-        `/info ${body.type}: response type mismatch — got '${env.type}'`,
-      );
-    }
-    return env.data;
+    return data;
   }
 }

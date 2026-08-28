@@ -343,7 +343,7 @@ describe.skipIf(!wasmBuilt)('Client.placeOrder submission', () => {
 
   beforeEach(() => {
     bodies = [];
-    reply = () => ({ ok: true, status: 200, body: '{"statuses":[]}' });
+    reply = () => ({ ok: true, status: 200, body: '{"data":{"statuses":[]}}' });
     savedFetch = globalThis.fetch;
     // The WASM loader fetches pkg/*.wasm through this same global, so record
     // only the `/exchange` posts.
@@ -377,7 +377,7 @@ describe.skipIf(!wasmBuilt)('Client.placeOrder submission', () => {
     reply = () => ({
       ok: true,
       status: 200,
-      body: '{"statuses":[{"resting":{"oid":11}},{"filled":{"oid":12,"total_sz":"1.5","avg_px":"50000.0"}}]}',
+      body: '{"data":{"statuses":[{"resting":{"oid":11}},{"filled":{"oid":12,"total_sz":"1.5","avg_px":"50000.0"}}]}}',
     });
     const c = await client();
     const result = await c.placeOrder([
@@ -397,7 +397,7 @@ describe.skipIf(!wasmBuilt)('Client.placeOrder submission', () => {
   });
 
   it('sends ONE spot_order POST PER spot order', async () => {
-    reply = () => ({ ok: true, status: 200, body: '{"statuses":[{"resting":{"oid":5}}]}' });
+    reply = () => ({ ok: true, status: 200, body: '{"data":{"statuses":[{"resting":{"oid":5}}]}}' });
     const c = await client();
     const result = await c.placeOrder([
       spotLeg(),
@@ -429,8 +429,8 @@ describe.skipIf(!wasmBuilt)('Client.placeOrder submission', () => {
     reply = () => {
       call += 1;
       return call === 2
-        ? { ok: false, status: 400, body: '{"error":"insufficient balance"}' }
-        : { ok: true, status: 200, body: '{"statuses":[{"resting":{"oid":5}}]}' };
+        ? { ok: false, status: 400, body: '{"error":{"code":"ASSET_INSUFFICIENT_BALANCE","message":"insufficient spot balance"}}' }
+        : { ok: true, status: 200, body: '{"data":{"statuses":[{"resting":{"oid":5}}]}}' };
     };
     const c = await client();
 

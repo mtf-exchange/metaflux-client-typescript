@@ -30,7 +30,7 @@ const client = new Client({
   privateKey: new Uint8Array(32).fill(0x42),
 });
 
-// ---- Reads (no key required) — POST /info, {type,data} envelope unwrapped ----
+// ---- Reads (no key required) — POST /info, {data} envelope unwrapped ----
 // Market reads are keyed by `coin` (the market SYMBOL, e.g. "BTC"); account
 // reads by 0x `address`. Numeric market_id/asset_id/account_id params are gone
 // from the read surface (the signed /exchange action plane keeps numeric ids).
@@ -422,13 +422,46 @@ See [`src/index.ts`](src/index.ts) for the full surface.
 | msgpack encoding of action bodies  | WASM (`rmp_serde::to_vec_named`)         |
 | EVM address derivation             | WASM (keccak + low-20-bytes slice)       |
 | HTTP fetch wrapper                 | TS                                       |
-| `{type,data}` envelope unwrap      | TS                                       |
+| `{data}` / `{error}` envelope unwrap| TS                                       |
 | JSON request/response coercion     | TS                                       |
 | WebSocket framing + reconnect      | TS                                       |
 
 The split is intentional: every byte the gateway/node *parses* is produced by
 Rust on both sides. The TS layer only assembles JSON envelopes around
 already-canonical WASM outputs, so the wire format has a single source of truth.
+
+## Error handling
+
+Every rejection raises `MetaFluxApiError`:
+
+```ts
+import { Client, MetaFluxApiError } from '@metaflux-dex/client';
+
+try {
+  await client.submitOrderNative(order);
+} catch (err) {
+  if (err instanceof MetaFluxApiError) {
+    // `code` is the stable contract. Branch on it.
+    if (err.code === 'MARGIN_INSUFFICIENT') topUp(err.details?.limit);
+    // `message` is prose and MAY change in any release. NEVER match on it.
+    console.error(err.code, err.message, err.details);
+  }
+}
+```
+
+- `code` is a `ApiErrorCode`: the union of the codes this release knows, widened
+  so a code minted by a NEWER node still type-checks and still parses. Keep a
+  default branch.
+- `details` is `{field, limit, actual}` and is ABSENT when the rejection names no
+  bound — never an empty object.
+- `code` and `details` are `undefined` when the response carried no error
+  envelope: a proxy fault, an unparseable body, or the faucet, which answers a
+  prose-only `{"error": "..."}`.
+- `status` is the HTTP status and keeps its own meaning. **Do not test the status
+  to find a rejection.** A rejection at COMMIT time answers `200`, because the
+  request was well-formed and admitted. Test for the exception.
+- A batch can fail one leg and succeed as a whole: read each `statuses` entry.
+  An `{ error }` entry carries the same `{code, message, details?}` object.
 
 ## Wire conventions
 
@@ -440,6 +473,11 @@ already-canonical WASM outputs, so the wire format has a single source of truth.
 - **MTF-native action**: a canonical snake_case JSON action
   (`{"type":"submit_order","order":{…}}`) signed verbatim; the request body is
   `{ action, nonce, signature }` to `POST /exchange`.
+- **Response envelope**: `/info` and `/exchange` answer ONE envelope. A success
+  is `{"data": <payload>}` and carries no `error` key. A failure is
+  `{"error": {"code", "message", "details"?}}` and carries no `data` key. `data`
+  may itself be `null` — a read can succeed with no content. `/info` keeps its
+  `type` discriminator INSIDE `data`, beside the payload fields.
 
 Field shapes are mirrored from the authoritative API spec in
 [`metaflux-knowledges`](https://github.com/mtf-exchange/metaflux-knowledges).

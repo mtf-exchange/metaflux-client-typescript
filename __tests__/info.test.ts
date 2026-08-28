@@ -3,10 +3,12 @@
 // `{"type": ...}` body the server's `/info` dispatcher expects
 // (per the KB spec metaflux-knowledges/api/rest/info.md), keyed by the real
 // param (`coin` market symbol / 0x `address` / 0x `vault`), and that the
-// `{type, data}` envelope is unwrapped to the typed `data`.
+// `{data}` envelope is unwrapped to the typed `data`, whose `type` key the
+// unwrap validates.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { InfoApi } from '../src/rest/info.js';
+import { MetaFluxApiError } from '../src/rest/http.js';
 
 interface Captured {
   url: string;
@@ -16,8 +18,9 @@ interface Captured {
 }
 
 let captured: Captured | undefined;
-// Server response — every `/info` reply is the `{type, data}` envelope. Tests
-// set `nextType` + `nextData`; the mock fetch wraps them.
+// Server response — every `/info` reply is the `{data}` envelope, with the
+// `type` discriminator folded INTO `data`. Tests set `nextType` + `nextData`;
+// the mock fetch wraps them.
 let nextType = '';
 let nextData: unknown = {};
 
@@ -42,7 +45,9 @@ beforeEach(() => {
       ok: true,
       status: 200,
       text: async () =>
-        JSON.stringify({ type: nextType || reqType, data: nextData }),
+        JSON.stringify({
+          data: { ...(nextData as object), type: nextType || reqType },
+        }),
     } as Response;
   }) as typeof fetch;
 });
@@ -419,8 +424,9 @@ describe('InfoApi request shapes', () => {
     // funding_paid reads "0" while funding_complete is false: UNKNOWN, not zero.
     expect(p.funding_paid).toBe('0');
     expect(p.funding_complete).toBe(false);
-    // The envelope carries address + positions and nothing else.
-    expect(Object.keys(res).sort()).toEqual(['address', 'positions']);
+    // The payload carries address + positions and nothing else; `type` is the
+    // envelope's discriminator, folded in beside them.
+    expect(Object.keys(res).sort()).toEqual(['address', 'positions', 'type']);
   });
 
   it('userPositionHistoryByTime sends the window and gets no echo back', async () => {
@@ -435,7 +441,7 @@ describe('InfoApi request shapes', () => {
       end_time: 9,
     });
     // Unlike userFillsByTime, this reply does NOT echo the bounds.
-    expect(Object.keys(res).sort()).toEqual(['address', 'positions']);
+    expect(Object.keys(res).sort()).toEqual(['address', 'positions', 'type']);
   });
 
   it('fundingHistory is keyed by coin and carries premium + funding_rate', async () => {
@@ -700,13 +706,14 @@ describe('InfoApi request shapes', () => {
     expect(res.ok).toBe(true);
   });
 
-  it('rawEnvelope returns the full {type, data} envelope', async () => {
+  it('raw returns the `type` folded into data alongside the payload', async () => {
     const api = new InfoApi(BASE);
-    nextType = 'exchange_status';
     nextData = { accepting_orders: true };
-    const env = await api.rawEnvelope({ type: 'exchange_status' });
-    expect(env.type).toBe('exchange_status');
-    expect(env.data).toEqual({ accepting_orders: true });
+    const res = await api.raw<{ type: string; accepting_orders: boolean }>({
+      type: 'exchange_status',
+    });
+    expect(res.type).toBe('exchange_status');
+    expect(res.accepting_orders).toBe(true);
   });
 });
 
@@ -1313,7 +1320,7 @@ describe('InfoApi P2 wave-1 reads', () => {
 });
 
 describe('InfoApi envelope validation', () => {
-  it('throws when the response is not a {type, data} envelope', async () => {
+  it('throws when the response is not a {data} envelope', async () => {
     const api = new InfoApi(BASE);
     // Override the mock to return a bare (un-enveloped) body.
     globalThis.fetch = (async () =>
@@ -1332,9 +1339,92 @@ describe('InfoApi envelope validation', () => {
         ok: true,
         status: 200,
         text: async () =>
-          JSON.stringify({ type: 'something_else', data: {} }),
+          JSON.stringify({ data: { type: 'something_else' } }),
       }) as Response) as typeof fetch;
     await expect(api.feeSchedule()).rejects.toThrow(/type mismatch/);
+  });
+
+  it('raises the error envelope with its code and details', async () => {
+    const api = new InfoApi(BASE);
+    globalThis.fetch = (async () =>
+      ({
+        ok: false,
+        status: 400,
+        text: async () =>
+          JSON.stringify({
+            error: {
+              code: 'ORDER_INVALID_PRICE',
+              message: 'price off grid: 12345 is not a multiple of tick_size 100',
+              details: { field: 'px', limit: '100', actual: '12345' },
+            },
+          }),
+      }) as Response) as typeof fetch;
+
+    const caught = await api.feeSchedule().catch((e: unknown) => e);
+    expect(caught).toBeInstanceOf(MetaFluxApiError);
+    if (!(caught instanceof MetaFluxApiError)) throw new Error('no throw');
+    expect(caught.status).toBe(400);
+    expect(caught.code).toBe('ORDER_INVALID_PRICE');
+    expect(caught.details).toEqual({
+      field: 'px',
+      limit: '100',
+      actual: '12345',
+    });
+  });
+
+  it('leaves details undefined when the rejection names no bound', async () => {
+    const api = new InfoApi(BASE);
+    globalThis.fetch = (async () =>
+      ({
+        ok: false,
+        status: 400,
+        text: async () =>
+          JSON.stringify({
+            error: { code: 'UNKNOWN_TYPE', message: 'unknown info type: nope' },
+          }),
+      }) as Response) as typeof fetch;
+
+    const caught = await api.feeSchedule().catch((e: unknown) => e);
+    if (!(caught instanceof MetaFluxApiError)) throw new Error('no throw');
+    expect(caught.code).toBe('UNKNOWN_TYPE');
+    expect(caught.details).toBeUndefined();
+  });
+
+  it('raises an error body that arrives with a 200', async () => {
+    // A COMMIT-time rejection is well-formed and was admitted, so it keeps its
+    // 200. A status-only test would read it as a success.
+    const api = new InfoApi(BASE);
+    globalThis.fetch = (async () =>
+      ({
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            error: { code: 'MARGIN_INSUFFICIENT', message: 'no margin' },
+          }),
+      }) as Response) as typeof fetch;
+
+    const caught = await api.feeSchedule().catch((e: unknown) => e);
+    if (!(caught instanceof MetaFluxApiError)) throw new Error('no throw');
+    expect(caught.status).toBe(200);
+    expect(caught.code).toBe('MARGIN_INSUFFICIENT');
+  });
+
+  it('accepts a code this release does not know', async () => {
+    const api = new InfoApi(BASE);
+    globalThis.fetch = (async () =>
+      ({
+        ok: false,
+        status: 400,
+        text: async () =>
+          JSON.stringify({
+            error: { code: 'ORDER_FROM_A_NEWER_NODE', message: 'nope' },
+          }),
+      }) as Response) as typeof fetch;
+
+    const caught = await api.feeSchedule().catch((e: unknown) => e);
+    if (!(caught instanceof MetaFluxApiError)) throw new Error('no throw');
+    expect(caught.code).toBe('ORDER_FROM_A_NEWER_NODE');
   });
 });
 

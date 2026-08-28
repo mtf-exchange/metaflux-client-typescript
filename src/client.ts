@@ -8,7 +8,7 @@
 // Naming note: exported as `Client` (NOT `MtfClient`) per session
 // direction. Consumers import as `import { Client } from '@metaflux-dex/client'`.
 
-import { httpRequest } from './rest/http.js';
+import { envelopeRequest, MetaFluxApiError } from './rest/http.js';
 import {
   // Only the canonical action-JSON builders the TYPED order path still needs
   // (order / cancel / spot / TWAP / batch / scale / chase). Every other action
@@ -560,7 +560,15 @@ export class Client {
         submissions[index] = { index, cloid: order.cloid, state: 'sent', ack };
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
-        submissions[index] = { index, cloid: order.cloid, state: 'failed', error: reason };
+        const api = err instanceof MetaFluxApiError ? err : undefined;
+        submissions[index] = {
+          index,
+          cloid: order.cloid,
+          state: 'failed',
+          error: reason,
+          code: api?.code,
+          details: api?.details,
+        };
         throw new PlaceOrderPartialError(result, reason);
       }
     }
@@ -1183,7 +1191,7 @@ export class Client {
       undefined,
       this.expiresAfterMs,
     );
-    return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
+    return envelopeRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
       method: 'POST',
       rawJson: typedOrderRequestBody(signed),
       bearer: this.jwt,
@@ -1245,7 +1253,7 @@ export class Client {
         );
       }
     });
-    return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
+    return envelopeRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
       method: 'POST',
       rawJson: typedOrderRequestBody(signed),
       bearer: this.jwt,
@@ -1338,7 +1346,7 @@ export class Client {
   async postTyped(
     signed: TypedSignedAction,
   ): Promise<NativeExchangeAck> {
-    return httpRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
+    return envelopeRequest<NativeExchangeAck>(this.baseUrl, '/exchange', {
       method: 'POST',
       rawJson: typedRequestBody(signed),
       bearer: this.jwt,

@@ -257,7 +257,11 @@ describe.skipIf(!wasmBuilt)(
       globalThis.fetch = vi.fn(
         async (_url: unknown, init: { body?: unknown } = {}) => {
           bodies.push(String(init.body ?? ''));
-          return { ok: true, status: 200, text: async () => '{}' } as Response;
+          return {
+            ok: true,
+            status: 200,
+            text: async () => '{"data":{}}',
+          } as Response;
         },
       ) as unknown as typeof globalThis.fetch;
     });
@@ -392,7 +396,11 @@ describe.skipIf(!wasmBuilt)('P0 redirected methods == typed submitTyped path', (
     globalThis.fetch = vi.fn(
       async (_url: unknown, init: { body?: unknown } = {}) => {
         bodies.push(String(init.body ?? ''));
-        return { ok: true, status: 200, text: async () => '{}' } as Response;
+        return {
+            ok: true,
+            status: 200,
+            text: async () => '{"data":{}}',
+          } as Response;
       },
     ) as unknown as typeof globalThis.fetch;
   });

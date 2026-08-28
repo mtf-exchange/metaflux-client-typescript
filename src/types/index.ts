@@ -14,6 +14,13 @@ export type {
   Tif,
   StpMode,
   ErrorEnvelope,
+  // The shared `/info` + `/exchange` response envelope.
+  ApiEnvelope,
+  ApiSuccess,
+  ApiFailure,
+  ApiError,
+  ApiErrorCode,
+  ApiErrorDetails,
   // MTF-native action types.
   NativeOrder,
   NativeCancel,

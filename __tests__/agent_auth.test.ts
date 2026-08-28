@@ -52,8 +52,9 @@ describe.skipIf(!wasmBuilt)('Client agent authorization', () => {
   let savedFetch: typeof globalThis.fetch;
 
   /// The `account_state` overview envelope the client reads `agents` from.
-  /// The echoed `type` is load-bearing: `InfoApi.post` refuses a mismatch, so a
-  /// stale name here would make every authorization check fail open.
+  /// The `type` echoed INSIDE `data` is load-bearing: `InfoApi.post` refuses a
+  /// mismatch, so a stale name here would make every authorization check fail
+  /// open.
   function approved(agents: AgentEntry[]): {
     ok: boolean;
     status: number;
@@ -63,8 +64,8 @@ describe.skipIf(!wasmBuilt)('Client agent authorization', () => {
       ok: true,
       status: 200,
       body: JSON.stringify({
-        type: 'account_state',
         data: {
+          type: 'account_state',
           address: '0x0',
           vault: { equities: [], vaults: [] },
           staking: {
@@ -101,7 +102,7 @@ describe.skipIf(!wasmBuilt)('Client agent authorization', () => {
           return {
             ok: true,
             status: 200,
-            text: async () => '{"statuses":[]}',
+            text: async () => '{"data":{"statuses":[]}}',
           } as Response;
         }
         if (target.includes('/info')) {
