@@ -276,6 +276,11 @@ describe('InfoApi request shapes', () => {
             maker_volume_30d: '3100000',
           },
           { product: 'spot_margin', taker_bps: '9.0', taker_volume_30d: '0' },
+          {
+            product: 'option',
+            option_taker_bps: '0.5',
+            option_premium_cap_ppm: 150000,
+          },
         ],
       },
     };
@@ -293,6 +298,11 @@ describe('InfoApi request shapes', () => {
     expect(f.user?.products?.[1]?.maker_volume_30d).toBeUndefined();
     // A NEGATIVE maker rate is a credit paid to the maker, not a malformed rate.
     expect(f.user?.products?.[0]?.maker_bps).toBe('1.2');
+    // The option row is a DIFFERENT shape: no ladder tier, no volume, and the
+    // two rates that actually decide its fee.
+    expect(f.user?.products?.[2]?.taker_bps).toBeUndefined();
+    expect(f.user?.products?.[2]?.taker_volume_30d).toBeUndefined();
+    expect(f.user?.products?.[2]?.option_premium_cap_ppm).toBe(150000);
   });
 
   it('feeSchedule tolerates an absent user block and absent products', async () => {

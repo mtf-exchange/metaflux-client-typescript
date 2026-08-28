@@ -560,7 +560,10 @@ export interface ProductFeeRow {
   product: string;
   /// The rate a fill on this product charges the taker, staking discount
   /// applied. Decimal bps string.
-  taker_bps: string;
+  ///
+  /// ABSENT on the `option` row, which does not price on a volume ladder — read
+  /// `option_taker_bps` there instead.
+  taker_bps?: string;
   /// The rate a fill on this product charges the maker, rebate subtracted.
   /// Decimal bps string; NEGATIVE means a credit paid to the maker.
   ///
@@ -569,10 +572,19 @@ export interface ProductFeeRow {
   /// leaves `spot_margin` and `option` with a taker leg only.
   maker_bps?: string;
   /// The trailing 30-day taker volume THIS product's tier reads.
-  taker_volume_30d: string;
+  /// ABSENT on the `option` row: an option does not price on a volume ladder.
+  taker_volume_30d?: string;
   /// The trailing 30-day maker volume THIS product's maker tier reads.
   /// ABSENT on a product with no maker leg — see `maker_bps`.
   maker_volume_30d?: string;
+  /// OPTION ROW ONLY. The rate charged on the option's MAXIMUM PAYOUT —
+  /// `strike` for a put, `cap - strike` for a capped call. Decimal bps string.
+  ///
+  /// The fee is the SMALLER of this term and `option_premium_cap_ppm` of the
+  /// premium. Both start unset, which charges nothing.
+  option_taker_bps?: string;
+  /// OPTION ROW ONLY. The fee ceiling as a fraction of the premium, in ppm.
+  option_premium_cap_ppm?: number;
 }
 
 /// One account's resolved fee position, returned by `Info.feeSchedule(address)`.
