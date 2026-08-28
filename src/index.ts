@@ -175,7 +175,6 @@ export type {
   // MTF-native `/info` response shapes. Source of truth:
   // the KB spec `metaflux-knowledges/api/rest/info.md`. Every field is the exact
   // snake_case key the node emits inside the `{type, data}` envelope's `data`.
-  NodeInfo,
   AccountState,
   AccountPosition,
   DexPositions,
@@ -217,7 +216,6 @@ export type {
   Candle,
   CandleType,
   CandleSnapshot,
-  BlockInfo,
   AgentEntry,
   SubAccountEntry,
   Mip3ActiveBids,

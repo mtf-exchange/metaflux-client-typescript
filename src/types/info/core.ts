@@ -17,26 +17,6 @@
 // within safe range stay `number`. Optional fields the node only emits
 // conditionally are `?`.
 
-/// `node_info` — static node identity + protocol version.
-export interface NodeInfo {
-  /// Network variant: `"devnet"`, `"testnet"`, or `"mainnet"`.
-  network: string;
-  /// EIP-712 chain id this node is pinned to.
-  chain_id: number;
-  /// Wire-protocol version (semver string).
-  protocol_version: string;
-  /// This node's index in the active validator set; `null` until published.
-  validator_index: number | null;
-  /// Operator-published build identifier (short hex).
-  build_commit: string;
-  /// Process uptime in seconds.
-  uptime_seconds: number;
-  /// Node software version string. Additive; may be absent on older nodes.
-  version?: string;
-  /// Whether the node supports the freeze-halt upgrade protocol. Additive.
-  freeze_halt_supported?: boolean;
-}
-
 /// Account liquidation tier — see `concepts/tiered-liquidation.md`.
 export type Tier = 'Safe' | 'T0' | 'T1' | 'T2' | 'T3';
 

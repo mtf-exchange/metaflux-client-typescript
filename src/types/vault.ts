@@ -30,9 +30,8 @@ export type WholeShares = string & { readonly __brand: 'WholeShares' };
 /// redemption fails the build. Before the brand it type-checked, and the burn
 /// was 10^18 times too large.
 ///
-/// The read types carry the brand as well. `ProtocolMetricsEvm
-/// .native_balance_wei` is typed `Raw1e18`, so a value parsed from a response
-/// arrives tagged and the caller tags nothing by hand.
+/// No read serves this plane. Every `/info` magnitude is already whole units,
+/// so a raw value always enters from OUTSIDE the SDK and the caller tags it.
 ///
 /// Build one with [`rawShares`]. Leave the raw plane with [`rawSharesToWhole`],
 /// which divides in exact integer arithmetic.
@@ -45,8 +44,7 @@ export type Raw1e18 = string & { readonly __brand: 'Raw1e18' };
 ///
 /// A plain `string` is untagged, not checked. No runtime test can separate the
 /// two planes, because `'1000000000000000000'` is also a legal whole-share
-/// count. So the wall fires where the plane is TAGGED: on a read type the SDK
-/// brands, or on a value the caller tags with [`rawShares`].
+/// count. So the wall fires where the plane is TAGGED, by [`rawShares`].
 export type NotRaw1e18 = WholeShares | (string & { readonly __brand?: undefined });
 
 /// Fraction digits the node keeps for a share count.

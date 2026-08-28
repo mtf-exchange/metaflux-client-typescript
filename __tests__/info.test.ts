@@ -56,27 +56,6 @@ const ADDR = '0x00000000000000000000000000000000000000aa';
 const VAULT = '0x00000000000000000000000000000000000000bb';
 
 describe('InfoApi request shapes', () => {
-  it('nodeInfo POSTs {"type":"node_info"} and unwraps `data`', async () => {
-    const api = new InfoApi(BASE);
-    nextData = {
-      network: 'devnet',
-      chain_id: 31337,
-      protocol_version: '1.0.0',
-      validator_index: null,
-      build_commit: 'abc1234',
-      uptime_seconds: 0,
-    };
-    const res = await api.nodeInfo();
-    expect(captured?.url).toBe('http://localhost:8080/info');
-    expect(captured?.method).toBe('POST');
-    expect(captured?.contentType).toBe('application/json');
-    expect(JSON.parse(captured!.body)).toEqual({ type: 'node_info' });
-    // Envelope unwrapped — `res` is the inner `data`, not `{type, data}`.
-    expect(res.network).toBe('devnet');
-    expect(res.chain_id).toBe(31337);
-    expect(res.protocol_version).toBe('1.0.0');
-  });
-
   it('accountState is keyed by 0x address (NOT a numeric account_id)', async () => {
     const api = new InfoApi(BASE);
     nextData = {
@@ -599,8 +578,11 @@ describe('InfoApi request shapes', () => {
       'leadingVaults',
       'maxBuilderFee',
       'spotDeployState',
-      // Operator lane: refused on the public API.
+      // Deleted outright: no lane serves them.
+      'nodeInfo',
+      'blockInfo',
       'protocolMetrics',
+      // Operator lane: refused on the public API.
       'rfqOpen',
       'rfqUser',
       'fbaBatchState',
@@ -1340,7 +1322,7 @@ describe('InfoApi envelope validation', () => {
         status: 200,
         text: async () => JSON.stringify({ chain_id: 31337 }),
       }) as Response) as typeof fetch;
-    await expect(api.nodeInfo()).rejects.toThrow(/envelope/);
+    await expect(api.feeSchedule()).rejects.toThrow(/envelope/);
   });
 
   it('throws when the echoed type does not match the request', async () => {
@@ -1352,7 +1334,7 @@ describe('InfoApi envelope validation', () => {
         text: async () =>
           JSON.stringify({ type: 'something_else', data: {} }),
       }) as Response) as typeof fetch;
-    await expect(api.nodeInfo()).rejects.toThrow(/type mismatch/);
+    await expect(api.feeSchedule()).rejects.toThrow(/type mismatch/);
   });
 });
 
@@ -1591,15 +1573,6 @@ describe('InfoApi realigned read shapes', () => {
 
   it('timestamp fields dropped the _ms suffix across the read surface', async () => {
     const api = new InfoApi(BASE);
-
-    nextData = {
-      height: 8_416_000,
-      round: 8_416_000,
-      epoch: 12,
-      timestamp: 1_784_820_001_000,
-      block_hash: '0x00',
-    };
-    expect((await api.blockInfo()).timestamp).toBe(1_784_820_001_000);
 
     nextData = {
       address: ADDR,

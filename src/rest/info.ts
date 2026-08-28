@@ -34,7 +34,6 @@ import type {
   AccountOverview,
   AccountState,
   ActiveAssetData,
-  BlockInfo,
   BridgeWithdrawalHistory,
   CandleSnapshot,
   CandleType,
@@ -49,7 +48,6 @@ import type {
   Markets,
   MarketsMeta,
   Mip3ActiveBids,
-  NodeInfo,
   OpenOrders,
   OptionPositions,
   OptionSeriesRegistry,
@@ -91,11 +89,6 @@ export class InfoApi {
   constructor(private readonly baseUrl: string) {}
 
   // ── documented core reads ──────────────────────────────────────────────
-
-  /// `node_info` — static node identity + protocol version.
-  async nodeInfo(): Promise<NodeInfo> {
-    return this.post<NodeInfo>({ type: 'node_info' });
-  }
 
   /// `account_state` — the account's full TRADING state, keyed by `address`
   /// (0x hex).
@@ -400,11 +393,6 @@ export class InfoApi {
     return this.post<CandleSnapshot>(body);
   }
 
-  /// `block_info` — latest committed block metadata. No parameters.
-  async blockInfo(): Promise<BlockInfo> {
-    return this.post<BlockInfo>({ type: 'block_info' });
-  }
-
   /// `mip3_active_bids` — MIP-3 permissionless perp-deploy auction snapshot.
   async mip3ActiveBids(): Promise<Mip3ActiveBids> {
     return this.post<Mip3ActiveBids>({ type: 'mip3_active_bids' });
@@ -653,9 +641,10 @@ export class InfoApi {
   /// validate the envelope, and return the unwrapped `data` typed. For request
   /// shapes the SDK doesn't yet model (e.g. `validator_votes`).
   ///
-  /// It does NOT reach an operator-lane read. `protocol_metrics`,
-  /// `mip3_deployer_oracle`, `rfq_open`, `rfq_user` and `fba_batch_state` are
-  /// refused on the public API with the same error an unknown type gets.
+  /// It does NOT reach an operator-lane read. `mip3_deployer_oracle`,
+  /// `rfq_open`, `rfq_user` and `fba_batch_state` are refused on the public API
+  /// with the same error an unknown type gets. `node_info`, `block_info` and
+  /// `protocol_metrics` are deleted outright — no lane serves them.
   async raw<T = unknown>(body: { type: string; [k: string]: unknown }): Promise<T> {
     return this.post<T>(body);
   }

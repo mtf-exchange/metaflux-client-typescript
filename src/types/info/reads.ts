@@ -461,20 +461,6 @@ export interface CandleSnapshot {
   candles: Candle[];
 }
 
-/// `block_info` — committed block metadata.
-export interface BlockInfo {
-  /// Latest committed block height.
-  height: number;
-  /// Consensus round of that block.
-  round: number;
-  /// Current epoch.
-  epoch: number;
-  /// Block timestamp (consensus ms).
-  timestamp: number;
-  /// Block hash (0x + 32 bytes).
-  block_hash: string;
-}
-
 /// One approved agent inside `AccountOverview.agents`.
 export interface AgentEntry {
   /// Approved agent wallet address (0x).

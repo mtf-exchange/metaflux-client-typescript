@@ -393,7 +393,7 @@ describe('WsClient wire protocol', () => {
     sock.open();
     await p;
 
-    const reply = ws.postInfo({ type: 'node_info' });
+    const reply = ws.postInfo({ type: 'fee_schedule' });
     // The frame went out as a `post` with id 1 and the info request payload.
     const frame = JSON.parse(sock.sent[sock.sent.length - 1]!) as {
       method: string;
@@ -403,7 +403,7 @@ describe('WsClient wire protocol', () => {
     expect(frame.method).toBe('post');
     expect(frame.id).toBe(1);
     expect(frame.request.type).toBe('info');
-    expect(frame.request.payload).toEqual({ type: 'node_info' });
+    expect(frame.request.payload).toEqual({ type: 'fee_schedule' });
 
     // The node echoes the id and wraps `{type, payload}`; post() returns payload.
     sock.inbound(

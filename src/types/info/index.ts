@@ -6,7 +6,6 @@
 //   bridge.ts    — the custody-bridge deployment + withdrawal-outbox reads
 
 export type {
-  NodeInfo,
   AccountState,
   AccountPosition,
   DexPositions,
@@ -55,7 +54,6 @@ export type {
   Candle,
   CandleType,
   CandleSnapshot,
-  BlockInfo,
   AgentEntry,
   SubAccountEntry,
   Mip3ActiveBids,

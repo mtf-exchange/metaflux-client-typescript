@@ -6,6 +6,20 @@ All notable changes to the TypeScript SDK are documented here.
 
 ### Removed
 
+- **Breaking: `info().nodeInfo()`, `info().blockInfo()`, and the `NodeInfo` and
+  `BlockInfo` types are deleted.** Neither read is served any more, so both
+  methods could only fail at run time.
+
+  Nothing replaces `node_info`: its fields were per-node identity, not consensus
+  state, so two honest nodes answer differently. Take the chain id from the
+  network you connect to — it is fixed per network, and `eth_chainId` on `/evm`
+  confirms it.
+
+  Nothing replaces `block_info` on REST: every read already stamps the committed
+  `height` and the consensus `time` it answers at, and the block head streams on
+  the `explorer_block` WS channel. `round` equalled `height` and `epoch` was
+  `height / 100000`, so both were restatements.
+
 - **Breaking: `encodeAction` and the `EncodeAction` type are deleted.** The node
   no longer serves the read, because the multisig inner blob now accepts the
   ordinary `{type, params}` wire action. Build the blob by UTF-8 encoding the
