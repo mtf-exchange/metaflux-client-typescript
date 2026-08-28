@@ -40,7 +40,7 @@ import type {
   ConvertToMultiSigUser,
   CreateVault,
   LinkStakingUser,
-  MbWithdraw,
+  BridgeWithdraw,
   Modify,
   NativeBuilder,
   NativeCancel,
@@ -985,9 +985,9 @@ export function buildNativeVaultDistributeAction(params: VaultDistribute): strin
 
 // ---- MetaBridge ----
 
-/// `mb_withdraw` — withdraw cross-collateral to a destination chain. `dst_addr`
+/// `bridge_withdraw` — withdraw cross-collateral to a destination chain. `dst_addr`
 /// is `0x` + 40 hex (a 20-byte EVM address).
-export function buildNativeMbWithdrawAction(params: MbWithdraw): string {
+export function buildNativeBridgeWithdrawAction(params: BridgeWithdraw): string {
   if (params.chain !== 'Base' && params.chain !== 'Arbitrum') {
     throw new RangeError('chain must be Base | Arbitrum');
   }
@@ -1000,7 +1000,7 @@ export function buildNativeMbWithdrawAction(params: MbWithdraw): string {
     throw new RangeError('dst_addr must be 0x + 40 hex chars (a 20-byte EVM address)');
   }
   return wrapParams(
-    'mb_withdraw',
+    'bridge_withdraw',
     `{${jsonStr('chain')}:${jsonStr(params.chain)},${jsonStr('asset')}:${params.asset},${jsonStr('amount')}:${params.amount},${jsonStr('dst_addr')}:${jsonStr(params.dst_addr)}}`,
   );
 }
@@ -1050,7 +1050,7 @@ export function buildNativeSpotMarginDepositAction(
  * @deprecated DEAD SURFACE. The node rejects `spot_margin_withdraw` while
  * cross-margin is active, which on the live chain is from genesis. Collateral is
  * the ONE unified USDC account, so there is no per-pair bucket to drain.
- * Withdraw account-wide with `mb_withdraw` instead. This builder stays because
+ * Withdraw account-wide with `bridge_withdraw` instead. This builder stays because
  * signature reconstruction needs the exact bytes.
  */
 export function buildNativeSpotMarginWithdrawAction(

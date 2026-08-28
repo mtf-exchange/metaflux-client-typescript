@@ -212,10 +212,10 @@ const VECTORS: Vector[] = [
   },
   {
     // chain "Arbitrum" => signed uint8 code 2; amount is a uint64 integer.
-    actionType: 'mb_withdraw',
+    actionType: 'bridge_withdraw',
     payload: { chain: 'Arbitrum', asset: 1, amount: 1_000_000, dst_addr: '0xdeadbeef' },
     nonce: 19n,
-    digest: '423f327abdec7b3469b6dc5d4993ac4a11f0a09487cec564b85d8162abdee2e8',
+    digest: '3a3f54fcf37ab322eaea12dee2696e11048c107c344a8b59c962dc1e8e65cfa4',
   },
   {
     actionType: 'spot_margin_deposit',
@@ -777,7 +777,7 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(isTypedAction('vault_distribute')).toBe(true);
     // The 12 formerly-deferred actions are now typed too.
     expect(isTypedAction('token_delegate')).toBe(true);
-    expect(isTypedAction('mb_withdraw')).toBe(true);
+    expect(isTypedAction('bridge_withdraw')).toBe(true);
     expect(isTypedAction('agent_set_abstraction')).toBe(true);
     expect(isTypedAction('spot_margin_open')).toBe(true);
     expect(isTypedAction('earn_withdraw')).toBe(true);
@@ -962,8 +962,8 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(encodeType('vault_withdraw')).toBe(
       'MetaFluxTransaction:VaultWithdraw(string metafluxChain,uint64 vaultId,string shares,uint64 nonce)',
     );
-    expect(encodeType('mb_withdraw')).toBe(
-      'MetaFluxTransaction:MbWithdraw(string metafluxChain,uint8 chain,uint32 asset,uint64 amount,string dstAddr,uint64 nonce)',
+    expect(encodeType('bridge_withdraw')).toBe(
+      'MetaFluxTransaction:BridgeWithdraw(string metafluxChain,uint8 chain,uint32 asset,uint64 amount,string dstAddr,uint64 nonce)',
     );
     expect(encodeType('spot_margin_deposit')).toBe(
       'MetaFluxTransaction:SpotMarginDeposit(string metafluxChain,uint32 pair,string amount,uint64 nonce)',
@@ -982,17 +982,17 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     );
   });
 
-  it('mb_withdraw: POST params.chain is the NAME, the v4 message field is the uint8 code', async () => {
+  it('bridge_withdraw: POST params.chain is the NAME, the v4 message field is the uint8 code', async () => {
     const { buildTyped, typedDataV4 } = await import('../src/native/typed.js');
     const built = buildTyped(
-      'mb_withdraw',
+      'bridge_withdraw',
       { chain: 'Arbitrum', asset: 1, amount: 1_000_000, dst_addr: '0xdeadbeef' },
       19n,
       CHAIN_ID,
     );
     // The POST action JSON carries the string chain name verbatim.
     expect(JSON.parse(built.actionJson)).toEqual({
-      type: 'mb_withdraw',
+      type: 'bridge_withdraw',
       params: { chain: 'Arbitrum', asset: 1, amount: 1_000_000, dst_addr: '0xdeadbeef' },
     });
     // The signed v4 message renders `chain` as the uint8 code (Arbitrum=2).

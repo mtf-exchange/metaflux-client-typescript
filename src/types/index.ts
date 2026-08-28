@@ -120,7 +120,7 @@ export type {
 } from './account.js';
 export type { TokenDelegate, ClaimRewards, LinkStakingUser } from './staking.js';
 export type { TwapOrder, TwapCancel } from './twap.js';
-export type { MbChain, MbWithdraw } from './meta-bridge.js';
+export type { BridgeChain, BridgeWithdraw } from './meta-bridge.js';
 export type {
   VaultKind,
   WholeShares,

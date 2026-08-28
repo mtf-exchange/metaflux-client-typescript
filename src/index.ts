@@ -153,7 +153,7 @@ export {
   buildNativeVaultModifyAction,
   buildNativeVaultWithdrawAction,
   buildNativeVaultDistributeAction,
-  buildNativeMbWithdrawAction,
+  buildNativeBridgeWithdrawAction,
   // RFQ / FBA / encrypted-order are signed via the W1 typed path
   // (`Client.rfqRequest` / `rfqAccept` / `fbaSubmit` / `submitEncryptedOrder` →
   // `submitTyped`), not opaque action builders.
@@ -458,8 +458,8 @@ export type {
   VaultWithdraw,
   VaultDistribute,
   // MetaBridge.
-  MbChain,
-  MbWithdraw,
+  BridgeChain,
+  BridgeWithdraw,
   // RFQ / FBA.
   CoreSide,
   RfqRequest,

@@ -72,7 +72,7 @@ import type {
   CWithdraw,
   FbaSubmit,
   LinkStakingUser,
-  MbWithdraw,
+  BridgeWithdraw,
   Modify,
   NativeCancel,
   NativeEarnDeposit,
@@ -1061,7 +1061,7 @@ export class Client {
 
   /// Withdraw cross-collateral to a destination chain via `POST /exchange`.
   async mbWithdraw(
-    params: MbWithdraw,
+    params: BridgeWithdraw,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
     return this.mbWithdrawTyped(params, opts);
@@ -1498,16 +1498,16 @@ export class Client {
     );
   }
 
-  /// Withdraw cross-collateral to a destination chain (`mb_withdraw`, typed
+  /// Withdraw cross-collateral to a destination chain (`bridge_withdraw`, typed
   /// scheme). The POST `params.chain` carries the chain NAME; the signed struct
   /// field is its `uint8` code (Base=1, Arbitrum=2). `amount` is an
   /// integer (uint64), not a decimal string.
   async mbWithdrawTyped(
-    params: MbWithdraw,
+    params: BridgeWithdraw,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
     return this.submitTyped(
-      'mb_withdraw',
+      'bridge_withdraw',
       params as unknown as Record<string, unknown>,
       opts,
     );

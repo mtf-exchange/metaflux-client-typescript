@@ -90,7 +90,7 @@ export interface NativeSpotMarginDeposit {
  * @deprecated DEAD SURFACE. The node rejects `spot_margin_withdraw` while
  * cross-margin is active, which on the live chain is from genesis. Collateral is
  * the ONE unified USDC account, so there is no per-pair bucket to drain.
- * Withdraw account-wide with `mb_withdraw` instead. The type stays because
+ * Withdraw account-wide with `bridge_withdraw` instead. The type stays because
  * signature reconstruction needs it.
  */
 export interface NativeSpotMarginWithdraw {

@@ -135,7 +135,7 @@ type FieldSolidityType =
   | 'bytes[]-hex';
 
 /// MetaBridge destination-chain string names → the `uint8` code the typed
-/// `mb_withdraw.chain` field signs. The POST `params.chain` carries the STRING
+/// `bridge_withdraw.chain` field signs. The POST `params.chain` carries the STRING
 /// name; the signed word carries this code (Base=1, Arbitrum=2).
 const MB_CHAIN_CODES: Readonly<Record<string, number>> = Object.freeze({
   Base: 1,
@@ -456,9 +456,9 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
     ],
   },
   // ---- MetaBridge (1) ----
-  mb_withdraw: {
-    pascal: 'MbWithdraw',
-    wireType: 'mb_withdraw',
+  bridge_withdraw: {
+    pascal: 'BridgeWithdraw',
+    wireType: 'bridge_withdraw',
     // `chain` rides POST `params` as the STRING name but signs as a uint8 code.
     // `amount` is an integer (uint64), not a decimal string.
     fields: [

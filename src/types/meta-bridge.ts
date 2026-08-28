@@ -6,12 +6,12 @@
 
 /// Destination chain for a MetaBridge withdrawal. PascalCase to match the
 /// node's chain enum.
-export type MbChain = 'Base' | 'Arbitrum';
+export type BridgeChain = 'Base' | 'Arbitrum';
 
-/// `mb_withdraw` — withdraw cross-collateral to a destination chain.
-export interface MbWithdraw {
+/// `bridge_withdraw` — withdraw cross-collateral to a destination chain.
+export interface BridgeWithdraw {
   /// Destination chain.
-  chain: MbChain;
+  chain: BridgeChain;
   /// MetaFlux asset id (`u32`; currently only `0` = USDC cross-collateral).
   asset: number;
   /// Amount in base units (`u64`).

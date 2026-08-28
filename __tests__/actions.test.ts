@@ -114,13 +114,13 @@ describe('real native write-action builders (JSON shape)', () => {
     );
   });
 
-  it('mb_withdraw: PascalCase chain + 20-byte dst_addr', async () => {
-    const { buildNativeMbWithdrawAction } = await import('../src/native/actions.js');
+  it('bridge_withdraw: PascalCase chain + 20-byte dst_addr', async () => {
+    const { buildNativeBridgeWithdrawAction } = await import('../src/native/actions.js');
     const dst = '0xabababababababababababababababababababab';
     expect(
-      buildNativeMbWithdrawAction({ chain: 'Base', asset: 0, amount: 1000000, dst_addr: dst }),
+      buildNativeBridgeWithdrawAction({ chain: 'Base', asset: 0, amount: 1000000, dst_addr: dst }),
     ).toBe(
-      `{"type":"mb_withdraw","params":{"chain":"Base","asset":0,"amount":1000000,"dst_addr":"${dst}"}}`,
+      `{"type":"bridge_withdraw","params":{"chain":"Base","asset":0,"amount":1000000,"dst_addr":"${dst}"}}`,
     );
   });
 
@@ -492,7 +492,7 @@ describe.skipIf(!wasmBuilt)('P0 redirected methods == typed submitTyped path', (
     },
     {
       name: 'mbWithdraw (twin)',
-      tag: 'mb_withdraw',
+      tag: 'bridge_withdraw',
       payload: { chain: 'Base', asset: 0, amount: 1_000_000, dst_addr: ADDR },
       conv: (c, n) =>
         c.mbWithdraw({ chain: 'Base', asset: 0, amount: 1_000_000, dst_addr: ADDR }, { nonce: n }),
