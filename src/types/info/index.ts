@@ -27,6 +27,8 @@ export type {
   RewardPool,
   RiskOverride,
   FeeSchedule,
+  FeeScheduleUser,
+  ProductFeeRow,
   FeeTier,
   SpotMarginState,
   SpotMarginAccount,

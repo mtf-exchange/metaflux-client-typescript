@@ -197,8 +197,17 @@ export class InfoApi {
   }
 
   /// `fee_schedule` — protocol fee schedule.
-  async feeSchedule(): Promise<FeeSchedule> {
-    return this.post<FeeSchedule>({ type: 'fee_schedule' });
+  ///
+  /// Pass an `address` to also get that account's resolved rates in `user`.
+  /// Read `user.products` for the product you are about to trade: `perp`,
+  /// `spot`, `spot_margin` and `option` price apart, and the top-level
+  /// `effective_*_bps` fields are the PERP ones.
+  async feeSchedule(address?: string): Promise<FeeSchedule> {
+    return this.post<FeeSchedule>(
+      address === undefined
+        ? { type: 'fee_schedule' }
+        : { type: 'fee_schedule', address },
+    );
   }
 
   // ── custody bridge reads ────────────────────────────────────────────────

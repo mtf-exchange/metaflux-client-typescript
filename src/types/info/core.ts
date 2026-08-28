@@ -536,6 +536,71 @@ export interface FeeSchedule {
   burn_ratio: string;
   /// Referrer share of the base taker take, decimal bps string.
   referrer_share_bps: string;
+  /// The day the POOLED volume counter stops buying a discount and each product
+  /// reads only its own volume. `0` = not armed yet. A server that predates
+  /// per-product fees omits it.
+  pooled_volume_sunset_day?: number;
+  /// The same instant in milliseconds, as a decimal string. `"0"` = not armed.
+  pooled_volume_sunset_ms?: string;
+  /// `true` while pooled volume still feeds a tier. On the sunset day this goes
+  /// false and a tier resting on cross-product volume DROPS.
+  pooled_volume_counts?: boolean;
+  /// One account's RESOLVED rates. Present only when the request carried an
+  /// `address` (see `Info.feeSchedule(address)`); absent on the ladder-only read.
+  user?: FeeScheduleUser;
+}
+
+/// One product's resolved rates inside a `FeeScheduleUser`.
+///
+/// The four products price APART: each carries its own ladder, its own base
+/// rates and its own 30-day counters. Read the row for the product you are about
+/// to trade — the top-level `FeeScheduleUser` rates are the PERP ones.
+export interface ProductFeeRow {
+  /// `"perp"`, `"spot"`, `"spot_margin"` or `"option"`.
+  product: string;
+  /// The rate a fill on this product charges the taker, staking discount
+  /// applied. Decimal bps string.
+  taker_bps: string;
+  /// The rate a fill on this product charges the maker, rebate subtracted.
+  /// Decimal bps string; NEGATIVE means a credit paid to the maker.
+  ///
+  /// ABSENT on a product with NO maker leg. A maker rests on the shared spot
+  /// book and never carries a lane, so it is always priced as `spot` — which
+  /// leaves `spot_margin` and `option` with a taker leg only.
+  maker_bps?: string;
+  /// The trailing 30-day taker volume THIS product's tier reads.
+  taker_volume_30d: string;
+  /// The trailing 30-day maker volume THIS product's maker tier reads.
+  /// ABSENT on a product with no maker leg — see `maker_bps`.
+  maker_volume_30d?: string;
+}
+
+/// One account's resolved fee position, returned by `Info.feeSchedule(address)`.
+///
+/// Only the taker of a fill carries a product. A maker rests on the shared spot
+/// book, so a maker is always priced as `spot` whichever lane crosses it.
+export interface FeeScheduleUser {
+  /// The resolved account.
+  address: string;
+  /// POOLED trailing 30-day taker volume, every product together.
+  taker_volume_30d: string;
+  /// POOLED trailing 30-day maker volume.
+  maker_volume_30d: string;
+  /// The PERP base taker rate, before the discount. Decimal bps string.
+  taker_bps: string;
+  /// The PERP base maker rate, before the rebate. Decimal bps string.
+  maker_bps: string;
+  /// The PERP taker rate a fill charges, discount applied.
+  effective_taker_bps: string;
+  /// The PERP maker rate a fill charges, rebate subtracted.
+  effective_maker_bps: string;
+  /// Taker-only staking discount, per mille (`100` = 10%).
+  staking_discount_permille: number;
+  /// The PERP maker rebate, before it is subtracted. Decimal bps string.
+  maker_rebate_bps: string;
+  /// Per-product resolved rates. A server that predates per-product fees sends
+  /// no rows, so an absent field means "not served", NOT "no products".
+  products?: ProductFeeRow[];
 }
 
 /// The `params` block on a `SpotMarginAccount` — the pair's risk parameters.

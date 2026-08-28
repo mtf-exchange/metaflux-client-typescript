@@ -250,6 +250,63 @@ describe('InfoApi request shapes', () => {
     expect(JSON.parse(captured!.body)).toEqual({ type: 'fee_schedule' });
   });
 
+  it('feeSchedule(address) adds the address and decodes per-product rows', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      tiers: [],
+      builder_rebate_bps: '0',
+      burn_ratio: '0.8',
+      referrer_share_bps: '5.0',
+      user: {
+        address: ADDR,
+        taker_volume_30d: '12500000',
+        maker_volume_30d: '3100000',
+        taker_bps: '4.5',
+        maker_bps: '1.5',
+        effective_taker_bps: '4.05',
+        effective_maker_bps: '1.2',
+        staking_discount_permille: 100,
+        maker_rebate_bps: '0.3',
+        products: [
+          {
+            product: 'perp',
+            taker_bps: '4.05',
+            maker_bps: '1.2',
+            taker_volume_30d: '12500000',
+            maker_volume_30d: '3100000',
+          },
+          { product: 'spot_margin', taker_bps: '9.0', taker_volume_30d: '0' },
+        ],
+      },
+    };
+    const f = await api.feeSchedule(ADDR);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'fee_schedule',
+      address: ADDR,
+    });
+    expect(f.user?.staking_discount_permille).toBe(100);
+    // The four products price apart, so the row is the rate — not the top pair.
+    expect(f.user?.products?.[1]?.product).toBe('spot_margin');
+    // A row with no maker leg OMITS both maker keys. `undefined` is "no maker
+    // leg", which is NOT the same fact as a maker rate of zero.
+    expect(f.user?.products?.[1]?.maker_bps).toBeUndefined();
+    expect(f.user?.products?.[1]?.maker_volume_30d).toBeUndefined();
+    // A NEGATIVE maker rate is a credit paid to the maker, not a malformed rate.
+    expect(f.user?.products?.[0]?.maker_bps).toBe('1.2');
+  });
+
+  it('feeSchedule tolerates an absent user block and absent products', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      tiers: [],
+      builder_rebate_bps: '0',
+      burn_ratio: '0.8',
+      referrer_share_bps: '5.0',
+    };
+    const bare = await api.feeSchedule();
+    expect(bare.user).toBeUndefined();
+  });
+
   it('openOrders is keyed by 0x address only (account_id param is GONE)', async () => {
     const api = new InfoApi(BASE);
     nextData = { address: ADDR, orders: [] };

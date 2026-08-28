@@ -196,6 +196,8 @@ export type {
   RewardPool,
   RiskOverride,
   FeeSchedule,
+  FeeScheduleUser,
+  ProductFeeRow,
   FeeTier,
   TradeSide,
   OrderTif,
