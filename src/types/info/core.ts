@@ -343,6 +343,13 @@ export interface MarketStatic {
   /// OMITTED (absent) when the market is uncapped — an absent cap is not a cap
   /// of `0`, so test for the key, not for a falsy value.
   oi_cap?: string;
+  /// REMAINING open-interest headroom, whole base units as a decimal string.
+  ///
+  /// The node already subtracts live open interest from the cap, so do NOT
+  /// rebuild it from `oi_cap` and `Markets.perp[].open_interest`. `null` means
+  /// the market is UNCAPPED, and `"0"` means the cap is reached — the two look
+  /// alike only if you read `null` as zero.
+  max_market_order_ntl: string | null;
   /// The registered underlying token block, when the perp has one. OMITTED
   /// (absent) when there is no registered underlying token — never `null`.
   token?: PerpUnderlyingToken;
@@ -521,6 +528,11 @@ export interface FeeTier {
 /// `burn_ratio` is a decimal fraction string in `[0, 1]` (`"0.8"` = 80%) — NOT
 /// bps, do not scale it by 10000. `tiers[0]` is the authoritative carrier of
 /// maker/taker when the top-level pair is absent.
+///
+/// THIS READ CARRIES NO BUILDER REBATE. There is no schedule-wide rebate rate:
+/// a broker's rate is the `builder_fee` it sets on each order, and the account
+/// caps it with `approved_builders[].max_fee_bps`. Read that cap, not a field
+/// here.
 export interface FeeSchedule {
   /// Top-level base maker fee, decimal bps string. May be absent — fall back
   /// to `tiers[0].maker_bps` when `undefined`.
@@ -529,8 +541,6 @@ export interface FeeSchedule {
   taker_bps?: string;
   /// Volume-tier ladder (authoritative carrier of maker/taker).
   tiers: FeeTier[];
-  /// Max additional builder-code rebate, decimal bps string.
-  builder_rebate_bps: string;
   /// Burn fraction of the non-referrer remainder, decimal fraction string in
   /// `[0, 1]` (NOT bps).
   burn_ratio: string;
@@ -613,6 +623,43 @@ export interface FeeScheduleUser {
   /// Per-product resolved rates. A server that predates per-product fees sends
   /// no rows, so an absent field means "not served", NOT "no products".
   products?: ProductFeeRow[];
+}
+
+/// `referral_state` — one account's referral credit and the referrer it is bound
+/// to. Keyed by `user` (0x hex), NOT by `address`: this read and `builder_state`
+/// are the two `/info` reads that name the account `user`.
+///
+/// READ THE CREDIT BEFORE YOU CLAIM IT. `claim_referral_rewards` returns an
+/// admission ack and no amount, so this is the only place the pending credit is
+/// visible.
+///
+/// The referral graph is address-based and ONE-DIRECTIONAL. There is no referral
+/// code and no reverse map, so this read cannot list the traders one referrer
+/// brought in — it answers only for the account you name.
+export interface ReferralState {
+  /// Echo of the requested account, 0x hex.
+  user: string;
+  /// Referral fee credit accrued and not yet claimed, whole-USDC decimal
+  /// string. `"0"` when nothing is pending.
+  claimable_rewards: string;
+  /// The referrer this account bound with `set_referrer`, 0x hex. `null` when
+  /// the account never bound one — binding is one-time.
+  referrer: string | null;
+}
+
+/// `builder_state` — one broker's accrued broker-code fee credit. Keyed by
+/// `user` (0x hex), like `referral_state`.
+///
+/// READ THE CREDIT BEFORE YOU CLAIM IT. `claim_builder_rewards` returns an
+/// admission ack and no amount.
+///
+/// It carries NO rate. What a broker may charge is the per-order `builder_fee`,
+/// bounded by the payer's `approved_builders[].max_fee_bps`.
+export interface BuilderState {
+  /// Echo of the requested broker account, 0x hex.
+  user: string;
+  /// Broker fee credit accrued and not yet claimed, whole-USDC decimal string.
+  claimable_rewards: string;
 }
 
 /// The `params` block on a `SpotMarginAccount` — the pair's risk parameters.

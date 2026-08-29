@@ -108,3 +108,84 @@ export interface OptionPositions {
   /// One row per open leg. Empty when the account is party to no series.
   positions: OptionPosition[];
 }
+
+// ── RFQ session reads ───────────────────────────────────────────────────────
+//
+// `rfq_open` and `rfq_user` are PUBLIC reads. They are what makes the RFQ lane
+// round-trip: a taker learns its own `rfq_id` from `rfq_user`, and a maker finds
+// a request to quote on from `rfq_open`. Without them a caller can post a
+// request and can never complete an accept.
+//
+// POLL THEM. No WebSocket channel carries an RFQ event.
+//
+// TWO SIDE PLANES. These reads answer `"B"` / `"A"`, the same tokens as
+// `user_fills` and `trades`. The RFQ ACTIONS sign `"Bid"` / `"Ask"` (`CoreSide`).
+// Never feed a read token straight into an action payload.
+
+/// One maker quote resting on an RFQ session.
+///
+/// ITS POSITION IN `RfqSession.quotes` IS THE `quote_idx` AN ACCEPT NAMES. The
+/// row carries no id of its own, so read the array index — and re-read the
+/// session immediately before accepting, because a quote that expires or is
+/// replaced shifts every later index.
+export interface RfqQuoteEntry {
+  /// Quoting maker, 0x hex.
+  maker: string;
+  /// The maker's self-trade-prevention group, or `null` when it set none.
+  maker_stp_group: number | null;
+  /// Quoted premium per unit, whole-USDC decimal string.
+  price: string;
+  /// Largest size this maker will fill, on the series size scale.
+  max_size: string;
+  /// The quote expires at this consensus timestamp (ms).
+  valid_until: number;
+  /// When the maker posted the quote (consensus ms).
+  submitted_at: number;
+}
+
+/// One open RFQ session with its resting maker quotes.
+export interface RfqSession {
+  /// Session id — the `rfq_id` a quote or an accept names.
+  rfq_id: number;
+  /// The option series this session clears, as the number an action SIGNS in
+  /// its `market` field. RFQ is options-only; never derive this number.
+  signing_id: number;
+  /// Symbol of the series underlying, or `null` when the series is gone.
+  underlying: string | null;
+  /// Taker side, `"B"` (bid) or `"A"` (ask) — the READ plane, not `CoreSide`.
+  side: 'B' | 'A';
+  /// Requested size, on the series size scale.
+  sz: string;
+  /// The taker that opened the session, 0x hex. Only this account can accept.
+  requester: string;
+  /// The taker's self-trade-prevention group, or `null`.
+  requester_stp_group: number | null;
+  /// The session stops accepting at this consensus timestamp (ms).
+  expiry: number;
+  /// Worst premium the taker will pay, whole-USDC decimal string, or `null`
+  /// when the request set no limit.
+  limit_px: string | null;
+  /// When the taker opened the session (consensus ms).
+  created_at: number;
+  /// Resting maker quotes, in `quote_idx` order.
+  quotes: RfqQuoteEntry[];
+}
+
+/// `rfq_open` — every open RFQ session, with quotes. No parameters.
+export interface RfqOpen {
+  /// Open sessions. Empty when none rest.
+  rfqs: RfqSession[];
+}
+
+/// `rfq_user` — the RFQ sessions one account is party to, keyed by `address`.
+///
+/// Both lists are empty for an account that is party to nothing; that is a
+/// `200`, not a `404`.
+export interface RfqUser {
+  /// Echo of the requested account, 0x hex.
+  address: string;
+  /// Sessions this account opened as the taker.
+  requested: RfqSession[];
+  /// Sessions this account has quoted on as a maker.
+  quoted: RfqSession[];
+}

@@ -1081,10 +1081,12 @@ export class Client {
   // EIP-712 typed structs and POST the canonical `{"type":...,"params":{...}}`
   // envelope the typed-only `/exchange` admits — routed through `submitTyped`,
   // the SAME path as the generic typed actions (the convenience signature only
-  // pins the action tag + param type). All SENDER-AUTHORIZED (the recovered
-  // signer is the taker / submitter; RFQ / FBA carry no `owner`). Numeric fields
-  // are RAW `u64` wire values; `side` POSTs the core PascalCase name and signs
-  // the uint8 code; `limit_px` / `stp_group` are optional (omit when absent).
+  // pins the action tag + param type). Numeric fields are RAW `u64` wire values;
+  // `side` POSTs the core PascalCase name and signs the uint8 code; `limit_px` /
+  // `stp_group` are optional (omit when absent).
+  //
+  // All three RFQ methods take `opts.owner` to act AS a vault; `fbaSubmit` is
+  // sender-authorized.
 
   /// **RFQ IS THE OPTION TRADE PATH.** All three methods clear OPTION series
   /// and nothing else. A market that is not a LIVE series is rejected with
@@ -1100,15 +1102,22 @@ export class Client {
   /// writer's escrow. It opens no perpetual position, charges no fee, and
   /// reserves no margin. An option position cannot be liquidated.
   ///
-  /// The session reads `rfq_open` and `rfq_user` are public, and this SDK does
-  /// not type them yet, so read them raw to find your own `rfq_id` and the
-  /// `quote_idx` an accept must name. No WS channel carries an RFQ event, so
-  /// both are polled.
+  /// The session reads are public and typed: `InfoApi.rfqUser` gives a taker
+  /// its own `rfq_id`, and `InfoApi.rfqOpen` gives a maker the open requests. A
+  /// quote's INDEX in `RfqSession.quotes` is the `quote_idx` an accept names. No
+  /// WS channel carries an RFQ event, so both are polled.
+  ///
+  /// TO ACT AS A VAULT, PASS `opts.owner` ON BOTH LEGS. The owner is bound into
+  /// the RFQ digests, so an approved agent must sign which account requests and
+  /// accepts. Omit it and the node admits the action for the SIGNER's own
+  /// account — the escrow and the option position land on the operator wallet.
 
-  /// Open an RFQ session as a taker (`rfq_request`, typed scheme).
+  /// Open an RFQ session as a taker (`rfq_request`, typed scheme). Pass
+  /// `opts.owner` to request AS a vault (operator path) — it binds the node's
+  /// owner-carrying `RfqRequest` digest and rides in `params.owner`.
   async rfqRequest(
     params: RfqRequest,
-    opts: { nonce?: bigint; chainId?: number } = {},
+    opts: { nonce?: bigint; chainId?: number; owner?: string } = {},
   ): Promise<NativeExchangeAck> {
     return this.submitTyped(
       'rfq_request',
@@ -1133,9 +1142,15 @@ export class Client {
   }
 
   /// Cross against a specific resting RFQ quote (`rfq_accept`, typed scheme).
+  /// `quote_idx` is the quote's index in `RfqSession.quotes`; re-read the
+  /// session first, because an expired quote shifts every later index.
+  ///
+  /// Pass the SAME `opts.owner` the request carried. The node gates the accept
+  /// on `requester == sender`, so an accept signed without the owner is not the
+  /// requester and is rejected.
   async rfqAccept(
     params: RfqAccept,
-    opts: { nonce?: bigint; chainId?: number } = {},
+    opts: { nonce?: bigint; chainId?: number; owner?: string } = {},
   ): Promise<NativeExchangeAck> {
     return this.submitTyped(
       'rfq_accept',

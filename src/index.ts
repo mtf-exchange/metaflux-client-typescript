@@ -238,6 +238,11 @@ export type {
   SpotMarginParams,
   EarnState,
   EarnPool,
+  // Referral / broker fee credit, read before the matching claim action.
+  ReferralState,
+  BuilderState,
+  DelegatorRewards,
+  DelegatorRewardRow,
   // Node-snapshot parity shapes.
   Markets,
   MarketsMeta,
@@ -262,6 +267,10 @@ export type {
   ValidatorSummary,
   GossipRootIps,
   AdvertisedPeer,
+  UserTwaps,
+  UserTwap,
+  ApprovedBuilders,
+  ApprovedBuilder,
   // The account's non-trading state, in one read.
   AccountOverview,
   AccountOverviewStaking,
@@ -273,6 +282,11 @@ export type {
   OptionPositions,
   OptionSeries,
   OptionSeriesRegistry,
+  // The public RFQ session reads — the other half of the option trade path.
+  RfqOpen,
+  RfqUser,
+  RfqSession,
+  RfqQuoteEntry,
   // Custody-bridge deployment rows + the withdrawal outbox.
   BridgeChainConfigRow,
   BridgeOutboxEntry,

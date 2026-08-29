@@ -711,3 +711,28 @@ export interface UserNonFundingLedgerUpdates {
   /// Ledger union rows.
   ledgerUpdates: LedgerUpdate[];
 }
+
+/// One validator's unclaimed delegation reward inside a `DelegatorRewards`.
+export interface DelegatorRewardRow {
+  /// The validator the stake is delegated to, 0x hex.
+  validator: string;
+  /// Reward accrued on this delegation and not yet claimed, decimal string.
+  unclaimed: string;
+  /// When this delegation last paid out (consensus ms). `0` if it never has.
+  last_claim_time: number;
+}
+
+/// `delegator_rewards` — one account's staking rewards, keyed by `address`.
+///
+/// `claimable_rewards` MAY EXCEED the sum of `rewards[].unclaimed`. It adds a
+/// per-account carry that no validator row holds, so claim against the total and
+/// use the rows only to see which validator earned what.
+export interface DelegatorRewards {
+  /// Echo of the requested account, 0x hex.
+  address: string;
+  /// Everything the account can claim now, decimal string. The authoritative
+  /// total.
+  claimable_rewards: string;
+  /// One row per active delegation. Empty when the account delegates nothing.
+  rewards: DelegatorRewardRow[];
+}

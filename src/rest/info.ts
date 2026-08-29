@@ -36,9 +36,12 @@ import type {
   AccountOverview,
   AccountState,
   ActiveAssetData,
+  ApprovedBuilders,
   BridgeWithdrawalHistory,
+  BuilderState,
   CandleSnapshot,
   CandleType,
+  DelegatorRewards,
   EarnState,
   ExchangeStatus,
   FeeSchedule,
@@ -55,6 +58,9 @@ import type {
   OptionSeriesRegistry,
   OrderStatusInfo,
   PerpDexs,
+  ReferralState,
+  RfqOpen,
+  RfqUser,
   SpotDeployAuction,
   SpotMarginState,
   SpotMeta,
@@ -66,6 +72,7 @@ import type {
   UserNonFundingLedgerUpdates,
   UserPositionHistory,
   UserRateLimit,
+  UserTwaps,
   ValidatorL1Votes,
   ValidatorSummaries,
   VaultState,
@@ -640,16 +647,82 @@ export class InfoApi {
     return this.post<GossipRootIps>({ type: 'gossip_root_ips' });
   }
 
+  /// `rfq_open` — every open RFQ session, with its resting maker quotes. No
+  /// parameters.
+  ///
+  /// A maker finds work here. `RfqSession.signing_id` is the number an
+  /// `rfq_quote` signs in `market`, and a quote's INDEX in `quotes` is the
+  /// `quote_idx` an accept names.
+  ///
+  /// Poll it — no WebSocket channel carries an RFQ event.
+  async rfqOpen(): Promise<RfqOpen> {
+    return this.post<RfqOpen>({ type: 'rfq_open' });
+  }
+
+  /// `rfq_user` — the RFQ sessions one account is party to, by `address`.
+  ///
+  /// A taker finds its own `rfq_id` here: `rfqRequest` answers with an
+  /// admission ack, not a session id. Read `requested` after the request
+  /// commits, then accept against `quotes` on that session.
+  async rfqUser(address: string): Promise<RfqUser> {
+    return this.post<RfqUser>({ type: 'rfq_user', address });
+  }
+
+  /// `referral_state` — an account's referral credit and bound referrer.
+  ///
+  /// Keyed by `user`, NOT `address` — this read and `builderState` are the two
+  /// that name the account `user`.
+  ///
+  /// Read it BEFORE `claim_referral_rewards`: the claim answers with an
+  /// admission ack and no amount, so this is the only view of the credit.
+  async referralState(user: string): Promise<ReferralState> {
+    return this.post<ReferralState>({ type: 'referral_state', user });
+  }
+
+  /// `builder_state` — a broker's accrued broker-code fee credit, keyed by
+  /// `user` (see `referralState` on the key name).
+  ///
+  /// Read it BEFORE `claim_builder_rewards`, for the same reason.
+  async builderState(user: string): Promise<BuilderState> {
+    return this.post<BuilderState>({ type: 'builder_state', user });
+  }
+
+  /// `user_twaps` — an account's ACTIVE TWAP parents, by `address`.
+  ///
+  /// The live set only: a completed or cancelled parent leaves the tracker, so
+  /// an empty list is not a history answer.
+  async userTwaps(address: string): Promise<UserTwaps> {
+    return this.post<UserTwaps>({ type: 'user_twaps', address });
+  }
+
+  /// `approved_builders` — every broker-fee grant an account has approved, by
+  /// `address`.
+  ///
+  /// `max_fee_bps` is the CAP the account allows, not a rate the broker
+  /// charges. An order whose `builder_fee` exceeds the row is refused, and an
+  /// empty list means every broker-fee order this account signs is refused.
+  async approvedBuilders(address: string): Promise<ApprovedBuilders> {
+    return this.post<ApprovedBuilders>({ type: 'approved_builders', address });
+  }
+
+  /// `delegator_rewards` — an account's staking rewards, by `address`.
+  ///
+  /// Claim against `claimable_rewards`. It may exceed the sum of the per-
+  /// validator rows, which carry no per-account carry.
+  async delegatorRewards(address: string): Promise<DelegatorRewards> {
+    return this.post<DelegatorRewards>({ type: 'delegator_rewards', address });
+  }
+
   // ── escape hatches ──────────────────────────────────────────────────────
 
   /// Raw escape hatch — POST an arbitrary `{type, ...}` body to `/info`,
   /// validate the envelope, and return the unwrapped `data` typed. For request
   /// shapes the SDK doesn't yet model (e.g. `validator_votes`).
   ///
-  /// It does NOT reach an operator-lane read. `mip3_deployer_oracle`,
-  /// `rfq_open`, `rfq_user` and `fba_batch_state` are refused on the public API
-  /// with the same error an unknown type gets. `node_info`, `block_info` and
-  /// `protocol_metrics` are deleted outright — no lane serves them.
+  /// It does NOT reach an operator-lane read. `mip3_deployer_oracle` and
+  /// `fba_batch_state` are refused on the public API with the same error an
+  /// unknown type gets. `node_info`, `block_info` and `protocol_metrics` are
+  /// deleted outright — no lane serves them.
   async raw<T = unknown>(body: { type: string; [k: string]: unknown }): Promise<T> {
     return this.post<T>(body);
   }

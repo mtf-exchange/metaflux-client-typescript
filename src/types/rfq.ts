@@ -28,6 +28,10 @@ export type CoreSide = 'Bid' | 'Ask';
 /// `Option<u64>`: the typed digest flattens each to a presence bool + a value
 /// word, and the POST `params` carries the key ONLY when present (omit, or pass
 /// `null`, to leave it absent).
+///
+/// To request AS a vault (operator path), pass `opts.owner` on
+/// `Client.rfqRequest` — it binds the node's owner-carrying digest. The node
+/// records the owner as the requester, and only that account can accept.
 export interface RfqRequest {
   /// The `signing_id` of a live option series (`u32`), from
   /// `InfoApi.optionSeries`. Any other market is refused.
@@ -68,10 +72,15 @@ export interface RfqQuote {
 
 /// `rfq_accept` — a taker crosses against a specific resting quote. Mirrors the
 /// node's frozen `RfqAccept` typed struct.
+///
+/// Pass the SAME `opts.owner` the request carried. The node admits an accept
+/// only from the account it recorded as the requester.
 export interface RfqAccept {
   /// Parent RFQ session id (`u64`).
   rfq_id: number | bigint;
-  /// Index of the accepted quote in the session's quote vector (`u32`).
+  /// Index of the accepted quote in `RfqSession.quotes` (`u32`), from
+  /// `InfoApi.rfqOpen` / `InfoApi.rfqUser`. Re-read the session first: an
+  /// expired or replaced quote shifts every later index.
   quote_idx: number;
   /// Accepted size (`u64`, `<= min(request.size, quote.max_size)`).
   size: number | bigint;

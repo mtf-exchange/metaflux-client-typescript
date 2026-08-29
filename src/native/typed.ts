@@ -819,12 +819,14 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
   },
   // ---- RFQ / FBA microstructure (3) + 2 aliases ----
   //
-  // RFQ / FBA are sender-authorized (NO owner — the recovered signer is the
-  // actor). `side` is the core `Side` PascalCase string on the wire, signed as a
+  // `side` is the core `Side` PascalCase string on the wire, signed as a
   // `uint8` code (Bid=0/Ask=1); the numeric fields are RAW u64 wire values
   // (fixed-point lots/price), NOT decimal-scaled. `limit_px` / `stp_group` are
   // `Option<u64>` flattened to a presence bool + a u64 value (`0` when absent),
   // the key emitted on the wire ONLY when present.
+  //
+  // All three RFQ actions are owner-supporting; `fba_submit` is
+  // sender-authorized (the recovered signer is the actor).
   rfq_request: {
     pascal: 'RfqRequest',
     wireType: 'rfq_request',
@@ -842,9 +844,7 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
   // `rfq_quote` — a maker posts a quote onto an open RFQ session (161). The
   // numeric fields are RAW u64 wire values (fixed-point lots / price), digest-
   // symmetric with `rfq_request`; the optional `stp_group` flattens to a presence
-  // bool + a u64 value. Owner-supporting (a vault operator quotes AS the vault):
-  // an optional `owner` binds right after metafluxChain, selecting the node's
-  // `RFQ_QUOTE_WITH_OWNER` type.
+  // bool + a u64 value.
   rfq_quote: {
     pascal: 'RfqQuote',
     wireType: 'rfq_quote',
@@ -945,16 +945,22 @@ function requireSpec(actionType: string): TypedSpec {
 // ============================================================================
 
 /// The account-set actions that take an agent-resolved params-level `owner`
-/// (operator / vault trading). Only `cancel_all_orders` has an owner-carrying
-/// shape today; the orders set's owner-carrying actions live in
+/// (operator / vault trading). The orders set's owner-carrying actions live in
 /// `./typed_orders.ts`. When an owner is bound the `address owner` word sits
 /// right after `metafluxChain`, selecting the node's `*_WITH_OWNER_TYPE` —
 /// byte-identical to the Rust SDK's `CANCEL_ALL_ORDERS_WITH_OWNER` shape.
+///
+/// ALL THREE RFQ ACTIONS BIND THE OWNER INTO THE DIGEST, unlike the order
+/// actions, which carry `owner` on the wire only. The node records the taker at
+/// request time and gates an accept on `requester == sender`, so an operator
+/// must sign WHICH account it acts for. Omitting `owner` is not a rejection: the
+/// request is admitted for the operator's OWN account, and the escrow and the
+/// option position land on the operator wallet instead of the vault.
 const ACCOUNT_OWNER_SUPPORTING: ReadonlySet<string> = new Set([
   'cancel_all_orders',
-  // A vault operator quotes AS the vault: `owner` binds right after
-  // metafluxChain, selecting the node's `RFQ_QUOTE_WITH_OWNER` type.
+  'rfq_request',
   'rfq_quote',
+  'rfq_accept',
 ]);
 
 /// Whether `actionType` accepts a digest-level agent-resolved `owner`.

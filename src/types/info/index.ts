@@ -35,6 +35,8 @@ export type {
   SpotMarginParams,
   EarnState,
   EarnPool,
+  ReferralState,
+  BuilderState,
 } from './core.js';
 export type {
   TradeSide,
@@ -70,6 +72,8 @@ export type {
   UserLedgerUpdates,
   UserNonFundingLedgerUpdates,
   LedgerUpdate,
+  DelegatorRewards,
+  DelegatorRewardRow,
 } from './reads.js';
 export type {
   Markets,
@@ -95,6 +99,10 @@ export type {
   ValidatorSummary,
   GossipRootIps,
   AdvertisedPeer,
+  UserTwaps,
+  UserTwap,
+  ApprovedBuilders,
+  ApprovedBuilder,
 } from './hl-parity.js';
 export type {
   AccountOverview,
@@ -108,6 +116,10 @@ export type {
   OptionPositions,
   OptionSeries,
   OptionSeriesRegistry,
+  RfqOpen,
+  RfqUser,
+  RfqSession,
+  RfqQuoteEntry,
 } from './options.js';
 export type {
   BridgeChainConfigRow,

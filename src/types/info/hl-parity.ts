@@ -388,3 +388,68 @@ export interface GossipRootIps {
   /// an empty array is the honest answer, not an error.
   peers: AdvertisedPeer[];
 }
+
+/// One live TWAP parent inside a `UserTwaps`.
+///
+/// The row is the parent SCHEDULE, not a fill. Each slice it fires lands on the
+/// normal fill tape under the parent's market.
+export interface UserTwap {
+  /// Parent TWAP id — the number `twap_cancel` names.
+  twap_id: number;
+  /// Market symbol the parent trades.
+  coin: string;
+  /// Side, `"B"` (bid) or `"A"` (ask) — the same token `user_fills` uses.
+  side: 'B' | 'A';
+  /// Total size the parent will work, on the market's size scale.
+  sz: string;
+  /// Size already filled, same scale. Subtract it from `sz` for the residual;
+  /// there is no separate remaining field.
+  executed_sz: string;
+  /// How many slices the parent is cut into.
+  slices_total: number;
+  /// How many slices have fired.
+  slices_done: number;
+  /// Gap between slices, in milliseconds. A DURATION, not a timestamp.
+  delay_ms: number;
+  /// When the last slice fired (consensus ms). `0` before the first one.
+  last_fire_ts: number;
+  /// Whether the parent may only reduce an existing position.
+  reduce_only: boolean;
+}
+
+/// `user_twaps` — the account's ACTIVE TWAP parents, keyed by `address`.
+///
+/// LIVE SET ONLY. A parent that completes or is cancelled leaves the tracker,
+/// so an empty list means nothing is working now — it is not a history read.
+///
+/// It spans every perp dex AND the spot parents, so a market outside the core
+/// dex is included.
+export interface UserTwaps {
+  /// Echo of the requested account, 0x hex.
+  address: string;
+  /// Active parents. Empty when none are working.
+  twaps: UserTwap[];
+}
+
+/// One broker-fee grant inside an `ApprovedBuilders`.
+export interface ApprovedBuilder {
+  /// The broker the account approved, 0x hex.
+  builder: string;
+  /// The CEILING this account allows that broker to charge per order, whole bps
+  /// as a decimal string. It is not a rate: the broker sets the actual
+  /// `builder_fee` on each order, and the node refuses an order above this cap.
+  max_fee_bps: string;
+}
+
+/// `approved_builders` — every broker-fee grant one account has approved, keyed
+/// by `address`.
+///
+/// It answers the point lookup too: to check one broker, read its row. An empty
+/// array means the account approved nobody, so every broker-fee order it signs
+/// is refused.
+export interface ApprovedBuilders {
+  /// Echo of the requested account, 0x hex.
+  address: string;
+  /// One row per approved broker. Empty when none are approved.
+  builders: ApprovedBuilder[];
+}

@@ -245,7 +245,7 @@ describe('InfoApi request shapes', () => {
 
   it('feeSchedule POSTs {"type":"fee_schedule"}', async () => {
     const api = new InfoApi(BASE);
-    nextData = { tiers: [], builder_rebate_bps: '0', burn_ratio: '0.8' };
+    nextData = { tiers: [], burn_ratio: '0.8' };
     await api.feeSchedule();
     expect(JSON.parse(captured!.body)).toEqual({ type: 'fee_schedule' });
   });
@@ -254,7 +254,6 @@ describe('InfoApi request shapes', () => {
     const api = new InfoApi(BASE);
     nextData = {
       tiers: [],
-      builder_rebate_bps: '0',
       burn_ratio: '0.8',
       referrer_share_bps: '5.0',
       user: {
@@ -309,7 +308,6 @@ describe('InfoApi request shapes', () => {
     const api = new InfoApi(BASE);
     nextData = {
       tiers: [],
-      builder_rebate_bps: '0',
       burn_ratio: '0.8',
       referrer_share_bps: '5.0',
     };
@@ -655,14 +653,17 @@ describe('InfoApi request shapes', () => {
       'nodeInfo',
       'blockInfo',
       'protocolMetrics',
-      // Operator lane: refused on the public API.
-      'rfqOpen',
-      'rfqUser',
+      // Capability not open yet: refused on the public API.
       'fbaBatchState',
       'mip3DeployerOracle',
     ]) {
       expect(api[gone]).toBeUndefined();
     }
+    // `rfq_open` / `rfq_user` left that list when the option lane shipped. They
+    // are what lets a taker learn its `rfq_id` and a maker find a request, so
+    // without them the RFQ lane is open at one end only.
+    expect(typeof api.rfqOpen).toBe('function');
+    expect(typeof api.rfqUser).toBe('function');
   });
 
   it('activeAssetData is keyed by address + coin SYMBOL', async () => {
@@ -824,6 +825,7 @@ describe('InfoApi deployed-gateway read shapes', () => {
       close: true,
       strict_isolated: false,
       risk_override: null,
+      max_market_order_ntl: null,
       }],
       spot: { pairs: [], tokens: [] },
     };
@@ -845,6 +847,9 @@ describe('InfoApi deployed-gateway read shapes', () => {
     expect(m.risk_override).toBeNull();
     // Uncapped OI omits the key; an absent cap is not a cap of zero.
     expect(m.oi_cap).toBeUndefined();
+    // The headroom is SERVED. `null` = uncapped, which pairs with the absent
+    // `oi_cap` above; do not rebuild it from `oi_cap` and `open_interest`.
+    expect(m.max_market_order_ntl).toBeNull();
   });
 
   it('feeSchedule decodes string bps + tiers[] + burn_ratio (optional top-level pair)', async () => {
@@ -853,7 +858,6 @@ describe('InfoApi deployed-gateway read shapes', () => {
       maker_bps: '1.0',
       taker_bps: '5.0',
       referrer_share_bps: '5.0',
-      builder_rebate_bps: '0',
       burn_ratio: '0.8',
       tiers: [{ maker_bps: '1.0', taker_bps: '5.0', volume_30d: '0' }],
     };
@@ -862,14 +866,15 @@ describe('InfoApi deployed-gateway read shapes', () => {
     expect(f.taker_bps).toBe('5.0');
     expect(f.burn_ratio).toBe('0.8');
     expect(f.referrer_share_bps).toBe('5.0');
-    expect(f.builder_rebate_bps).toBe('0');
+    // The node stopped serving a schedule-wide builder rebate. A caller that
+    // still reads the key gets `undefined`, and arithmetic on it is NaN.
+    expect((f as unknown as Record<string, unknown>).builder_rebate_bps).toBeUndefined();
     expect(f.tiers[0]?.taker_bps).toBe('5.0');
     expect(f.tiers[0]?.volume_30d).toBe('0');
 
     // A source-built node may omit the top-level maker/taker pair.
     nextData = {
       referrer_share_bps: '5.0',
-      builder_rebate_bps: '0',
       burn_ratio: '0.8',
       tiers: [{ maker_bps: '1.0', taker_bps: '5.0', volume_30d: '0' }],
     };
@@ -1979,5 +1984,126 @@ describe('InfoApi realigned read shapes', () => {
     const api = new InfoApi(BASE) as unknown as Record<string, unknown>;
     // The kind has no dispatch arm on the node; a request 400s.
     expect(api.frontendOpenOrders).toBeUndefined();
+  });
+});
+
+// The reads that complete the RFQ lane and the fee-credit lane. Each body is the
+// CURRENT node shape, so a decode here fails if a field moves.
+describe('RFQ session + fee-credit reads', () => {
+  const SESSION = {
+    rfq_id: 1,
+    signing_id: 2_147_483_649,
+    underlying: 'SOL',
+    side: 'B' as const,
+    sz: '10',
+    requester: ADDR,
+    requester_stp_group: 42,
+    expiry: 5000,
+    limit_px: '0.00000105',
+    created_at: 10,
+    quotes: [
+      {
+        maker: VAULT,
+        maker_stp_group: null,
+        price: '0.000001',
+        max_size: '5',
+        valid_until: 4000,
+        submitted_at: 20,
+      },
+    ],
+  };
+
+  it('rfqOpen takes no params and decodes a session with its quotes', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { rfqs: [SESSION] };
+    const res = await api.rfqOpen();
+    expect(JSON.parse(captured!.body)).toEqual({ type: 'rfq_open' });
+    // The quote's INDEX is the `quote_idx` an accept names; the row has no id.
+    expect(res.rfqs[0]!.quotes[0]!.maker).toBe(VAULT);
+    // The read plane answers "B"/"A"; the ACTION signs "Bid"/"Ask".
+    expect(res.rfqs[0]!.side).toBe('B');
+    expect(res.rfqs[0]!.signing_id).toBe(2_147_483_649);
+  });
+
+  it('rfqUser is keyed by address and splits taker from maker sessions', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { address: ADDR, requested: [SESSION], quoted: [] };
+    const res = await api.rfqUser(ADDR);
+    expect(JSON.parse(captured!.body)).toEqual({ type: 'rfq_user', address: ADDR });
+    expect(res.requested[0]!.rfq_id).toBe(1);
+    expect(res.quoted).toEqual([]);
+  });
+
+  it('referralState is keyed by user (NOT address) and reports a null referrer', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { user: ADDR, claimable_rewards: '12.5', referrer: null };
+    const res = await api.referralState(ADDR);
+    expect(JSON.parse(captured!.body)).toEqual({ type: 'referral_state', user: ADDR });
+    // `null` = never bound a referrer. Binding is one-time.
+    expect(res.referrer).toBeNull();
+    expect(res.claimable_rewards).toBe('12.5');
+  });
+
+  it('builderState is keyed by user and carries the credit, not a rate', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { user: VAULT, claimable_rewards: '0' };
+    const res = await api.builderState(VAULT);
+    expect(JSON.parse(captured!.body)).toEqual({ type: 'builder_state', user: VAULT });
+    expect(res.claimable_rewards).toBe('0');
+  });
+
+  it('userTwaps decodes the live parent set', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      address: ADDR,
+      twaps: [
+        {
+          twap_id: 1,
+          coin: 'BTC',
+          side: 'B',
+          sz: '15',
+          executed_sz: '6',
+          slices_total: 5,
+          slices_done: 2,
+          delay_ms: 30_000,
+          last_fire_ts: 1_700_000_000_000,
+          reduce_only: false,
+        },
+      ],
+    };
+    const res = await api.userTwaps(ADDR);
+    expect(JSON.parse(captured!.body)).toEqual({ type: 'user_twaps', address: ADDR });
+    // There is no remaining-size field: subtract `executed_sz` from `sz`.
+    expect(res.twaps[0]!.executed_sz).toBe('6');
+    expect(res.twaps[0]!.delay_ms).toBe(30_000);
+  });
+
+  it('approvedBuilders decodes the per-broker fee CAP', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { address: ADDR, builders: [{ builder: VAULT, max_fee_bps: '25' }] };
+    const res = await api.approvedBuilders(ADDR);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'approved_builders',
+      address: ADDR,
+    });
+    expect(res.builders[0]!.max_fee_bps).toBe('25');
+  });
+
+  it('delegatorRewards keeps the total apart from the per-validator rows', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      address: ADDR,
+      claimable_rewards: '7',
+      rewards: [{ validator: VAULT, unclaimed: '4', last_claim_time: 0 }],
+    };
+    const res = await api.delegatorRewards(ADDR);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'delegator_rewards',
+      address: ADDR,
+    });
+    // The total adds a per-account carry no validator row holds, so it can
+    // exceed the row sum. Claim against the total.
+    expect(res.claimable_rewards).toBe('7');
+    expect(res.rewards[0]!.unclaimed).toBe('4');
   });
 });

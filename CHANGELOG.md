@@ -50,6 +50,15 @@ All notable changes to the TypeScript SDK are documented here.
 
 ### Removed
 
+- **Breaking: `FeeSchedule.builder_rebate_bps`.** The node stopped serving a
+  schedule-wide builder rebate. The field was typed `string` and REQUIRED, so it
+  read `undefined` at runtime with no compile error, and arithmetic on it yielded
+  `NaN` in a displayed or charged rebate.
+
+  There is no replacement field. A broker's rate is the `builder_fee` it sets per
+  order, capped by `ApprovedBuilder.max_fee_bps` from
+  `info().approvedBuilders(address)`.
+
 - **Breaking: `info().rawEnvelope()` is deleted.** It existed to expose the
   echoed `type`, which now rides inside `data`. Use `info().raw()`.
 
@@ -112,6 +121,60 @@ All notable changes to the TypeScript SDK are documented here.
   `user_to_multi_sig_signers` and `agents`.
 
 ### Added
+
+- **`info().rfqOpen()` and `info().rfqUser(address)` — the reads that close the
+  RFQ lane.** Both are public. They were listed here as refused on the public
+  API; that was wrong, and it left the lane open at one end only. A taker learns
+  its own `rfq_id` from `rfqUser` (the request answers with an admission ack, not
+  a session id), and a maker finds a request to quote on from `rfqOpen`.
+
+  New types: `RfqOpen`, `RfqUser`, `RfqSession`, `RfqQuoteEntry`.
+
+  **A quote's INDEX in `RfqSession.quotes` is the `quote_idx` an accept names.**
+  The row carries no id, so re-read the session before you accept: an expired or
+  replaced quote shifts every later index. No WebSocket channel carries an RFQ
+  event, so poll both reads.
+
+  **Two side planes.** These reads answer `"B"` / `"A"`; the RFQ actions sign
+  `"Bid"` / `"Ask"`. Never feed a read token into an action payload.
+
+- **`rfqRequest` and `rfqAccept` take `opts.owner`.** All three RFQ actions bind
+  the owner into the EIP-712 digest, so an approved agent or a vault operator can
+  now open and accept an RFQ for its owner. Only `rfqQuote` could before.
+
+  **Omitting `owner` was never a rejection — it was worse.** The node admitted
+  the action for the SIGNER's own account, so the option escrow and the resulting
+  position landed on the operator wallet instead of the vault. RFQ is the only
+  option trade path.
+
+  Pass the same `owner` on BOTH legs: the node records the owner as the requester
+  and admits an accept only from that account.
+
+- **`info().referralState(user)` and `info().builderState(user)`, with the
+  `ReferralState` / `BuilderState` types.** The accrued referral and broker fee
+  credit. Read the credit BEFORE the matching claim: `claim_referral_rewards` and
+  `claim_builder_rewards` answer with an admission ack and no amount, so this is
+  the only view of what is pending.
+
+  **Both are keyed by `user`, not `address`** — the only two `/info` reads that
+  name the account that way. `ReferralState.referrer` is `null` when the account
+  never bound one; binding is one-time.
+
+- **`info().userTwaps(address)`, `info().approvedBuilders(address)` and
+  `info().delegatorRewards(address)`.** Three live reads that had no typed
+  method. New types: `UserTwaps`, `UserTwap`, `ApprovedBuilders`,
+  `ApprovedBuilder`, `DelegatorRewards`, `DelegatorRewardRow`.
+
+  `userTwaps` is the LIVE parent set: a completed or cancelled TWAP leaves the
+  tracker, so an empty list is not a history answer. `ApprovedBuilder.max_fee_bps`
+  is the CAP the account allows, not a rate the broker charges.
+  `DelegatorRewards.claimable_rewards` may EXCEED the sum of the per-validator
+  rows; claim against the total.
+
+- **`MarketStatic.max_market_order_ntl`** — the remaining open-interest headroom,
+  already served on every `markets_meta` perp row. `null` means the market is
+  UNCAPPED and `"0"` means the cap is reached. Do not rebuild it from `oi_cap`
+  and `open_interest`: the two-read reconstruction misses the `null` convention.
 
 - **`info().optionPositions()`, and the `OptionPositions` / `OptionPosition`
   types.** One account's open option legs, by `address`. Each row carries the

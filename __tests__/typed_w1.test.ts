@@ -55,6 +55,10 @@ const ENCODE_TYPES = {
     'MetaFluxTransaction:RfqQuote(string metafluxChain,uint64 rfqId,uint64 price,uint64 maxSize,uint64 validUntilMs,bool hasStpGroup,uint64 stpGroup,uint64 nonce)',
   rfq_quote_with_owner:
     'MetaFluxTransaction:RfqQuote(string metafluxChain,address owner,uint64 rfqId,uint64 price,uint64 maxSize,uint64 validUntilMs,bool hasStpGroup,uint64 stpGroup,uint64 nonce)',
+  rfq_request_with_owner:
+    'MetaFluxTransaction:RfqRequest(string metafluxChain,address owner,uint32 market,uint8 side,uint64 size,bool hasLimitPx,uint64 limitPx,uint64 expiryMs,bool hasStpGroup,uint64 stpGroup,uint64 nonce)',
+  rfq_accept_with_owner:
+    'MetaFluxTransaction:RfqAccept(string metafluxChain,address owner,uint64 rfqId,uint32 quoteIdx,uint64 size,uint64 nonce)',
   vault_distribute:
     'MetaFluxTransaction:VaultDistribute(string metafluxChain,uint64 vaultId,string pnl,uint64 nonce)',
   claim_builder_rewards:
@@ -92,7 +96,14 @@ describe('W1 typed-action encodeType strings (frozen contract)', () => {
       ENCODE_TYPES.claim_referral_rewards,
     );
     expect(encodeType('rfq_accept')).toBe(ENCODE_TYPES.rfq_accept);
+    // The taker legs bind the owner too: the node records the requester at
+    // request time and admits an accept only from that account.
+    expect(encodeType('rfq_request', true)).toBe(ENCODE_TYPES.rfq_request_with_owner);
+    expect(encodeType('rfq_accept', true)).toBe(ENCODE_TYPES.rfq_accept_with_owner);
     expect(encodeType('fba_submit')).toBe(ENCODE_TYPES.fba_submit);
+    // `fba_submit` is sender-authorized: a passed owner is ignored, and the
+    // digest stays byte-identical to the owner-less one.
+    expect(encodeType('fba_submit', true)).toBe(ENCODE_TYPES.fba_submit);
     // The pm_unenroll alias reuses the existing primary type (NOT a new struct).
     expect(encodeType('pm_unenroll')).toBe(ENCODE_TYPES.pm_unenroll);
     expect(primaryType('pm_unenroll')).toBe(
@@ -372,6 +383,53 @@ describe('P0+P1 wire shapes (rfq_quote)', () => {
         valid_until_ms: 9000,
       },
     });
+  });
+});
+
+describe('RFQ taker legs carry the owner', () => {
+  it('rfq_request / rfq_accept prepend params.owner and bind the owner word', async () => {
+    const { buildTyped, typedDataV4 } = await import('../src/native/typed.js');
+
+    const req = buildTyped(
+      'rfq_request',
+      { market: 7, side: 'Bid', size: 10, expiry_ms: 5000 },
+      54n,
+      CHAIN_ID,
+      KAT_OWNER,
+    );
+    expect(JSON.parse(req.actionJson)).toEqual({
+      type: 'rfq_request',
+      params: { owner: KAT_OWNER, market: 7, side: 'Bid', size: 10, expiry_ms: 5000 },
+    });
+    expect(primaryFields(typedDataV4(req))[1]).toEqual({
+      name: 'owner',
+      type: 'address',
+    });
+
+    const acc = buildTyped(
+      'rfq_accept',
+      { rfq_id: 9, quote_idx: 0, size: 10 },
+      54n,
+      CHAIN_ID,
+      KAT_OWNER,
+    );
+    expect(JSON.parse(acc.actionJson)).toEqual({
+      type: 'rfq_accept',
+      params: { owner: KAT_OWNER, rfq_id: 9, quote_idx: 0, size: 10 },
+    });
+    expect(typedDataV4(acc).message.owner).toBe(KAT_OWNER);
+  });
+
+  it('fba_submit ignores a passed owner (sender-authorized)', async () => {
+    const { buildTyped } = await import('../src/native/typed.js');
+    const built = buildTyped(
+      'fba_submit',
+      { market: 7, side: 'Bid', size: 10, price: 100 },
+      54n,
+      CHAIN_ID,
+      KAT_OWNER,
+    );
+    expect(JSON.parse(built.actionJson).params.owner).toBeUndefined();
   });
 });
 
