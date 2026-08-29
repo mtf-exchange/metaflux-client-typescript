@@ -4,6 +4,13 @@ All notable changes to the TypeScript SDK are documented here.
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-08-29
+
+**The chain does not serve this shape yet.** The reshape ships in node 0.8.14,
+which swaps in at freeze height 25,040,000. Until that height the live chain still
+answers the flat body, so pin 0.24 if you read the account before the swap.
+
+
 ### Changed
 
 - **Breaking: `account_state` is four LANE SUMMARIES, not a flat body.** The

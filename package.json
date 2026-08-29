@@ -1,6 +1,6 @@
 {
   "name": "@metaflux-dex/client",
-  "version": "0.24.1",
+  "version": "0.25.0",
   "packageManager": "pnpm@11.3.0",
   "description": "MetaFlux (MTF) TypeScript client SDK \u2014 WASM-backed crypto + ESM-only fetch wrappers.",
   "type": "module",
