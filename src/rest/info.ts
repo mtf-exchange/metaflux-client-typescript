@@ -463,7 +463,10 @@ export class InfoApi {
   /// `escrow_per_unit` a writer locks. SIGN `signing_id`; never derive it —
   /// the encoding behind the number is internal to the node.
   ///
-  /// On a `capped_call`, `escrow_per_unit` is `cap - strike`, not `strike`.
+  /// READ `settle_asset` WITH `escrow_per_unit`. A put escrows the strike in
+  /// USDC. A CALL ESCROWS ONE COIN of the underlying, so its `escrow_per_unit`
+  /// is `'1'` and it is a coin, not dollars. A caller that reads it as dollars
+  /// sizes a call writer's collateral wrong by the whole coin price.
   async optionSeries(): Promise<OptionSeriesRegistry> {
     return this.post<OptionSeriesRegistry>({ type: 'option_series' });
   }
@@ -482,11 +485,15 @@ export class InfoApi {
   /// a HOLDER sees the units it owns.
   ///
   /// TWO PLANES ON ONE ROW: `long` / `short` are UNIT counts on the series size
-  /// scale, already divided. `escrow` is MONEY, a decimal USDC string. Both are
-  /// typed `string` — only the field name separates them.
+  /// scale, already divided. `escrow` is MONEY, in the row's own
+  /// `settle_asset` — USDC on a put, the underlying coin on a call. Both are
+  /// typed `string` — only the field name separates them, and only
+  /// `settle_asset` gives the escrow a unit. Never sum `escrow` over rows of
+  /// both kinds.
   ///
-  /// The `account_state` `option` lane carries the SUMMARY of these rows. Read
-  /// this one for the legs themselves.
+  /// The `account_state` `option` lane carries the SUMMARY of these rows, and
+  /// its one escrow number counts PUT legs only. Read this one for the legs
+  /// themselves, and for a call's escrow.
   ///
   /// The node serves this read at HEAD. A node that predates the rename answers
   /// `unknown info type`.

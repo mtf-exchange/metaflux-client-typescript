@@ -701,14 +701,16 @@ describe('WS channel body decode', () => {
       '{"channel":"option_state","data":{' +
         '"address":"0x00000000000000000000000000000000000000aa",' +
         '"positions":[{"signing_id":2147483650,"underlying":"BTC",' +
-        '"kind":"capped_call","strike":"100000","expiry":1735689600000,' +
-        '"long":"0","short":"1.5","escrow":"45000"}],' +
+        '"kind":"call","strike":"100000","expiry":1735689600000,' +
+        '"long":"0","short":"1.5","settle_asset":"BTC","escrow":"1.5"}],' +
         '"height":8416000,"time":1784820001000},"is_snapshot":true}',
     );
     if (!isChannelFrame(f, 'option_state')) throw new Error('narrow failed');
-    // `short` is a UNIT count; `escrow` is USDC. Both are strings.
+    // `short` is a UNIT count; `escrow` is money in `settle_asset` — 1.5 coins
+    // here, because a call escrows one coin per unit. Both are strings.
     expect(f.data.positions[0]?.short).toBe('1.5');
-    expect(f.data.positions[0]?.escrow).toBe('45000');
+    expect(f.data.positions[0]?.settle_asset).toBe('BTC');
+    expect(f.data.positions[0]?.escrow).toBe('1.5');
     expect(f.data.height).toBe(8_416_000);
   });
 

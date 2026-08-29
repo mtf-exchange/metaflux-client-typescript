@@ -23,6 +23,17 @@ export type CoreSide = 'Bid' | 'Ask';
 /// `InfoApi.optionSeries`. RFQ clears options and nothing else, and the number
 /// is served whole — never derive it.
 ///
+/// AN `Ask` REQUEST WRITES THE SERIES, so it must fund the escrow. On a CALL
+/// series the escrow is ONE COIN of the underlying per unit, taken from the
+/// SPOT balance, not from cross collateral. Hold the coin first: a request that
+/// carries a `limit_px` is pre-checked and refused with
+/// `insufficient underlying balance for the escrow`. The USDC premium the
+/// writer receives cannot net a coin escrow — they are different assets.
+///
+/// PRICE IS USDC ON BOTH KINDS. `limit_px` is a dollar premium per unit for a
+/// call as well as for a put — it does NOT follow the series `settle_asset`.
+/// Only the escrow and the settlement payout do.
+///
 /// All numeric fields are RAW `u64` wire values (fixed-point lots / price), NOT
 /// decimal-scaled — pass a `number` or `bigint`. `limit_px` and `stp_group` are
 /// `Option<u64>`: the typed digest flattens each to a presence bool + a value
@@ -50,6 +61,11 @@ export interface RfqRequest {
 
 /// `rfq_quote` — a maker posts a quote onto an open RFQ session. Mirrors the
 /// node's frozen `RfqQuote` typed struct.
+///
+/// `price` is a USDC premium per unit on BOTH kinds. QUOTING THE ASK SIDE OF A
+/// CALL MAKES YOU THE WRITER: hold one coin of the underlying per unit on the
+/// spot ledger before the taker accepts, or the accept is refused with
+/// `insufficient underlying balance for the escrow`.
 ///
 /// All numeric fields are RAW `u64` wire values (fixed-point lots / price), NOT
 /// decimal-scaled — pass a `number` or `bigint`. `stp_group` is `Option<u64>`:

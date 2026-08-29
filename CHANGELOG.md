@@ -4,6 +4,64 @@ All notable changes to the TypeScript SDK are documented here.
 
 ## [Unreleased]
 
+**The chain does not serve this shape yet.** The standard-European reshape is
+landed in the node and ships with its next release. Until that swap the live
+chain still answers the retired third kind and still serves `cap`, so pin 0.25
+if you read the option lane before then.
+
+### Changed
+
+- **Breaking: options are STANDARD EUROPEAN. `OptionKind` is `'put' | 'call'`.**
+  The third kind this SDK typed is REMOVED. The chain cannot list it, no series
+  answers it, and nothing on the chain expresses a call spread any more. A
+  client that still matches on that token matches nothing.
+
+  | kind | payoff per unit | writer escrow per unit |
+  | --- | --- | --- |
+  | `put` | `max(K − S*, 0)` USDC | `K` USDC |
+  | `call` | `max(1 − K/S*, 0)` COIN | ONE coin |
+
+  `S*` is the settlement price. Two worked amounts on a $100,000 strike, per
+  whole unit: at `S* = 80,000` the put pays `100000 − 80000 = 20,000` USDC; at
+  `S* = 125,000` the call pays `1 − 100000/125000 = 0.2` coin.
+
+  **A call is coin-denominated because the denomination is FORCED, not chosen.**
+  A call pays `max(S* − K, 0)` in dollars, which has no upper bound, so no
+  finite USDC escrow covers it. The same payoff read in the underlying stays
+  under one coin at every price. One coin therefore funds the writer in full at
+  the fill, which is what keeps an option position impossible to liquidate.
+
+- **Breaking: `OptionSeries.cap` is GONE, and `settle_asset` is NEW** on both
+  `OptionSeries` and `OptionPosition`. `settle_asset` is a coin label: `'USDC'`
+  on a put, the underlying's spot-token name (`'BTC'`) on a call.
+
+  **IT IS THE UNIT OF `escrow_per_unit`, OF `escrow`, AND OF EVERY PAYOUT.**
+  Read it before you read any of them. A call's `escrow_per_unit` is `'1'` — one
+  coin, at every strike — so a caller that assumes dollars is wrong on every
+  call by the whole coin price. `strike` stays a dollar price on both kinds.
+
+  Never sum `OptionPosition.escrow` across rows of both kinds: that adds coins
+  to dollars.
+
+- **`account_state`'s `option.escrow` counts PUT LEGS ONLY.** It is one USDC
+  number and a call escrows the underlying, so a call leg cannot join it.
+  `legs` still counts every leg, so `escrow: '0'` with `legs: 3` is a normal
+  account that writes calls. Read `optionState(address)` for a call's escrow and
+  the coin it is in.
+
+- **`ProductFeeRow.option_taker_bps` prices the STRIKE FACE — `strike × units` —
+  on both kinds.** That face is the put's maximum payout exactly; a call's
+  maximum payout is one coin, which has no USDC figure the chain can read
+  without a price. The fee is USDC on both lanes.
+
+- **RFQ doc comments: the premium is USDC on BOTH kinds; the escrow is not.** A
+  call writer locks one coin per unit out of its SPOT balance, and the USDC
+  premium it receives cannot net that lock. Two rejections an integrator can now
+  hit: `insufficient underlying balance for the escrow` (an `Ask` request that
+  carries a `limit_px`, and every accept, on a call series) and
+  `insufficient free collateral for the fee`. No signing type changed — the RFQ
+  EIP-712 structs are untouched.
+
 ## [0.25.0] — 2026-08-29
 
 **The chain does not serve this shape yet.** The reshape ships in node 0.8.14,
@@ -305,13 +363,10 @@ answers the flat body, so pin 0.24 if you read the account before the swap.
   WHOLE. There is no formula, no base and no arithmetic that derives it — the
   encoding behind the number is internal to the node and may move.
 
-  `escrow_per_unit` is what a WRITER locks per whole unit. On a `capped_call` it
-  is `cap - strike`, not `strike`: a $100,000 strike capped at $130,000 locks
-  $30,000 per unit. Reading `strike` as the lock overstates it by the whole
-  strike.
-
-  `cap` is ABSENT on a put. An empty registry is a `200` with an empty `series`,
-  not an error.
+  `escrow_per_unit` is what a WRITER locks per whole unit. On a put it is the
+  strike. The second kind that release served, and its `cap`, are REMOVED — see
+  Unreleased. An empty registry is a `200` with an empty `series`, not an
+  error.
 
   The read carries no option price and no implied volatility, because the chain
   computes neither. For an account's own holding, read `optionPositions()`.

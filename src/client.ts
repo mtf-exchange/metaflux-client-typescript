@@ -1099,8 +1099,17 @@ export class Client {
   /// `InfoApi.optionSeries`. Serve that number; never derive it.
   ///
   /// An accept moves the premium from the buyer to the writer and locks the
-  /// writer's escrow. It opens no perpetual position, charges no fee, and
-  /// reserves no margin. An option position cannot be liquidated.
+  /// writer's escrow. It opens no perpetual position and reserves no margin.
+  /// The escrow funds the payoff in full at the fill, so an option position can
+  /// never be liquidated. Only the TAKER pays a fee, and only when governance
+  /// has set an option fee schedule; both terms start unset and charge nothing.
+  ///
+  /// THE PREMIUM IS USDC ON BOTH KINDS. THE ESCROW IS NOT. A put writer locks
+  /// the strike in USDC out of cross collateral. A CALL WRITER LOCKS ONE COIN
+  /// of the underlying per unit, out of its SPOT balance, and the USDC premium
+  /// it receives cannot net that lock. Read `settle_asset` on the series row
+  /// before you fund a write; a writer short of the coin is refused with
+  /// `insufficient underlying balance for the escrow`.
   ///
   /// The session reads are public and typed: `InfoApi.rfqUser` gives a taker
   /// its own `rfq_id`, and `InfoApi.rfqOpen` gives a maker the open requests. A

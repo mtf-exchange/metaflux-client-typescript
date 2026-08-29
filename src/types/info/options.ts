@@ -15,29 +15,51 @@
 // node and may move. A client that derives it signs a market the chain may not
 // resolve.
 //
-// THE ESCROW IS WHAT A WRITER LOCKS. On a `capped_call`, `escrow_per_unit` is
-// `cap − strike`, not `strike`. A $100,000 strike capped at $130,000 locks
-// $30,000 per unit. Reading `strike` as the lock overstates it by the whole
-// strike.
+// READ `settle_asset` BEFORE YOU READ ANY ESCROW OR PAYOUT. It names the coin
+// a series escrows and pays in. A put settles in USDC. A CALL SETTLES IN THE
+// UNDERLYING: it escrows ONE COIN per unit and it pays that coin. So
+// `escrow_per_unit`, `escrow` and every settlement amount are dollars on a put
+// and COIN on a call. A caller that assumes dollars is wrong on every call
+// series.
+//
+// THE DENOMINATION IS FORCED, NOT CHOSEN. A call pays `max(S* − K, 0)` in
+// dollars, which has no upper bound, so no finite USDC escrow covers it. The
+// same payoff read in the underlying is `max(1 − K/S*, 0)` coin per unit, which
+// stays under one coin at every price. One coin therefore funds the writer in
+// full at the fill. That is why an option position can never be liquidated.
+//
+// THE PREMIUM STAYS IN USDC ON BOTH LANES. `RfqQuoteEntry.price` and
+// `RfqSession.limit_px` are dollars for a call as well as for a put. Only the
+// escrow and the settlement payout follow `settle_asset`.
 //
 // A POSITION ROW CARRIES TWO PLANES. `long` and `short` are UNIT counts on the
 // series size scale. The node already divides by `sz_decimals`, so `'2.5'` is
-// two and a half whole units. `escrow` is MONEY: a decimal USDC string.
+// two and a half whole units. `escrow` is MONEY, in `settle_asset`.
 //
 // Both planes are typed `string`, so a caller that reads `escrow` as a unit
-// count, or `short` as a dollar figure, gets a wrong number that still parses.
-// The type cannot catch it. Read the field name.
+// count, or `short` as an amount, gets a wrong number that still parses. The
+// type cannot catch it. Read the field name.
 //
 // The registry carries no option price and no implied volatility, because the
 // chain computes neither: the premium is what two accounts agree on in an RFQ.
 
-/// Option kind. A call is always CAPPED: an uncapped call has no finite worst
-/// case, so cash cannot fully collateralize it.
+/// Option kind. Standard European, and fully collateralized at the fill.
 ///
-/// - `put` — payoff `max(K − S, 0)` per unit. The writer locks the strike.
-/// - `capped_call` — payoff `min(max(S − K, 0), C − K)` per unit. The writer
-///   locks `C − K`.
-export type OptionKind = 'put' | 'capped_call';
+/// `S*` is the settlement price the chain reads from the underlying at expiry.
+///
+/// - `put` — payoff `max(K − S*, 0)` USDC per unit. The writer escrows `K`
+///   USDC.
+/// - `call` — payoff `max(1 − K/S*, 0)` COIN per unit. The writer escrows ONE
+///   coin. See the file header for why a call is coin-denominated.
+///
+/// Two worked amounts on a $100,000 strike, per whole unit. At `S* = 80,000`
+/// the put pays `100000 − 80000 = 20,000` USDC. At `S* = 125,000` the call pays
+/// `1 − 100000/125000 = 0.2` coin.
+///
+/// THE THIRD KIND THIS SDK TYPED IS GONE. The chain cannot list it, no series
+/// answers it, and nothing on the chain expresses a call spread any more. A
+/// client that still matches on that token matches nothing.
+export type OptionKind = 'put' | 'call';
 
 /// One live option series.
 export interface OptionSeries {
@@ -46,19 +68,29 @@ export interface OptionSeries {
   signing_id: number;
   /// Symbol of the underlying market the settlement price comes from.
   underlying: string;
-  /// Put, or capped call.
+  /// `'put'` or `'call'`.
   kind: OptionKind;
-  /// Strike `K`, whole-USDC decimal string.
+  /// Strike `K`, whole-USDC decimal string. A strike is a DOLLAR price on both
+  /// kinds, whatever `settle_asset` says.
   strike: string;
-  /// Cap `C`, whole-USDC decimal string. ABSENT on a put — the node omits the
-  /// key.
-  cap?: string;
   /// Expiry (consensus ms). The first settlement attempt runs at this stamp.
   expiry: number;
   /// Size precision. An RFQ `size` of `10^sz_decimals` is ONE whole unit.
   sz_decimals: number;
-  /// What a WRITER locks per whole unit, whole-USDC decimal string. On a
-  /// `capped_call` this is `cap − strike`.
+  /// The coin this series escrows and pays in: `'USDC'` on a put, the
+  /// underlying's token name (`'BTC'`) on a call.
+  ///
+  /// IT IS THE UNIT OF `escrow_per_unit` AND OF EVERY PAYOUT. Read it, do not
+  /// infer it from `underlying`: the label comes from the spot-token registry,
+  /// and the chain refuses to list a call on an underlying that has no spot
+  /// token.
+  settle_asset: string;
+  /// What a WRITER locks per whole unit, decimal string IN `settle_asset`: the
+  /// strike in USDC on a put, `'1'` — one coin — on a call.
+  ///
+  /// A call's lock is one coin at every strike, so this row never grows with
+  /// `strike`. Read it as dollars and a call writer sizes its collateral by the
+  /// coin price, which is the whole error.
   escrow_per_unit: string;
 }
 
@@ -73,14 +105,14 @@ export interface OptionSeriesRegistry {
 /// One account's open leg in one option series.
 ///
 /// The row mixes two planes: `long` / `short` are UNIT counts and `escrow` is
-/// USDC. See the file header.
+/// money in `settle_asset`. See the file header.
 export interface OptionPosition {
   /// The number an RFQ action puts in its `market` field. Served whole — never
   /// derive it.
   signing_id: number;
   /// Symbol of the underlying market the settlement price comes from.
   underlying: string;
-  /// Put, or capped call.
+  /// `'put'` or `'call'`.
   kind: OptionKind;
   /// Strike `K`, whole-USDC decimal string.
   strike: string;
@@ -90,23 +122,31 @@ export interface OptionPosition {
   long: string;
   /// Units WRITTEN, on the series size scale. Already whole units, NOT money.
   short: string;
-  /// USDC this account has locked in the series pot. MONEY, not a unit count.
-  /// It is what the writer takes back if the series settles worthless.
+  /// The coin this series escrows and pays in — `'USDC'` on a put, the
+  /// underlying's token name on a call. The unit of `escrow`.
+  settle_asset: string;
+  /// What this account has locked in the series pot, decimal string IN
+  /// `settle_asset`. MONEY, not a unit count. It is what the writer takes back
+  /// if the series settles worthless.
+  ///
+  /// NEVER SUM THIS ACROSS ROWS. A call leg is coin and a put leg is dollars,
+  /// so a total over both kinds adds coins to dollars.
   escrow: string;
 }
 
 /// `option_state` — one account's open option legs.
 ///
-/// A row carries no `cap`, no `sz_decimals` and no `escrow_per_unit`. Those are
+/// A row carries no `sz_decimals` and no `escrow_per_unit`. Those are
 /// series-wide, on `OptionSeries`.
 ///
 /// One of `long` / `short` is always `'0'`. A fill consumes the opposite leg
 /// before it opens a new one, so a row is either a holding or a written
 /// position, never both.
 ///
-/// The `account_state` `option` lane carries the SUMMARY of these rows — total
-/// escrow, leg count, nearest expiry. It is a different body from a different
-/// builder; do not read one as the other.
+/// The `account_state` `option` lane carries the SUMMARY of these rows — escrow,
+/// leg count, nearest expiry. It is a different body from a different builder;
+/// do not read one as the other. Its `escrow` is ONE USDC number, so it counts
+/// PUT legs only. Per-series denominations are here.
 ///
 /// The node serves this read at HEAD. A node that predates the rename answers
 /// `unknown info type`, and so does the retired `option_positions` name.
@@ -146,7 +186,8 @@ export interface RfqQuoteEntry {
   maker: string;
   /// The maker's self-trade-prevention group, or `null` when it set none.
   maker_stp_group: number | null;
-  /// Quoted premium per unit, whole-USDC decimal string.
+  /// Quoted premium per unit, whole-USDC decimal string. USDC ON BOTH KINDS —
+  /// the premium does NOT follow the series `settle_asset`.
   price: string;
   /// Largest size this maker will fill, on the series size scale.
   max_size: string;
@@ -176,7 +217,7 @@ export interface RfqSession {
   /// The session stops accepting at this consensus timestamp (ms).
   expiry: number;
   /// Worst premium the taker will pay, whole-USDC decimal string, or `null`
-  /// when the request set no limit.
+  /// when the request set no limit. USDC on both kinds, like `price`.
   limit_px: string | null;
   /// When the taker opened the session (consensus ms).
   created_at: number;

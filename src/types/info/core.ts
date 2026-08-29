@@ -189,8 +189,13 @@ export interface AccountMarginLane {
 ///
 /// Read `optionState(address)` for the per-series legs.
 export interface AccountOptionLane {
-  /// USDC locked as writer escrow across every leg, decimal string. MONEY, not
-  /// a unit count.
+  /// USDC locked as writer escrow, decimal string. MONEY, not a unit count.
+  ///
+  /// PUT LEGS ONLY. This is one USDC number, and a CALL escrows the underlying
+  /// coin, so a call leg cannot be added to it without summing coins into
+  /// dollars. `legs` still counts every leg, so `escrow: '0'` with `legs: 3`
+  /// is a normal account that writes calls. Read `optionState(address)` for a
+  /// call's escrow and the coin it is in.
   escrow: string;
   /// How many open legs the account holds. A NUMBER, not a decimal string.
   legs: number;
@@ -714,8 +719,12 @@ export interface ProductFeeRow {
   /// The trailing 30-day maker volume THIS product's maker tier reads.
   /// ABSENT on a product with no maker leg — see `maker_bps`.
   maker_volume_30d?: string;
-  /// OPTION ROW ONLY. The rate charged on the option's MAXIMUM PAYOUT —
-  /// `strike` for a put, `cap - strike` for a capped call. Decimal bps string.
+  /// OPTION ROW ONLY. The rate charged on the STRIKE FACE — `strike × units` —
+  /// on BOTH kinds. Decimal bps string.
+  ///
+  /// That face is the put's maximum payout exactly. A call's maximum payout is
+  /// one coin, which has no USDC figure the chain can read without a price, so
+  /// the strike face prices both lanes. The fee itself is USDC on both.
   ///
   /// The fee is the SMALLER of this term and `option_premium_cap_ppm` of the
   /// premium. Both start unset, which charges nothing.

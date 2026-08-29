@@ -2036,17 +2036,18 @@ describe('InfoApi realigned read shapes', () => {
           strike: '100000',
           expiry: 1_735_689_600_000,
           sz_decimals: 5,
+          settle_asset: 'USDC',
           escrow_per_unit: '100000',
         },
         {
           signing_id: 2_147_483_650,
           underlying: 'BTC',
-          kind: 'capped_call',
+          kind: 'call',
           strike: '100000',
-          cap: '130000',
           expiry: 1_735_689_600_000,
           sz_decimals: 5,
-          escrow_per_unit: '30000',
+          settle_asset: 'BTC',
+          escrow_per_unit: '1',
         },
       ],
     };
@@ -2055,13 +2056,14 @@ describe('InfoApi realigned read shapes', () => {
     expect(res.series).toHaveLength(2);
     // The signing id is served whole — it is the number an RFQ action carries.
     expect(res.series[0]!.signing_id).toBe(2_147_483_649);
-    // A put carries no cap, and locks the strike.
-    expect(res.series[0]!.cap).toBeUndefined();
+    // A put locks the strike, in USDC.
+    expect(res.series[0]!.settle_asset).toBe('USDC');
     expect(res.series[0]!.escrow_per_unit).toBe('100000');
-    // A capped call locks the WIDTH, not the strike.
-    expect(res.series[1]!.kind).toBe('capped_call');
-    expect(res.series[1]!.cap).toBe('130000');
-    expect(res.series[1]!.escrow_per_unit).toBe('30000');
+    // A call locks ONE COIN, whatever the strike, and it says which coin. A
+    // reader that takes this for dollars is out by the whole coin price.
+    expect(res.series[1]!.kind).toBe('call');
+    expect(res.series[1]!.settle_asset).toBe('BTC');
+    expect(res.series[1]!.escrow_per_unit).toBe('1');
   });
 
   it('optionState sends the address and keeps the two planes apart', async () => {
@@ -2073,12 +2075,13 @@ describe('InfoApi realigned read shapes', () => {
         {
           signing_id: 2_147_483_650,
           underlying: 'BTC',
-          kind: 'capped_call',
+          kind: 'call',
           strike: '100000',
           expiry: 1_735_689_600_000,
           long: '0',
           short: '1.5',
-          escrow: '45000',
+          settle_asset: 'BTC',
+          escrow: '1.5',
         },
       ],
       height: 8_416_000,
@@ -2096,9 +2099,11 @@ describe('InfoApi realigned read shapes', () => {
     // `short` is a UNIT count on the series size scale ...
     expect(res.positions[0]!.short).toBe('1.5');
     expect(res.positions[0]!.long).toBe('0');
-    // ... and `escrow` is USDC. Reading one as the other is the failure this
-    // read warns about; both are strings, so only the name separates them.
-    expect(res.positions[0]!.escrow).toBe('45000');
+    // ... and `escrow` is money in `settle_asset`: 1.5 written units of a call
+    // lock one coin each, so this is 1.5 BTC, not dollars. Both fields are
+    // strings, so only the names separate them.
+    expect(res.positions[0]!.settle_asset).toBe('BTC');
+    expect(res.positions[0]!.escrow).toBe('1.5');
     // The renamed read gained the stamp the old one did not carry.
     expect(res.height).toBe(8_416_000);
     expect(res.time).toBe(1_784_820_001_000);
