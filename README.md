@@ -64,8 +64,15 @@ console.log(oracleBars.candles.length);
 const acct = await client.info.accountState(
   '0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025',
 );
-// Positions are grouped by perp dex; the core dex key is the empty string.
-console.log(acct.account_value, acct.clearinghouse_state['']?.positions);
+// The account scalars are cross-lane; each lane key is always present.
+console.log(acct.account_value, acct.perp.init_margin, acct.spot.balances);
+
+// Positions left `account_state` and have their own read. They are grouped by
+// perp dex; the core dex key is the empty string.
+const chs = await client.info.clearinghouseState(
+  '0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025',
+);
+console.log(chs.clearinghouse_state['']?.positions);
 
 // ---- Signed order — POST /exchange (MTF-native signed action) ----
 const ack = await client.submitOrderNative({
@@ -179,8 +186,8 @@ id**. Prices ride the 1e8 plane. All three time-in-force values work: `ioc` drop
 the residual, `gtc` and `alo` rest it with escrow. Discover pairs with
 `client.info.spotMeta()`, trade with `submitSpotOrderNative` /
 `cancelSpotOrderNative`, and read balances back with
-`client.info.accountState(address)` — its `balances` array is the whole token
-ledger, USDC and spot tokens alike.
+`client.info.accountState(address)` — its `spot.balances` array is the whole
+token ledger, USDC and spot tokens alike.
 
 Both spot actions take an optional `owner`. Set it and an **approved agent** of
 that account places or cancels AS the owner; leave it off and the signer trades
@@ -208,7 +215,7 @@ const spotAck = await client.submitSpotOrderNative({
 const acct = await client.info.accountState(
   '0x17c5185167401ed00cf5f5b2fc97d9bbfdb7d025',
 );
-for (const b of acct.balances ?? []) console.log(b.name, b.asset, b.total);
+for (const b of acct.spot.balances) console.log(b.name, b.signing_id, b.total);
 
 // 4. Cancel a resting order by oid.
 await client.cancelSpotOrderNative({ pair: pair.id, oid: 7 });
@@ -336,13 +343,18 @@ out-of-band signing.
 
 ### WebSocket streams
 
-The gateway serves 18 native snake_case channels: `l2_book`, `bbo`, `trades`,
+The gateway serves 20 native snake_case channels: `l2_book`, `bbo`, `trades`,
 `markets`, `explorer_block`, `explorer_txs`, `candles`, `fills`,
 `order_updates`, `open_orders`, `notifications`, `ledger_updates`,
 `user_fundings`, `user_twap_slice_fills`, `user_twap_history`,
-`account_state`, `spot_margin_state`, and `active_asset_data`. Per-market
-channels take `coin` (the market symbol); per-account channels take `user`
-(0x address).
+`account_state`, `clearinghouse_state`, `option_state`, `spot_margin_state`,
+and `active_asset_data`. Per-market channels take `coin` (the market symbol);
+per-account channels take `user` (0x address).
+
+`account_state` carries the account scalars and the four lane summaries.
+`clearinghouse_state` carries the perp POSITION rows that left it, and
+`option_state` carries the option legs. Subscribe to all three for the whole
+account, and compare `height` before you read a summary and a detail together.
 
 RETIRED, and refused with the error envelope: `web_data2`, `spot_state`,
 `web_data`, `all_mids`, `active_asset_ctx` and `user_events`. Each duplicated
