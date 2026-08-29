@@ -2,7 +2,7 @@
 
 All notable changes to the TypeScript SDK are documented here.
 
-## [Unreleased]
+## [0.26.0] - 2026-08-30
 
 **The chain does not serve this shape yet.** The standard-European reshape is
 landed in the node and ships with its next release. Until that swap the live
