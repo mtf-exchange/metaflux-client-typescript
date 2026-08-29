@@ -22,10 +22,12 @@
 
 import type {
   AccountState,
+  ClearinghouseState,
   Funding,
   MarketKind,
   SpotMarginState,
 } from '../types/info/core.js';
+import type { OptionState } from '../types/info/options.js';
 import type {
   Candle,
   CandleType,
@@ -82,6 +84,8 @@ export type WsChannel =
   | 'user_twap_slice_fills'
   | 'user_twap_history'
   | 'account_state'
+  | 'clearinghouse_state'
+  | 'option_state'
   | 'spot_margin_state'
   // per-account + market (`active_asset_data` needs `user` + `coin`)
   | 'active_asset_data';
@@ -104,6 +108,8 @@ export const WS_CHANNELS: readonly WsChannel[] = [
   'user_twap_slice_fills',
   'user_twap_history',
   'account_state',
+  'clearinghouse_state',
+  'option_state',
   'spot_margin_state',
   'active_asset_data',
 ] as const;
@@ -118,6 +124,7 @@ export const WS_CHANNELS: readonly WsChannel[] = [
 ///                  `open_orders`, `notifications`, `ledger_updates`,
 ///                  `user_fundings`, `user_twap_slice_fills`,
 ///                  `user_twap_history`, `account_state`,
+///                  `clearinghouse_state`, `option_state`,
 ///                  `spot_margin_state`, `active_asset_data`); the 0x address.
 ///   - `interval` — `candles` only (`1m`/`5m`/`15m`/`1h`/`4h`/`1d`)
 ///   - `candle_type` — `candles` only (`mark` / `oracle`)
@@ -596,6 +603,19 @@ export interface WsMarketRow {
 /// read returns, including the `height` / `time` stamp.
 export type WsAccountState = AccountState;
 
+/// `clearinghouse_state` channel payload — the SAME body the REST
+/// `clearinghouse_state` read returns, including the `height` / `time` stamp.
+///
+/// Position rows NEVER carry `adl_lamps` here. The lamp ranks one account
+/// against the others in the market, so an always-on lamp would re-emit this
+/// account whenever a STRANGER's return-on-equity crossed a quartile. Ask the
+/// REST read with `detail: "adl"` for the column.
+export type WsClearinghouseState = ClearinghouseState;
+
+/// `option_state` channel payload — the SAME body the REST `option_state` read
+/// returns, including the `height` / `time` stamp.
+export type WsOptionState = OptionState;
+
 /// `spot_margin_state` channel payload — the REST `spot_margin_state` body PLUS
 /// the `height` / `time` stamp. The REST read carries no stamp.
 export type WsSpotMarginState = SpotMarginState & {
@@ -628,6 +648,8 @@ export interface WsChannelData {
   user_twap_slice_fills: WsTwapSliceFill[];
   user_twap_history: WsTwapHistoryRecord[];
   account_state: WsAccountState;
+  clearinghouse_state: WsClearinghouseState;
+  option_state: WsOptionState;
   spot_margin_state: WsSpotMarginState;
   active_asset_data: ActiveAssetDataFrame;
 }
@@ -930,10 +952,28 @@ export class WsClient {
   }
 
   /// Subscribe to the per-user live account-state stream (0x address). The
-  /// frame carries the DEFAULT depth. With the REST `detail: "overview"` read,
-  /// this covers the whole account.
+  /// frame carries the DEFAULT depth: the account scalars and the four lane
+  /// summaries. The perp POSITION rows ride the `clearinghouse_state` channel
+  /// instead. With the REST `detail: "overview"` read, this covers the whole
+  /// account.
   async subscribeAccountState(user: string): Promise<void> {
     return this.subscribe({ type: 'account_state', user });
+  }
+
+  /// Subscribe to the per-user PERP POSITION stream (0x address). Each frame
+  /// is the same body the REST `clearinghouse_state` read returns.
+  ///
+  /// This is the position detail that left `account_state`. Subscribe to BOTH
+  /// channels for the whole picture, and compare `height` before you read a
+  /// summary and a detail together.
+  async subscribeClearinghouseState(user: string): Promise<void> {
+    return this.subscribe({ type: 'clearinghouse_state', user });
+  }
+
+  /// Subscribe to the per-user option-leg stream (0x address). Each frame is
+  /// the same body the REST `option_state` read returns.
+  async subscribeOptionState(user: string): Promise<void> {
+    return this.subscribe({ type: 'option_state', user });
   }
 
   /// Subscribe to the per-user spot-margin position stream (0x address). Each

@@ -35,6 +35,8 @@ import { envelopeRequest } from './http.js';
 import type {
   AccountOverview,
   AccountState,
+  AccountMarginDetail,
+  ClearinghouseState,
   ActiveAssetData,
   ApprovedBuilders,
   BridgeWithdrawalHistory,
@@ -54,7 +56,7 @@ import type {
   MarketsMeta,
   Mip3ActiveBids,
   OpenOrders,
-  OptionPositions,
+  OptionState,
   OptionSeriesRegistry,
   OrderStatusInfo,
   PerpDexs,
@@ -80,7 +82,11 @@ import type {
 } from '../types/info/index.js';
 
 /// Response depth for `InfoApi.accountState`.
-export type AccountDetail = 'full' | 'margin' | 'adl';
+///
+/// `"adl"` is NOT here any more: the position rows it widened moved to
+/// `clearinghouseState`, which takes the same parameter. `account_state`
+/// REFUSES it.
+export type AccountDetail = 'full' | 'margin';
 
 /// `/info` namespace handle. Each method POSTs a typed `{"type": ...}` body to
 /// `POST <baseUrl>/info`, validates the `{data}` envelope, and returns the
@@ -93,42 +99,83 @@ export class InfoApi {
 
   // ── documented core reads ──────────────────────────────────────────────
 
-  /// `account_state` — the account's full TRADING state, keyed by `address`
-  /// (0x hex).
+  /// `account_state` — ONE coherent per-account snapshot, keyed by `address`
+  /// (0x hex): the ACCOUNT truths at the top level, then one summary per LANE.
   ///
-  /// `detail: "full"` (the default) returns equity, margins, tier, positions
-  /// and the whole token ledger. Positions are grouped by perp dex under
-  /// `clearinghouse_state`; the core dex key is `""`. `balances` is an ARRAY of
-  /// `{asset, name, total, hold, avg_entry_px}` rows, USDC first.
+  /// `detail: "full"` (the default) returns the account scalars —
+  /// `account_value`, `total_raw_usd`, `withdrawable`, `health`, `tier`,
+  /// `abstraction`, `pm_net_value`, `position_mode` — plus the four lane keys
+  /// `perp` / `spot` / `margin` / `option`. Every lane key is ALWAYS present
+  /// and zeroed when the lane is empty, so no lane read needs a guard.
   ///
-  /// `detail: "margin"` returns the margin scalars alone — it adds
-  /// `cross_maintenance_margin_used` and skips the position walk and the
-  /// balance scan, which is the right ask for a frequent liquidation-health
-  /// poll. The skipped walk also drops `total_ntl_pos`. Both depths compute
-  /// the shared scalars with one helper, so they can never disagree.
+  /// The scalars are CROSS-LANE. Never sum the lanes to rebuild one: under
+  /// USDC unification the same USDC backs more than one lane, so a sum
+  /// double-counts it.
   ///
-  /// `detail: "adl"` returns the FULL body widened, not a different body: every
-  /// field of `"full"` plus `adl_lamps` on each position row. It is opt-in
-  /// because each lamp ranks the position against every other position in that
-  /// market, so ask for it only on a screen that shows the column.
+  /// The perp POSITION rows are NOT in this body. Read them with
+  /// `clearinghouseState(address)`. Both bodies carry `height`, so a client can
+  /// see when its detail lags its summary.
   ///
-  /// The node accepts a fourth value, `detail: "overview"`. It answers with the
+  /// `detail: "margin"` returns the margin scalars ALONE, which is the right
+  /// ask for a frequent liquidation-health poll. It is a different shape, typed
+  /// by `AccountMarginDetail`: it adds `cross_maintenance_margin_used`, it
+  /// keeps the flat `total_margin_used` name, and it carries no lane keys.
+  ///
+  /// The node accepts a third value, `detail: "overview"`. It answers with the
   /// `AccountOverview` shape, which `AccountState` cannot describe, so
   /// `accountOverview()` posts it and types the answer.
   ///
+  /// `detail: "adl"` is REFUSED. Pass it to `clearinghouseState` instead.
+  ///
   /// `height` / `time` stamp the committed snapshot at every depth. The WS
-  /// `account_state` frame carries the DEFAULT depth only, so it never carries
-  /// `adl_lamps`.
+  /// `account_state` frame carries the DEFAULT depth.
+  async accountState(address: string, detail?: 'full'): Promise<AccountState>;
+  async accountState(
+    address: string,
+    detail: 'margin',
+  ): Promise<AccountMarginDetail>;
   async accountState(
     address: string,
     detail?: AccountDetail,
-  ): Promise<AccountState> {
+  ): Promise<AccountState | AccountMarginDetail> {
     const body: { type: string; [k: string]: unknown } = {
       type: 'account_state',
       address,
     };
     if (detail !== undefined) body.detail = detail;
-    return this.post<AccountState>(body);
+    return this.post<AccountState | AccountMarginDetail>(body);
+  }
+
+  /// `clearinghouse_state` — one account's open PERP POSITIONS, grouped by
+  /// perp dex, keyed by `address` (0x hex).
+  ///
+  /// This is the position detail that left the `account_state` body. The core
+  /// dex key is `""` and is always present; a MIP-3 deployer dex key is the
+  /// deployer's lowercase 0x address.
+  ///
+  /// The body carries NO equity, NO balances and NO health. Those are one
+  /// commit-consistent set on `accountState`, and joining two frames to rebuild
+  /// a health number can produce a figure that was never true. Compare `height`
+  /// across the two bodies instead.
+  ///
+  /// `detail: "adl"` widens every row with `adl_lamps`. It is opt-in because
+  /// each lamp ranks the position against every other position in that market,
+  /// so ask for it only on a screen that shows the column. The WS
+  /// `clearinghouse_state` frame never carries it: an always-on lamp would
+  /// re-emit an account when a STRANGER's return-on-equity crossed a quartile.
+  ///
+  /// The node serves this read at HEAD. A node that predates the reshape
+  /// answers `unknown info type`.
+  async clearinghouseState(
+    address: string,
+    detail?: 'adl',
+  ): Promise<ClearinghouseState> {
+    const body: { type: string; [k: string]: unknown } = {
+      type: 'clearinghouse_state',
+      address,
+    };
+    if (detail !== undefined) body.detail = detail;
+    return this.post<ClearinghouseState>(body);
   }
 
   /// The account's full NON-TRADING state, keyed by `address` (0x hex): vault
@@ -421,7 +468,10 @@ export class InfoApi {
     return this.post<OptionSeriesRegistry>({ type: 'option_series' });
   }
 
-  /// `option_positions` — one account's open option legs, by `address`.
+  /// `option_state` — one account's open option legs, by `address`.
+  ///
+  /// RENAMED from `option_positions`. The old name is not an alias: it answers
+  /// `unknown info type`, the same error a nonexistent read gets.
   ///
   /// Each row carries the series terms beside the position, so no second read
   /// is needed. An account party to no series answers `200` with an empty
@@ -434,8 +484,14 @@ export class InfoApi {
   /// TWO PLANES ON ONE ROW: `long` / `short` are UNIT counts on the series size
   /// scale, already divided. `escrow` is MONEY, a decimal USDC string. Both are
   /// typed `string` — only the field name separates them.
-  async optionPositions(address: string): Promise<OptionPositions> {
-    return this.post<OptionPositions>({ type: 'option_positions', address });
+  ///
+  /// The `account_state` `option` lane carries the SUMMARY of these rows. Read
+  /// this one for the legs themselves.
+  ///
+  /// The node serves this read at HEAD. A node that predates the rename answers
+  /// `unknown info type`.
+  async optionState(address: string): Promise<OptionState> {
+    return this.post<OptionState>({ type: 'option_state', address });
   }
 
   // ── P2 wave-1 typed reads (order / history / spot-margin / earn / pm) ────
@@ -579,8 +635,8 @@ export class InfoApi {
   /// registry; the numeric `id` is the compact `coin` label spot prints carry
   /// on the WS `trades` / `candles` / `fills` channels.
   ///
-  /// Spot token BALANCES are not here: `accountState(address).balances` is the
-  /// account's whole token ledger, USDC and spot tokens alike.
+  /// Spot token BALANCES are not here: `accountState(address).spot.balances`
+  /// is the account's whole token ledger, USDC and spot tokens alike.
   async spotMeta(): Promise<SpotMeta> {
     const d = await this.post<{ spot: SpotMeta }>({
       type: 'markets_meta',

@@ -1,8 +1,8 @@
 // The `account_state` `detail: "overview"` shape — the account's full
 // NON-TRADING state, for `POST /info`.
 //
-// The companion shape to `AccountState`: the default depth owns margin,
-// positions and the token ledger, this one owns vault equities and vault
+// The companion shape to `AccountState`: the default depth owns the account
+// scalars and the four lane summaries, this one owns vault equities and vault
 // summaries, staking, sub-accounts, the multisig signer set, API-wallet agents,
 // and the derived role. The node fills each facet with the SAME serializer the
 // facet's own builder uses, so a facet here cannot drift from the rest of the

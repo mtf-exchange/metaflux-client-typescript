@@ -210,11 +210,17 @@ describe('WsClient wire protocol', () => {
       'user_twap_slice_fills',
       'user_twap_history',
       'account_state',
+      'clearinghouse_state',
+      'option_state',
       'spot_margin_state',
       'active_asset_data',
     ]);
-    expect(WS_CHANNELS).toHaveLength(18);
+    expect(WS_CHANNELS).toHaveLength(20);
     expect(WS_CHANNELS).toContain('spot_margin_state');
+    // The perp position detail and the option legs left `account_state` and
+    // each got its own channel. Both REQUIRE a `user` on subscribe.
+    expect(WS_CHANNELS).toContain('clearinghouse_state');
+    expect(WS_CHANNELS).toContain('option_state');
     // All removed server-side: a subscribe answers with the error envelope.
     // Each retired one duplicated a channel above, so a client had to pick and
     // a wrong pick was silent. `markets` carries what `all_mids` and
@@ -245,6 +251,25 @@ describe('WsClient wire protocol', () => {
     await ws.subscribeSpotMarginState(USER);
     expect(sock.sent).toContain(
       `{"method":"subscribe","subscription":{"type":"spot_margin_state","user":"${USER}"}}`,
+    );
+    ws.close();
+  });
+
+  it('subscribes to the per-account clearinghouse_state and option_state channels', async () => {
+    const ws = new WsClient('wss://x/ws', { autoReconnect: false });
+    const p = ws.connect();
+    const sock = MockSocket.instances[0]!;
+    sock.open();
+    await p;
+
+    const USER = '0x00000000000000000000000000000000000000aa';
+    await ws.subscribeClearinghouseState(USER);
+    await ws.subscribeOptionState(USER);
+    expect(sock.sent).toContain(
+      `{"method":"subscribe","subscription":{"type":"clearinghouse_state","user":"${USER}"}}`,
+    );
+    expect(sock.sent).toContain(
+      `{"method":"subscribe","subscription":{"type":"option_state","user":"${USER}"}}`,
     );
     ws.close();
   });
@@ -617,28 +642,74 @@ describe('WS channel body decode', () => {
     expect(nb.n).toBe(12);
   });
 
-  it('account_state decodes the live dex-keyed body with health_deferred', async () => {
+  it('account_state decodes the four lane summaries with health_deferred', async () => {
     const f = await inbound(
       '{"channel":"account_state","data":{' +
         '"address":"0x00000000000000000000000000000000000000aa",' +
-        '"account_value":"1000","withdrawable":"400",' +
-        '"total_raw_usd":"1000","total_margin_used":"600","total_ntl_pos":"0",' +
+        '"account_value":"1000","total_raw_usd":"1000","withdrawable":"400",' +
         '"health":"1000","tier":"Safe","health_deferred":true,' +
-        '"abstraction":"unified",' +
-        '"clearinghouse_state":{"":{"positions":[]}},' +
-        '"balances":[{"asset":0,"name":"USDC","total":"1000","hold":"0"}],' +
-        '"pm_maint_margin":"0","pm_net_value":"0",' +
-        '"pm_concentration_penalty":"0","position_mode":"one_way",' +
+        '"abstraction":"unified","pm_net_value":"0",' +
+        '"position_mode":"one_way",' +
+        '"perp":{"init_margin":"600","total_ntl_pos":"0",' +
+        '"pm_maint_margin":"0","pm_concentration_penalty":"0"},' +
+        '"spot":{"balances":[{"name":"USDC","signing_id":100,' +
+        '"total":"1000","hold":"0"}]},' +
+        '"margin":{"collateral":"0","debt":"0","pairs":0},' +
+        '"option":{"escrow":"0","legs":0},' +
         '"height":8416000,"time":1784820001000},"is_snapshot":true}',
     );
     if (!isChannelFrame(f, 'account_state')) throw new Error('narrow failed');
-    // The core dex key is the EMPTY STRING; positions are grouped by dex.
-    expect(f.data.clearinghouse_state?.['']?.positions).toEqual([]);
+    // Every lane key is present and needs no guard.
+    expect(f.data.perp.init_margin).toBe('600');
+    expect(f.data.spot.balances[0]?.name).toBe('USDC');
+    expect(f.data.margin.pairs).toBe(0);
+    expect(f.data.option.legs).toBe(0);
+    // `tier` is a STRING. The gateway cold-subscribe placeholder can serve a
+    // number here, so never do arithmetic on it.
+    expect(f.data.tier).toBe('Safe');
     // A deferred account reports maint 0 for want of a price — `tier` and
     // `health` are then not solvency statements.
     expect(f.data.health_deferred).toBe(true);
     expect(f.data.height).toBe(8_416_000);
     expect(f.is_snapshot).toBe(true);
+  });
+
+  it('clearinghouse_state carries the dex-keyed positions and no equity', async () => {
+    const f = await inbound(
+      '{"channel":"clearinghouse_state","data":{' +
+        '"address":"0x00000000000000000000000000000000000000aa",' +
+        '"clearinghouse_state":{"":{"positions":[{"coin":"BTC","size":"-0.5",' +
+        '"entry":"25000","upnl":"12.5","isolated":false,"lev":10,' +
+        '"liq":"30000","roe":"0.05","funding":"0","margin":"1250",' +
+        '"maint_margin":"150","notional":"12500"}]}},' +
+        '"height":8416000,"time":1784820001000},"is_snapshot":true}',
+    );
+    if (!isChannelFrame(f, 'clearinghouse_state')) {
+      throw new Error('narrow failed');
+    }
+    // The core dex key is the EMPTY STRING; positions are grouped by dex.
+    const rows = f.data.clearinghouse_state['']!.positions;
+    expect(rows[0]?.size).toBe('-0.5');
+    // The WS frame never carries `adl_lamps`: an always-on lamp would re-emit
+    // this account when a STRANGER's return-on-equity crossed a quartile.
+    expect(rows[0]?.adl_lamps).toBeUndefined();
+    expect(f.data.height).toBe(8_416_000);
+  });
+
+  it('option_state carries the legs and the stamp', async () => {
+    const f = await inbound(
+      '{"channel":"option_state","data":{' +
+        '"address":"0x00000000000000000000000000000000000000aa",' +
+        '"positions":[{"signing_id":2147483650,"underlying":"BTC",' +
+        '"kind":"capped_call","strike":"100000","expiry":1735689600000,' +
+        '"long":"0","short":"1.5","escrow":"45000"}],' +
+        '"height":8416000,"time":1784820001000},"is_snapshot":true}',
+    );
+    if (!isChannelFrame(f, 'option_state')) throw new Error('narrow failed');
+    // `short` is a UNIT count; `escrow` is USDC. Both are strings.
+    expect(f.data.positions[0]?.short).toBe('1.5');
+    expect(f.data.positions[0]?.escrow).toBe('45000');
+    expect(f.data.height).toBe(8_416_000);
   });
 
   it('l2_book carries [bids, asks] under `levels` with the `n` count key', async () => {

@@ -5,8 +5,9 @@
 // `{type, data}.data`. Money magnitudes are typed `string`.
 //
 // TWO PUBLIC queries are typed here. `option_series` answers which series are
-// live and which number to sign against. `option_positions` answers what one
-// account holds in them.
+// live and which number to sign against. `option_state` answers what one
+// account holds in them. `option_state` REPLACES the retired `option_positions`
+// name — the old name is not an alias, it answers `unknown info type`.
 //
 // SIGN `signing_id`, DO NOT COMPUTE IT. The registry serves the number an RFQ
 // action puts in its `market` field. There is no public formula, no base and no
@@ -94,7 +95,7 @@ export interface OptionPosition {
   escrow: string;
 }
 
-/// `option_positions` — one account's open option legs.
+/// `option_state` — one account's open option legs.
 ///
 /// A row carries no `cap`, no `sz_decimals` and no `escrow_per_unit`. Those are
 /// series-wide, on `OptionSeries`.
@@ -102,11 +103,23 @@ export interface OptionPosition {
 /// One of `long` / `short` is always `'0'`. A fill consumes the opposite leg
 /// before it opens a new one, so a row is either a holding or a written
 /// position, never both.
-export interface OptionPositions {
+///
+/// The `account_state` `option` lane carries the SUMMARY of these rows — total
+/// escrow, leg count, nearest expiry. It is a different body from a different
+/// builder; do not read one as the other.
+///
+/// The node serves this read at HEAD. A node that predates the rename answers
+/// `unknown info type`, and so does the retired `option_positions` name.
+export interface OptionState {
   /// The account the rows belong to, `0x` hex.
   address: string;
   /// One row per open leg. Empty when the account is party to no series.
   positions: OptionPosition[];
+  /// Committed block height of the snapshot. The retired `option_positions`
+  /// read carried no stamp.
+  height: number;
+  /// Consensus timestamp of that block (unix ms).
+  time: number;
 }
 
 // ── RFQ session reads ───────────────────────────────────────────────────────

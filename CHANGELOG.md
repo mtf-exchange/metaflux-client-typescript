@@ -6,6 +6,97 @@ All notable changes to the TypeScript SDK are documented here.
 
 ### Changed
 
+- **Breaking: `account_state` is four LANE SUMMARIES, not a flat body.** The
+  account truths stay at the top level — `address`, `account_value`,
+  `total_raw_usd`, `withdrawable`, `health`, `tier`, `health_deferred`,
+  `abstraction`, `pm_net_value`, `position_mode`, `height`, `time`. Everything
+  else moved into one of four lane keys:
+
+  | was | is now |
+  | --- | --- |
+  | `total_margin_used` | `perp.init_margin` |
+  | `total_ntl_pos` | `perp.total_ntl_pos` |
+  | `pm_maint_margin` | `perp.pm_maint_margin` |
+  | `pm_concentration_penalty` | `perp.pm_concentration_penalty` |
+  | `balances` | `spot.balances` |
+  | `clearinghouse_state` | its own read and channel, see below |
+
+  Every lane key — `perp`, `spot`, `margin`, `option` — is ALWAYS present and
+  zeroed when the lane is empty, so no lane read needs a guard. The one
+  exception is `option.next_expiry`, absent when `option.legs` is `0`: a zero
+  timestamp reads as 1970.
+
+  `spot.balances` is NEVER an empty array. The USDC row is unconditional and
+  reads `total: "0"` for an account that holds nothing, so an empty array is a
+  placeholder, not an empty ledger.
+
+  New exported types: `AccountPerpLane`, `AccountSpotLane`, `AccountMarginLane`,
+  `AccountOptionLane`.
+
+  **`pm_net_value` stays at the TOP LEVEL.** It reads like a perp figure and is
+  a whole-account one: its cash term is the whole unified pool, and under
+  multi-collateral it folds haircut-valued spot balances. Never sum the lanes to
+  rebuild an account scalar — under USDC unification the same USDC backs more
+  than one lane, so a sum double-counts it.
+
+  Two `margin` / `option` lane fields are NUMBERS, not decimal strings:
+  `margin.pairs` and `option.legs` are counts.
+
+- **Breaking: `accountState(address, 'margin')` returns `AccountMarginDetail`,
+  a different shape.** It is no longer a thinner `AccountState`: it adds
+  `cross_maintenance_margin_used`, it KEEPS the flat `total_margin_used` name,
+  and it carries no lane keys and no `position_mode`. `AccountDetail` narrows to
+  `'full' | 'margin'`.
+
+- **Breaking: `optionPositions()` is now `optionState()`.** The wire type is
+  `option_state`; `option_positions` is not an alias and answers
+  `unknown info type`. The type `OptionPositions` is now `OptionState`, and the
+  body gained the `height` / `time` stamp the old read did not carry.
+
+### Added
+
+- **`clearinghouseState(address, detail?)` — the perp POSITION rows that left
+  `account_state`.** The body is
+  `{address, clearinghouse_state: {"<dex>": {positions: [...]}}, height, time}`;
+  the row shape is unchanged, the core dex key is `""` and is always present.
+  New exported type `ClearinghouseState`.
+
+  It carries NO equity, NO balances and NO health. Those are one
+  commit-consistent set on `accountState`, and joining two frames to rebuild a
+  health number can produce a figure that was never true. Compare `height`
+  across the two bodies instead.
+
+  `detail: "adl"` moved here from `accountState`, which now REFUSES it.
+  `accountState(address, 'adl')` no longer type-checks.
+
+- **Two WebSocket channels: `clearinghouse_state` and `option_state`.** Both
+  REQUIRE a `user` on subscribe, and each frame is the same body its REST read
+  returns. `subscribeClearinghouseState(user)` and `subscribeOptionState(user)`.
+  New payload types `WsClearinghouseState` and `WsOptionState`.
+  `WS_CHANNELS` goes from 18 names to 20.
+
+  The `clearinghouse_state` frame never carries `adl_lamps`. A lamp ranks one
+  account against the others in the market, so an always-on lamp would re-emit
+  the account whenever a STRANGER's return-on-equity crossed a quartile. Ask the
+  REST read with `detail: "adl"` for the column.
+
+- **Read `tier` as a STRING.** The node serves `"Safe"` / `"T0"` / `"T1"` /
+  `"T2"` / `"T3"`. The gateway's cold-subscribe placeholder — the frame a
+  subscriber gets while the node is still answering — can serve the NUMBER `0`
+  in that slot, and it can serve `abstraction: "standard"` and an empty
+  `spot.balances` where the node computes something else. A placeholder frame
+  stamps `height: 0` and `time: 0`; treat a zero stamp as "no data yet" rather
+  than as account state.
+
+### Not live yet
+
+- The shapes above are LANDED but NOT RELEASED. Measured 2026-08-29 against the
+  live public API, `option_series`, `option_positions` and `option_state` all
+  answer `unknown info type`, which proves the live node predates this change.
+  So the live node still serves the FLAT `account_state` body and refuses
+  `clearinghouse_state`. This SDK release LEADS the node release, the way an
+  upgrade notice does. Stay on the previous SDK version until the node ships.
+
 - **Breaking: `/info` and `/exchange` answer ONE response envelope.** A success
   is `{"data": <payload>}` with NO `error` key; a failure is
   `{"error": {"code", "message", "details"?}}` with NO `data` key. `data` may

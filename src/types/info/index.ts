@@ -7,6 +7,12 @@
 
 export type {
   AccountState,
+  AccountMarginDetail,
+  AccountPerpLane,
+  AccountSpotLane,
+  AccountMarginLane,
+  AccountOptionLane,
+  ClearinghouseState,
   AccountPosition,
   DexPositions,
   TokenBalance,
@@ -113,7 +119,7 @@ export type {
 export type {
   OptionKind,
   OptionPosition,
-  OptionPositions,
+  OptionState,
   OptionSeries,
   OptionSeriesRegistry,
   RfqOpen,

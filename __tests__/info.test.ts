@@ -66,8 +66,15 @@ describe('InfoApi request shapes', () => {
     nextData = {
       address: ADDR,
       account_value: '0',
-      clearinghouse_state: { '': { positions: [] } },
-      balances: [],
+      perp: {
+        init_margin: '0',
+        total_ntl_pos: '0',
+        pm_maint_margin: '0',
+        pm_concentration_penalty: '0',
+      },
+      spot: { balances: [] },
+      margin: { collateral: '0', debt: '0', pairs: 0 },
+      option: { escrow: '0', legs: 0 },
     };
     await api.accountState(ADDR);
     expect(JSON.parse(captured!.body)).toEqual({
@@ -644,6 +651,9 @@ describe('InfoApi request shapes', () => {
       'userFillsByTime',
       'predictedFundings',
       'spotClearinghouseState',
+      // Renamed to `optionState`. The node answers `unknown info type` for
+      // `option_positions`, so a method still posting it fails on every call.
+      'optionPositions',
       'maxMarketOrderNtls',
       'perpsAtOpenInterestCap',
       'leadingVaults',
@@ -1503,18 +1513,171 @@ describe('InfoApi envelope validation', () => {
 // The node renamed the client-facing read surface. These specs pin the NEW
 // keys, so a regression to the old ones fails here rather than at runtime.
 describe('InfoApi realigned read shapes', () => {
-  it('accountState groups positions by dex and returns balances as an array', async () => {
+  it('accountState answers cross-lane scalars plus four lane summaries', async () => {
     const api = new InfoApi(BASE);
     nextData = {
       address: ADDR,
       account_value: '1000',
-      withdrawable: '400',
       total_raw_usd: '987.5',
-      total_margin_used: '600',
-      total_ntl_pos: '12500',
+      withdrawable: '400',
       health: '850',
       tier: 'Safe',
       abstraction: 'unified',
+      pm_net_value: '0',
+      position_mode: 'one_way',
+      perp: {
+        init_margin: '600',
+        total_ntl_pos: '12500',
+        pm_maint_margin: '0',
+        pm_concentration_penalty: '0',
+      },
+      spot: {
+        balances: [
+          { name: 'USDC', signing_id: 100, total: '1000', hold: '25' },
+          { name: 'BTC', signing_id: 101, total: '0.5', hold: '0' },
+        ],
+      },
+      margin: { collateral: '250', debt: '75.5', pairs: 2 },
+      option: { escrow: '30000', legs: 1, next_expiry: 1_735_689_600_000 },
+      height: 8_416_000,
+      time: 1_784_820_001_000,
+    };
+    const res = await api.accountState(ADDR);
+
+    // The perp lane owns the margin figures that used to be flat. The old
+    // `total_margin_used` is `perp.init_margin`.
+    expect(res.perp.init_margin).toBe('600');
+    expect(res.perp.total_ntl_pos).toBe('12500');
+    expect(res.perp.pm_maint_margin).toBe('0');
+    expect(res.perp.pm_concentration_penalty).toBe('0');
+
+    // Balances are the WHOLE token ledger, an ARRAY of rows, USDC first.
+    expect(res.spot.balances[0]?.name).toBe('USDC');
+    expect(res.spot.balances[1]?.signing_id).toBe(101);
+
+    // The spot-margin lane folds to three numbers, and `pairs` is a COUNT.
+    expect(res.margin.collateral).toBe('250');
+    expect(res.margin.debt).toBe('75.5');
+    expect(res.margin.pairs).toBe(2);
+
+    // The option lane folds to escrow, a leg COUNT, and the nearest expiry.
+    expect(res.option.escrow).toBe('30000');
+    expect(res.option.legs).toBe(1);
+    expect(res.option.next_expiry).toBe(1_735_689_600_000);
+
+    // Cross-lane scalars stay at the top level.
+    expect(res.account_value).toBe('1000');
+    expect(res.total_raw_usd).toBe('987.5');
+    expect(res.withdrawable).toBe('400');
+    expect(res.health).toBe('850');
+    expect(res.tier).toBe('Safe');
+    expect(res.position_mode).toBe('one_way');
+    // `pm_net_value` reads like a perp figure and is a WHOLE-ACCOUNT one, so
+    // it is top level. Under `perp` a lane-summing client double-counts USDC.
+    expect(res.pm_net_value).toBe('0');
+    // REST bodies carry a flat height/time stamp.
+    expect(res.height).toBe(8_416_000);
+    expect(res.time).toBe(1_784_820_001_000);
+
+    // Every key that MOVED is gone from the top level. A body that still
+    // carries one is half-old, and reading it silently yields NaN.
+    const raw = res as unknown as Record<string, unknown>;
+    for (const moved of [
+      'total_margin_used',
+      'total_ntl_pos',
+      'pm_maint_margin',
+      'pm_concentration_penalty',
+      'balances',
+      'clearinghouse_state',
+      'cross_maintenance_margin_used',
+      'init_margin',
+    ]) {
+      expect(raw[moved]).toBeUndefined();
+    }
+  });
+
+  it('accountState keeps every lane present and zeroed on an empty account', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      address: ADDR,
+      account_value: '0',
+      total_raw_usd: '0',
+      withdrawable: '0',
+      health: '0',
+      tier: 'Safe',
+      abstraction: 'unified',
+      pm_net_value: '0',
+      position_mode: 'one_way',
+      perp: {
+        init_margin: '0',
+        total_ntl_pos: '0',
+        pm_maint_margin: '0',
+        pm_concentration_penalty: '0',
+      },
+      // The USDC row is unconditional: an EMPTY array is a shape no real
+      // account returns.
+      spot: {
+        balances: [
+          { name: 'USDC', signing_id: 100, total: '0', hold: '0', avg_entry_px: null },
+        ],
+      },
+      margin: { collateral: '0', debt: '0', pairs: 0 },
+      option: { escrow: '0', legs: 0 },
+      height: 8_416_000,
+      time: 1_784_820_001_000,
+    };
+    const res = await api.accountState(ADDR);
+    // No lane key needs a guard.
+    expect(res.perp.init_margin).toBe('0');
+    expect(res.margin.pairs).toBe(0);
+    expect(res.option.legs).toBe(0);
+    expect(res.spot.balances).toHaveLength(1);
+    expect(res.spot.balances[0]?.name).toBe('USDC');
+    // A zero timestamp reads as 1970, so the node omits the key instead.
+    expect(res.option.next_expiry).toBeUndefined();
+  });
+
+  it('accountState surfaces health_deferred, and omits it when priceable', async () => {
+    const api = new InfoApi(BASE);
+    const base = {
+      address: ADDR,
+      account_value: '1000',
+      total_raw_usd: '1000',
+      withdrawable: '1000',
+      health: '1000',
+      tier: 'Safe',
+      abstraction: 'unified',
+      pm_net_value: '0',
+      position_mode: 'one_way',
+      perp: {
+        init_margin: '0',
+        total_ntl_pos: '0',
+        pm_maint_margin: '0',
+        pm_concentration_penalty: '0',
+      },
+      spot: { balances: [{ name: 'USDC', signing_id: 100, total: '1000', hold: '0' }] },
+      margin: { collateral: '0', debt: '0', pairs: 0 },
+      option: { escrow: '0', legs: 0 },
+      height: 8_416_000,
+      time: 1_784_820_001_000,
+    };
+    // The node emits the key ONLY when the risk engine defers on the account.
+    nextData = { ...base, health_deferred: true };
+    const deferred = await api.accountState(ADDR);
+    // Deferred: maint is 0 for want of a price, so `tier` / `health` are not
+    // solvency statements.
+    expect(deferred.health_deferred).toBe(true);
+    expect(deferred.tier).toBe('Safe');
+
+    nextData = base;
+    const priceable = await api.accountState(ADDR);
+    expect(priceable.health_deferred).toBeUndefined();
+  });
+
+  it('clearinghouseState posts its own type and anchors the core dex key', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      address: ADDR,
       clearinghouse_state: {
         '': {
           positions: [
@@ -1536,88 +1699,45 @@ describe('InfoApi realigned read shapes', () => {
         },
         '0x00000000000000000000000000000000000000cc': { positions: [] },
       },
-      balances: [
-        { name: 'USDC', signing_id: 100, total: '1000', hold: '25' },
-        { name: 'BTC', signing_id: 101, total: '0.5', hold: '0' },
-      ],
-      pm_maint_margin: '0',
-      pm_net_value: '0',
-      pm_concentration_penalty: '0',
-      position_mode: 'one_way',
       height: 8_416_000,
       time: 1_784_820_001_000,
     };
-    const res = await api.accountState(ADDR);
-    // The core dex key is the empty string and is always present at full depth.
-    const core = res.clearinghouse_state!['']!;
-    const pos = core.positions[0]!;
+    const res = await api.clearinghouseState(ADDR);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'clearinghouse_state',
+      address: ADDR,
+    });
+    // The core dex key is the empty string and is ALWAYS present.
+    const pos = res.clearinghouse_state['']!.positions[0]!;
     // A POSITION size key is `size` and is SIGNED. Order / book / trade rows
     // use `sz` instead — the two are deliberately different.
     expect(pos.size).toBe('-0.5');
-    // The POSITION row keeps its own `maint_margin`. The rename is account-level.
+    // The POSITION row keeps its own `maint_margin`.
     expect(pos.maint_margin).toBe('150');
     // A one-way account omits the hedge leg label.
     expect(pos.side).toBeUndefined();
     // A MIP-3 deployer dex keys by the deployer address.
     expect(
-      res.clearinghouse_state!['0x00000000000000000000000000000000000000cc'],
+      res.clearinghouse_state['0x00000000000000000000000000000000000000cc'],
     ).toBeDefined();
-    // Balances are the WHOLE token ledger, an ARRAY of rows, USDC first.
-    expect(res.balances![0]?.name).toBe('USDC');
-    expect(res.balances![1]?.signing_id).toBe(101);
-    // The folded PM figures are whole-USDC and always present.
-    expect(res.pm_maint_margin).toBe('0');
-    expect(res.pm_net_value).toBe('0');
-    expect(res.pm_concentration_penalty).toBe('0');
-    expect(res.position_mode).toBe('one_way');
-    // REST bodies carry a flat height/time stamp.
+    // Both bodies carry the stamp, so a client sees when detail lags summary.
     expect(res.height).toBe(8_416_000);
-    expect(res.time).toBe(1_784_820_001_000);
-    // Account-level scalars: the NEW names, and the old ones are gone.
-    expect(res.total_margin_used).toBe('600');
-    expect(res.total_raw_usd).toBe('987.5');
-    expect(res.total_ntl_pos).toBe('12500');
+
+    // No equity, no balances, no health here. Joining two frames to rebuild a
+    // health number can produce a figure that was never true.
     const raw = res as unknown as Record<string, unknown>;
-    expect(raw.init_margin).toBeUndefined();
-    expect(raw.maint_margin).toBeUndefined();
-    expect(res.cross_maintenance_margin_used).toBeUndefined();
+    for (const absent of [
+      'account_value',
+      'withdrawable',
+      'health',
+      'balances',
+      'positions',
+    ]) {
+      expect(raw[absent]).toBeUndefined();
+    }
   });
 
-  it('accountState surfaces health_deferred, and omits it when priceable', async () => {
-    const api = new InfoApi(BASE);
-    const base = {
-      address: ADDR,
-      account_value: '1000',
-      withdrawable: '1000',
-      total_raw_usd: '1000',
-      total_margin_used: '0',
-      total_ntl_pos: '0',
-      health: '1000',
-      tier: 'Safe',
-      abstraction: 'unified',
-      clearinghouse_state: { '': { positions: [] } },
-      balances: [],
-      pm_maint_margin: '0',
-      pm_net_value: '0',
-      pm_concentration_penalty: '0',
-      position_mode: 'one_way',
-      height: 8_416_000,
-      time: 1_784_820_001_000,
-    };
-    // The node emits the key ONLY when the risk engine defers on the account.
-    nextData = { ...base, health_deferred: true };
-    const deferred = await api.accountState(ADDR);
-    // Deferred: maint is 0 for want of a price, so `tier` / `health` are not
-    // solvency statements.
-    expect(deferred.health_deferred).toBe(true);
-    expect(deferred.tier).toBe('Safe');
-
-    nextData = base;
-    const priceable = await api.accountState(ADDR);
-    expect(priceable.health_deferred).toBeUndefined();
-  });
-
-  it('accountState keeps the hedge leg label distinct from the side token', async () => {
+  it('clearinghouseState keeps the hedge leg label distinct from the side token', async () => {
     const api = new InfoApi(BASE);
     nextData = {
       address: ADDR,
@@ -1642,16 +1762,17 @@ describe('InfoApi realigned read shapes', () => {
           ],
         },
       },
-      balances: [],
+      height: 8_416_000,
+      time: 1_784_820_001_000,
     };
-    const res = await api.accountState(ADDR);
+    const res = await api.clearinghouseState(ADDR);
     // A hedge leg label is "long" / "short" — NOT the "B" / "A" side token.
-    expect(res.clearinghouse_state?.['']?.positions[0]?.side).toBe('long');
+    expect(res.clearinghouse_state['']?.positions[0]?.side).toBe('long');
     // `adl_lamps` rides `detail: "adl"` only, so the default depth omits it.
-    expect(res.clearinghouse_state?.['']?.positions[0]?.adl_lamps).toBeUndefined();
+    expect(res.clearinghouse_state['']?.positions[0]?.adl_lamps).toBeUndefined();
   });
 
-  it('accountState detail:adl posts the depth and reads adl_lamps, zero included', async () => {
+  it('clearinghouseState detail:adl posts the depth and reads adl_lamps, zero included', async () => {
     const api = new InfoApi(BASE);
     const pos = (coin: string, lamps: number) => ({
       coin,
@@ -1671,15 +1792,16 @@ describe('InfoApi realigned read shapes', () => {
     nextData = {
       address: ADDR,
       clearinghouse_state: { '': { positions: [pos('BTC', 4), pos('ETH', 0)] } },
-      balances: [],
+      height: 8_416_000,
+      time: 1_784_820_001_000,
     };
-    const res = await api.accountState(ADDR, 'adl');
+    const res = await api.clearinghouseState(ADDR, 'adl');
     expect(JSON.parse(captured!.body)).toEqual({
-      type: 'account_state',
+      type: 'clearinghouse_state',
       address: ADDR,
       detail: 'adl',
     });
-    const rows = res.clearinghouse_state?.['']?.positions ?? [];
+    const rows = res.clearinghouse_state['']?.positions ?? [];
     expect(rows[0]?.adl_lamps).toBe(4);
     // Zero is a real answer — not in the queue — never "unknown".
     expect(rows[1]?.adl_lamps).toBe(0);
@@ -1833,53 +1955,54 @@ describe('InfoApi realigned read shapes', () => {
     expect(vs.validators[0]?.unjail_at).toBeNull();
   });
 
-  it('accountState.balances carries the optional avg_entry_px cost basis', async () => {
+  it('accountState spot.balances carries the optional avg_entry_px cost basis', async () => {
     const api = new InfoApi(BASE);
     nextData = {
       address: ADDR,
       account_value: '0',
-      withdrawable: '0',
       total_raw_usd: '0',
-      total_margin_used: '0',
-      total_ntl_pos: '0',
+      withdrawable: '0',
       health: '0',
       tier: 'Safe',
       abstraction: 'unified',
-      position_mode: 'one_way',
-      clearinghouse_state: { '': { positions: [] } },
-      balances: [
-        // Deposited / pre-basis holding: no entry recorded, so no key.
-        { name: 'USDC', signing_id: 100, total: '390548', hold: '390548' },
-        { name: 'MTF', signing_id: 104, total: '10000039.5196599', hold: '3000000', avg_entry_px: '412.5' },
-      ],
-      pm_maint_margin: '0',
       pm_net_value: '0',
-      pm_concentration_penalty: '0',
+      position_mode: 'one_way',
+      perp: {
+        init_margin: '0',
+        total_ntl_pos: '0',
+        pm_maint_margin: '0',
+        pm_concentration_penalty: '0',
+      },
+      spot: {
+        balances: [
+          // Deposited / pre-basis holding: no entry recorded, so no key.
+          { name: 'USDC', signing_id: 100, total: '390548', hold: '390548' },
+          { name: 'MTF', signing_id: 104, total: '10000039.5196599', hold: '3000000', avg_entry_px: '412.5' },
+        ],
+      },
+      margin: { collateral: '0', debt: '0', pairs: 0 },
+      option: { escrow: '0', legs: 0 },
       height: 6_845_318,
       time: 1_786_164_224_330,
     };
     const res = await api.accountState(ADDR);
     // Absent means UNKNOWN, never zero -- a deposit writes no basis at all.
-    expect(res.balances![0]?.avg_entry_px).toBeUndefined();
-    expect(res.balances![1]?.avg_entry_px).toBe('412.5');
+    expect(res.spot.balances[0]?.avg_entry_px).toBeUndefined();
+    expect(res.spot.balances[1]?.avg_entry_px).toBe('412.5');
   });
 
-  it('accountState margin depth adds the cross maint scalar and drops the walks', async () => {
+  it('accountState margin depth is its own shape, with no lane keys', async () => {
     const api = new InfoApi(BASE);
     nextData = {
       address: ADDR,
       account_value: '100',
-      withdrawable: '10',
       total_raw_usd: '100',
-      total_margin_used: '20',
+      withdrawable: '10',
       cross_maintenance_margin_used: '15',
+      total_margin_used: '20',
       health: '85',
       tier: 'Safe',
       abstraction: 'unified',
-      position_mode: 'one_way',
-      pm_maint_margin: '0',
-      pm_net_value: '0',
-      pm_concentration_penalty: '0',
       height: 8_416_000,
       time: 1_784_820_001_000,
     };
@@ -1891,13 +2014,15 @@ describe('InfoApi realigned read shapes', () => {
     });
     // `cross_maintenance_margin_used` is served at THIS depth only.
     expect(res.cross_maintenance_margin_used).toBe('15');
+    // This depth KEEPS the flat name; the full body serves the same number as
+    // `perp.init_margin`.
     expect(res.total_margin_used).toBe('20');
     expect(res.total_raw_usd).toBe('100');
-    // The walks are skipped, so both collections and `total_ntl_pos` are
-    // absent, not empty-wrong.
-    expect(res.clearinghouse_state).toBeUndefined();
-    expect(res.balances).toBeUndefined();
-    expect(res.total_ntl_pos).toBeUndefined();
+    // The walks are skipped, so no lane key is served at all.
+    const raw = res as unknown as Record<string, unknown>;
+    for (const lane of ['perp', 'spot', 'margin', 'option', 'position_mode']) {
+      expect(raw[lane]).toBeUndefined();
+    }
   });
 
   it('optionSeries POSTs the bare type and keeps both kinds apart', async () => {
@@ -1939,7 +2064,7 @@ describe('InfoApi realigned read shapes', () => {
     expect(res.series[1]!.escrow_per_unit).toBe('30000');
   });
 
-  it('optionPositions sends the address and keeps the two planes apart', async () => {
+  it('optionState sends the address and keeps the two planes apart', async () => {
     const api = new InfoApi(BASE);
     const who = '0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1';
     nextData = {
@@ -1956,10 +2081,14 @@ describe('InfoApi realigned read shapes', () => {
           escrow: '45000',
         },
       ],
+      height: 8_416_000,
+      time: 1_784_820_001_000,
     };
-    const res = await api.optionPositions(who);
+    const res = await api.optionState(who);
+    // The wire type is `option_state`. `option_positions` was RETIRED, not
+    // aliased: it answers `unknown info type`.
     expect(JSON.parse(captured!.body)).toEqual({
-      type: 'option_positions',
+      type: 'option_state',
       address: who,
     });
     expect(res.positions).toHaveLength(1);
@@ -1970,13 +2099,21 @@ describe('InfoApi realigned read shapes', () => {
     // ... and `escrow` is USDC. Reading one as the other is the failure this
     // read warns about; both are strings, so only the name separates them.
     expect(res.positions[0]!.escrow).toBe('45000');
+    // The renamed read gained the stamp the old one did not carry.
+    expect(res.height).toBe(8_416_000);
+    expect(res.time).toBe(1_784_820_001_000);
   });
 
-  it('optionPositions returns an empty list for an account party to nothing', async () => {
+  it('optionState returns an empty list for an account party to nothing', async () => {
     const api = new InfoApi(BASE);
     const who = '0xb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2';
-    nextData = { address: who, positions: [] };
-    const res = await api.optionPositions(who);
+    nextData = {
+      address: who,
+      positions: [],
+      height: 8_416_000,
+      time: 1_784_820_001_000,
+    };
+    const res = await api.optionState(who);
     expect(res.positions).toEqual([]);
   });
 

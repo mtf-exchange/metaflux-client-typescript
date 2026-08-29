@@ -2096,8 +2096,9 @@ export class Client {
 
   // NOTE: The CCXT market / position reads (`getMarkets` / `getPositions`, which
   // hit the deleted `/ccxt/*` routes — ADR-028) were REMOVED. Use the MTF-native
-  // `/info` reads instead: `client.info.markets()` for the market universe and
-  // `client.info.accountState(address)` for an account's positions / balances.
+  // `/info` reads instead: `client.info.markets()` for the market universe,
+  // `client.info.accountState(address)` for the account summary and balances,
+  // and `client.info.clearinghouseState(address)` for the position rows.
 
   /// Internal: set the JWT after a successful `/auth` exchange. Exposed
   /// so an external auth flow (wallet popup, etc.) can plant a token.

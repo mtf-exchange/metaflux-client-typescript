@@ -30,7 +30,7 @@ export type MarginMode = 'cross' | 'isolated' | 'strict_iso';
 /// `abstraction === 'portfolio'`.
 export type Abstraction = 'unified' | 'standard' | 'portfolio';
 
-/// One open position inside an `AccountState`.
+/// One open position inside a `ClearinghouseState`.
 ///
 /// All USD magnitudes are whole-USDC decimal strings. `size` is the signed
 /// REAL size (whole units, sign preserved for shorts).
@@ -90,14 +90,15 @@ export interface AccountPosition {
   adl_lamps?: number;
 }
 
-/// The positions of one perp dex inside `AccountState.clearinghouse_state`.
-/// The object wraps `positions` so the node can add per-dex fields later.
+/// The positions of one perp dex inside
+/// `ClearinghouseState.clearinghouse_state`. The object wraps `positions` so
+/// the node can add per-dex fields later.
 export interface DexPositions {
   /// Open positions on that dex.
   positions: AccountPosition[];
 }
 
-/// One token balance row of `account_state.balances` — the account's WHOLE
+/// One token balance row of `account_state.spot.balances` — the account's WHOLE
 /// token ledger, the unified USDC pool in row 0 and every spot token after it.
 ///
 /// `total - hold` is NOT the spendable amount. `hold` counts spot order escrow
@@ -130,45 +131,118 @@ export interface TokenBalance {
   avg_entry_px?: string | null;
 }
 
-/// `account_state` — the account's full TRADING state, keyed by `address`.
+/// The `perp` lane summary inside an `AccountState`. ALWAYS present; every
+/// field reads `"0"` when the account holds no perp leg.
 ///
-/// Margin scalars are whole-USDC decimal strings. `balances` is the WHOLE token
-/// ledger, so there is no second balance read to merge in. The non-trading
-/// facets (vaults, staking, sub-accounts, multisig, agents) are on the
-/// companion `detail: "overview"` depth.
+/// The scope is the account's CROSS legs. An isolated leg carries its own
+/// margin bucket and liquidates on that bucket alone, so it is not counted
+/// here. Read the position row's own `margin` / `maint_margin` for an isolated
+/// leg.
+export interface AccountPerpLane {
+  /// Initial margin the perp lane holds, whole-USDC decimal string. The flat
+  /// body called this `total_margin_used`.
+  init_margin: string;
+  /// Mark notional of the CROSS legs, whole-USDC decimal string. An isolated
+  /// leg is EXCLUDED, so this is not the account's whole exposure.
+  total_ntl_pos: string;
+  /// Portfolio-margin maintenance requirement, whole-USDC decimal string.
+  /// `"0"` when the account is not PM-enrolled, so gate the MEANING on
+  /// `abstraction === 'portfolio'` rather than on the value.
+  pm_maint_margin: string;
+  /// Portfolio-margin concentration penalty, whole-USDC decimal string. Same
+  /// presence rule as `pm_maint_margin`.
+  pm_concentration_penalty: string;
+}
+
+/// The `spot` lane summary — the account's WHOLE token ledger. ALWAYS present.
 ///
-/// The `detail: "margin"` depth answers the scalars alone: it adds
-/// `cross_maintenance_margin_used`, and omits `total_ntl_pos`,
-/// `clearinghouse_state` and `balances`.
+/// A spot balance IS the spot position, so no detail read splits off the way
+/// the perp positions do.
+export interface AccountSpotLane {
+  /// One row per token, USDC first. NEVER an empty array: the node emits the
+  /// USDC row unconditionally, reading `total: "0"` for an account that holds
+  /// nothing. An empty array is a shape no real account returns, so treat one
+  /// as a placeholder rather than as an empty ledger.
+  balances: TokenBalance[];
+}
+
+/// The `margin` lane summary — the spot-margin lane folded to three numbers.
+/// ALWAYS present, zeroed for an account with no margin position.
+///
+/// `base_held` does NOT fold in. It is per-pair BASE units with no common unit,
+/// so read `spotMarginState(user)` for it. That detail read accrues debt
+/// through the same path this summary uses, so the two cannot disagree.
+export interface AccountMarginLane {
+  /// Collateral posted across every spot-margin pair, whole-USDC decimal
+  /// string. Every spot pair quotes in USDC, so the pairs are addable.
+  collateral: string;
+  /// Accrued debt across every pair, whole-USDC decimal string.
+  debt: string;
+  /// How many spot-margin pairs the account holds. A NUMBER, not a decimal
+  /// string — it is a count, not money.
+  pairs: number;
+}
+
+/// The `option` lane summary — what the account locked as an option WRITER,
+/// and when its nearest leg expires. ALWAYS present, zeroed for an account
+/// party to no series.
+///
+/// Read `optionState(address)` for the per-series legs.
+export interface AccountOptionLane {
+  /// USDC locked as writer escrow across every leg, decimal string. MONEY, not
+  /// a unit count.
+  escrow: string;
+  /// How many open legs the account holds. A NUMBER, not a decimal string.
+  legs: number;
+  /// Nearest leg expiry (consensus ms). ABSENT when `legs` is `0`: a zero
+  /// timestamp reads as 1970, so the node omits the key instead of serving one.
+  next_expiry?: number;
+}
+
+/// `account_state` — ONE coherent per-account snapshot: the ACCOUNT truths at
+/// the top level, then one summary per LANE.
+///
+/// The top-level scalars are CROSS-LANE figures. `account_value` folds perp AND
+/// spot-margin unrealised PnL, `withdrawable` subtracts BOTH lanes' held initial
+/// margin, and `health` / `tier` derive from those. Never read one as a
+/// perp-only number, and never sum the lanes to rebuild one — under USDC
+/// unification the same USDC backs more than one lane, so a sum double-counts
+/// it. `pm_net_value` is the same case: it reads like a perp figure and is a
+/// WHOLE-ACCOUNT one, which is why it sits at the top level.
+///
+/// Every lane key is ALWAYS present, zeroed when the lane is empty, so
+/// `state.perp.init_margin` needs no guard. The one exception is
+/// `option.next_expiry`, which is absent when the option lane is empty.
+///
+/// The perp POSITION table LEFT this body. Read `clearinghouseState(address)`,
+/// or subscribe to the `clearinghouse_state` channel. Both bodies carry
+/// `height`, so a client can see when its detail lags its summary.
+///
+/// `detail: "margin"` answers the narrower `AccountMarginDetail` body.
+/// `detail: "overview"` answers the non-trading facets as `AccountOverview`.
+/// `detail: "adl"` is REFUSED here — the rows it widened moved to
+/// `clearinghouseState`, which takes the same parameter.
 export interface AccountState {
   /// Echo of the requested 0x address.
   address: string;
-  /// Equity including unrealised PnL, whole-USDC decimal string.
+  /// Equity including unrealised PnL, whole-USDC decimal string. CROSS-LANE.
   account_value: string;
-  /// Cash the account can take out, decimal string, CLAMPED at zero.
-  ///
-  /// It is settled cash minus funding owed minus `total_margin_used`. It does
-  /// NOT count unrealised profit, so a healthy account whose margin is funded
-  /// by open profit reads `'0'` — that means "nothing to withdraw", not
-  /// "broke". The chain's admission gate uses the raw signed figure, which can
-  /// go negative; this read never does.
-  withdrawable: string;
   /// Settled cash equity, whole-USDC decimal string. It EXCLUDES unrealised
   /// PnL, so a mark move alone never moves it. `account_value` is the same
-  /// equity WITH that PnL counted. Served at both depths.
+  /// equity WITH that PnL counted.
   total_raw_usd: string;
-  /// Initial margin requirement, whole-USDC decimal string. Served at both
-  /// depths.
-  total_margin_used: string;
-  /// Mark notional of the account's CROSS legs, whole-USDC decimal string. An
-  /// isolated leg is EXCLUDED, so this is not the account's whole exposure.
-  /// Served at the FULL depth only: `detail: "margin"` skips the position walk
-  /// and therefore omits this key.
-  total_ntl_pos?: string;
+  /// Cash the account can take out, decimal string, CLAMPED at zero.
+  ///
+  /// It is settled cash minus funding owed minus the initial margin BOTH lanes
+  /// hold. It does NOT count unrealised profit, so a healthy account whose
+  /// margin is funded by open profit reads `'0'` — that means "nothing to
+  /// withdraw", not "broke". The chain's admission gate uses the raw signed
+  /// figure, which can go negative; this read never does.
+  withdrawable: string;
   /// `account_value - cross_maintenance_margin_used` (signed decimal string).
   /// Read the maintenance margin itself with `detail: "margin"`.
   health: string;
-  /// Liquidation tier.
+  /// Liquidation tier. A STRING, never a number.
   tier: Tier;
   /// Present and `true` ONLY when the risk engine DEFERS on this account: it
   /// holds a leg no risk path can price. The reported maintenance margin is
@@ -178,36 +252,89 @@ export interface AccountState {
   health_deferred?: boolean;
   /// Margin abstraction class (`abstraction === 'portfolio'` = PM enrolled).
   abstraction: Abstraction;
+  /// Portfolio-margin net account value, whole-USDC decimal string. Always
+  /// present — `"0"` when the account is not PM-enrolled.
+  ///
+  /// TOP LEVEL, not under `perp`, and that placement is the contract. Its cash
+  /// term is the whole unified pool, and under multi-collateral it also folds
+  /// haircut-valued SPOT balances. It is the PM twin of `account_value`.
+  pm_net_value: string;
+  /// Position mode: `"one_way"` (single net position) or `"hedge"` (two-way).
+  position_mode: 'one_way' | 'hedge';
+  /// Perp lane summary. The position rows are on `clearinghouseState`.
+  perp: AccountPerpLane;
+  /// Spot lane — the whole token ledger.
+  spot: AccountSpotLane;
+  /// Spot-margin lane summary. The per-pair rows are on `spotMarginState`.
+  margin: AccountMarginLane;
+  /// Option lane summary. The per-series legs are on `optionState`.
+  option: AccountOptionLane;
+  /// Committed block height of the snapshot. Compare it across two reads to
+  /// reject a stale snapshot.
+  height: number;
+  /// Consensus timestamp of that block (unix ms).
+  time: number;
+}
+
+/// The `account_state` `detail: "margin"` body — the scalars ALONE, for a
+/// frequent liquidation-health poll.
+///
+/// It is a DIFFERENT shape, not a thinner `AccountState`: it adds
+/// `cross_maintenance_margin_used`, it keeps the flat `total_margin_used` name,
+/// and it carries NO lane keys and no `position_mode`. The node skips the
+/// position walk and the balance scan to serve it.
+export interface AccountMarginDetail {
+  /// Echo of the requested 0x address.
+  address: string;
+  /// Equity including unrealised PnL, whole-USDC decimal string.
+  account_value: string;
+  /// Settled cash equity, whole-USDC decimal string.
+  total_raw_usd: string;
+  /// Cash the account can take out, decimal string, CLAMPED at zero.
+  withdrawable: string;
   /// Maintenance margin of the account's CROSS legs, whole-USDC decimal
-  /// string. Served ONLY at `detail: "margin"`; the full depth carries the
-  /// per-leg `maint_margin` on each position row instead.
+  /// string. Served at THIS depth only; the full body drops it.
   ///
   /// The scope is CROSS. An isolated position carries its own margin bucket
   /// and liquidates on that bucket alone, so never size an isolated position
   /// from this number. Read the position row's `maint_margin` for that leg.
-  cross_maintenance_margin_used?: string;
+  cross_maintenance_margin_used: string;
+  /// Initial margin requirement, whole-USDC decimal string. This depth KEEPS
+  /// the flat name; the full body serves the same number as
+  /// `perp.init_margin`.
+  total_margin_used: string;
+  /// `account_value - cross_maintenance_margin_used` (signed decimal string).
+  health: string;
+  /// Liquidation tier.
+  tier: Tier;
+  /// Present and `true` only when the risk engine defers on the account.
+  health_deferred?: boolean;
+  /// Margin abstraction class.
+  abstraction: Abstraction;
+  /// Committed block height of the snapshot.
+  height: number;
+  /// Consensus timestamp of that block (unix ms).
+  time: number;
+}
+
+/// `clearinghouse_state` — one account's open PERP POSITIONS, grouped by dex.
+///
+/// This is the position detail that left the `account_state` body. It carries
+/// NO equity, NO balances and NO health: those are one commit-consistent set on
+/// `account_state`, and joining two frames to rebuild a health number can
+/// produce a figure that was never true. Compare `height` across the two
+/// bodies instead.
+///
+/// The node serves this read at HEAD. A node that predates the reshape answers
+/// `unknown info type`.
+export interface ClearinghouseState {
+  /// Echo of the requested 0x address.
+  address: string;
   /// Open positions grouped by perp dex. The core dex key is the empty string
-  /// `""` and is always present; a MIP-3 deployer dex key is the deployer's
-  /// lowercase 0x address. ABSENT at `detail: "margin"`, which skips the walk.
-  clearinghouse_state?: Record<string, DexPositions>;
-  /// The account's whole token ledger. The USDC row is always first; an
-  /// all-zero token row is skipped. ABSENT at `detail: "margin"`, which skips
-  /// the scan.
-  balances?: TokenBalance[];
-  /// Portfolio-margin maintenance requirement, whole-USDC decimal string.
-  /// Always present — `"0"` when the account is not PM-enrolled. Gate the
-  /// meaning on `abstraction === 'portfolio'`.
-  pm_maint_margin: string;
-  /// Portfolio-margin net account value, whole-USDC decimal string. Same
-  /// presence rule as `pm_maint_margin`.
-  pm_net_value: string;
-  /// Portfolio-margin concentration penalty, whole-USDC decimal string. Same
-  /// presence rule as `pm_maint_margin`.
-  pm_concentration_penalty: string;
-  /// Position mode: `"one_way"` (single net position) or `"hedge"` (two-way).
-  position_mode: 'one_way' | 'hedge';
-  /// Committed block height of the snapshot. Compare it across two reads to
-  /// reject a stale snapshot.
+  /// `""` and is ALWAYS present, so an empty account still has an anchor. A
+  /// MIP-3 deployer dex key is the deployer's lowercase 0x address.
+  clearinghouse_state: Record<string, DexPositions>;
+  /// Committed block height of the snapshot.
   height: number;
   /// Consensus timestamp of that block (unix ms).
   time: number;
@@ -710,7 +837,8 @@ export interface SpotMarginState {
 /// appear ONLY when the request carried a `user`. All magnitudes are
 /// full-precision normalized decimal strings.
 export interface EarnPool {
-  /// Pool token symbol — the same row shape `account_state.balances` carries.
+  /// Pool token symbol — the same row shape `account_state.spot.balances`
+  /// carries.
   name: string;
   /// The uint32 to put in the `asset` field of a signed `earnDeposit` /
   /// `earnWithdraw`. It has no other meaning: every row is keyed by `name`.

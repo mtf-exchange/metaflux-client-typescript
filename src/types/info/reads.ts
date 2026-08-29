@@ -278,7 +278,7 @@ export interface UserFills {
 /// One CLOSED position lifecycle inside a `UserPositionHistory`.
 ///
 /// A position that is still OPEN is never in this history — read the live
-/// position from `account_state.clearinghouse_state`. The archive emits a row
+/// position from the `clearinghouse_state` read. The archive emits a row
 /// only once the lifecycle closes.
 ///
 /// DERIVED, never stored: `realized_pnl = closed_pnl − fee_paid` and

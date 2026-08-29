@@ -176,6 +176,12 @@ export type {
   // the KB spec `metaflux-knowledges/api/rest/info.md`. Every field is the exact
   // snake_case key the node emits inside the `{type, data}` envelope's `data`.
   AccountState,
+  AccountMarginDetail,
+  AccountPerpLane,
+  AccountSpotLane,
+  AccountMarginLane,
+  AccountOptionLane,
+  ClearinghouseState,
   AccountPosition,
   DexPositions,
   TokenBalance,
@@ -279,7 +285,7 @@ export type {
   // The live option series registry, and an account's legs in it.
   OptionKind,
   OptionPosition,
-  OptionPositions,
+  OptionState,
   OptionSeries,
   OptionSeriesRegistry,
   // The public RFQ session reads — the other half of the option trade path.
@@ -330,6 +336,8 @@ export {
   type WsTwapHistoryState,
   type WsMarketRow,
   type WsAccountState,
+  type WsClearinghouseState,
+  type WsOptionState,
   type WsSpotMarginState,
 } from './ws/ws.js';
 export {
