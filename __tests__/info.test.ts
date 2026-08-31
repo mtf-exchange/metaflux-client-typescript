@@ -708,7 +708,7 @@ describe('InfoApi request shapes', () => {
       spot: {
         pairs: [
           {
-            id: 110,
+            signing_id: 110,
             name: 'BTC/USDC',
             base: 101,
             quote: 100,
@@ -750,9 +750,9 @@ describe('InfoApi request shapes', () => {
       type: 'markets_meta',
       kind: 'spot',
     });
-    // `name` is the derived `{base}/{quote}` display name; `id` is the
+    // `name` is the derived `{base}/{quote}` display name; `signing_id` is the
     // numeric pair id spot prints carry as `coin` on the WS feeds.
-    expect(res.pairs[0]?.id).toBe(110);
+    expect(res.pairs[0]?.signing_id).toBe(110);
     expect(res.pairs[0]?.name).toBe('BTC/USDC');
     // taker_fee_bps is a decimal STRING on this surface.
     expect(res.pairs[0]?.taker_fee_bps).toBe('5');

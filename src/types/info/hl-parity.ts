@@ -13,8 +13,9 @@ import type {
 /// One spot pair inside `SpotMeta` (also `markets.spot.pairs`).
 export interface SpotPair {
   /// Numeric pair id — also the compact `coin` label spot prints carry on the
-  /// WS `trades` / `candles` / `fills` channels.
-  id: number;
+  /// WS `trades` / `candles` / `fills` channels. The wire renamed this from
+  /// `id`; a spot order names its pair by this number.
+  signing_id: number;
   /// Display name derived as `{base}/{quote}` from the token registry
   /// (e.g. `"BTC/USDC"`).
   name: string;
@@ -32,8 +33,9 @@ export interface SpotPair {
   /// `whole_units × 10^sz_decimals`. Load-bearing — do not derive it from the
   /// quote token or from a perp of the same symbol.
   sz_decimals: number;
-  /// Pair mark price, decimal string.
-  mark_px: string;
+  /// Pair mark price, decimal string. `null` on an inactive pair — the wire
+  /// sends an explicit null, not an absent field.
+  mark_px: string | null;
   /// Order-book mid price, decimal string; `null` when one-sided.
   mid_px: string | null;
   /// Previous-day close price, decimal string; `null` if unset.
@@ -42,6 +44,10 @@ export interface SpotPair {
   day_ntl_vlm: string;
   /// Circulating base-token supply, decimal string.
   circulating_supply: string;
+  /// Address that registered the pair.
+  deployer: string;
+  /// Registration time, consensus milliseconds; `0` for a genesis pair.
+  registered_at: number;
 }
 
 /// One token registry entry inside `SpotMeta` (also `markets.spot.tokens`).

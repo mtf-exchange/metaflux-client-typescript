@@ -17,8 +17,20 @@
 // `coin` is the market symbol string and is optional (account channels carry none).
 //
 // Transport: the standard `WebSocket` global (browser-native; Node ≥ 22 ships
-// it globally, which is the SDK's floor). No `ws` npm dependency — keeping the
-// SDK dependency-free for both runtimes.
+// it globally, which is the SDK's floor). No `ws` npm dependency — the same
+// code runs in both runtimes.
+//
+// Compression: the client offers the `mtf-zstd.v1` subprotocol. The server
+// echoes the token it selected, so the mode is known before the first frame.
+// With the token selected, a BINARY frame is one zstd frame whose decompressed
+// payload is exactly the JSON text; TEXT frames stay plain JSON, and control
+// frames stay TEXT in every mode. With no token selected the stream is plain
+// text, exactly as before. Outbound frames are always text.
+//
+// A server that grants no subprotocol makes the client FAIL the handshake (the
+// WebSocket standard requires this). So a socket that offered the token and
+// closed before it opened retries at once with no offer, and every later
+// attempt from this client offers nothing.
 
 import type {
   AccountState,
@@ -52,6 +64,14 @@ import type {
   NativeExchangeAck,
   NativeOrder,
 } from '../types/index.js';
+import { decompress } from 'fzstd';
+
+/// Subprotocol token for zstd binary frames without a dictionary. The gateway
+/// also serves a dictionary token; this SDK does not offer it, because no pure
+/// JavaScript decoder accepts a raw zstd dictionary.
+const ZSTD_PROTOCOL = 'mtf-zstd.v1';
+
+const UTF8 = new TextDecoder();
 
 /// Channel names exactly as the gateway's native `/ws` surface accepts them
 /// (snake_case MTF-native) — the channels the gateway serves natively.
@@ -773,6 +793,9 @@ export class WsClient {
   private backoffMs: number;
   /// True once `close()` is called — suppresses auto-reconnect.
   private closed = false;
+  /// Sticky: offer no subprotocol on every later attempt. Set when a socket
+  /// that offered one closed before it opened.
+  private plainHandshake = false;
   /// Monotonic id source for `post` request/response correlation.
   private postIdSeq = 1;
   /// In-flight `post` requests keyed by correlation id. Resolved when the
@@ -1220,10 +1243,17 @@ export class WsClient {
   private openOnce(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       let settled = false;
-      const sock = new WebSocket(this.url);
+      let opened = false;
+      // Per socket, not per client: a reconnect can select another mode.
+      let zstd = false;
+      const offered = !this.plainHandshake;
+      const sock = new WebSocket(this.url, offered ? [ZSTD_PROTOCOL] : []);
+      sock.binaryType = 'arraybuffer';
       this.socket = sock;
 
       sock.onopen = () => {
+        opened = true;
+        zstd = sock.protocol === ZSTD_PROTOCOL;
         this.backoffMs = this.config.initialBackoffMs;
         // Replay active subscriptions on (re)connect.
         for (const sub of this.active.values()) {
@@ -1235,11 +1265,23 @@ export class WsClient {
       };
 
       sock.onmessage = (ev: MessageEvent) => {
-        this.dispatch(typeof ev.data === 'string' ? ev.data : String(ev.data));
+        if (typeof ev.data === 'string') {
+          this.dispatch(ev.data);
+          return;
+        }
+        if (!zstd) return; // Binary in text mode: not ours, drop it.
+        try {
+          const raw = decompress(new Uint8Array(ev.data as ArrayBuffer));
+          this.dispatch(UTF8.decode(raw));
+        } catch {
+          // Every frame is an independent zstd frame, so one bad frame
+          // poisons nothing. Drop it, like any other malformed frame.
+        }
       };
 
       sock.onerror = () => {
-        if (!settled) {
+        // With a token offered, the retry in `onclose` owns the outcome.
+        if (!settled && !offered) {
           settled = true;
           reject(new Error(`WsClient failed to connect to ${this.url}`));
         }
@@ -1249,6 +1291,15 @@ export class WsClient {
       sock.onclose = () => {
         this.clearTimers();
         this.socket = undefined;
+        if (!opened && offered && !this.closed) {
+          this.plainHandshake = true;
+          this.openOnce().then(resolve, reject);
+          return;
+        }
+        if (!settled) {
+          settled = true;
+          reject(new Error(`WsClient failed to connect to ${this.url}`));
+        }
         if (!this.closed && this.config.autoReconnect) {
           this.scheduleReconnect();
         }

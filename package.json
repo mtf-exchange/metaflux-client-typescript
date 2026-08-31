@@ -65,5 +65,8 @@
 	"license": "MIT",
 	"publishConfig": {
 		"access": "public"
+	},
+	"dependencies": {
+		"fzstd": "^0.1.1"
 	}
 }
