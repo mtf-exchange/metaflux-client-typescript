@@ -379,7 +379,7 @@ describe.skipIf(!wasmBuilt)('typed digest binding — every field enters its dig
 describe('typed encodeType — MIP-3 perp deployer lane', () => {
   const FROZEN_PERP: Record<string, string> = {
     perp_register_asset:
-      'MetaFluxTransaction:PerpRegisterAsset(string metafluxChain,string symbol,uint8 decimals,uint64 nonce)',
+      'MetaFluxTransaction:PerpRegisterAsset(string metafluxChain,string symbol,uint8 decimals,string name,uint64 nonce)',
     perp_set_oracle:
       'MetaFluxTransaction:PerpSetOracle(string metafluxChain,uint32 asset,uint16 oracleSourceMask,uint64 nonce)',
     perp_set_leverage:
@@ -422,7 +422,7 @@ describe('typed encodeType — MIP-3 perp deployer lane', () => {
       expect(FROZEN_PERP[actionType]).not.toContain('bid');
       const built = buildTyped(
         actionType,
-        { symbol: 'WIF', decimals: 8, asset: 1001, oracle_source_mask: 1, max_leverage: 20,
+        { symbol: 'GRAD:WIF', decimals: 8, name: 'GRAD', asset: 1001, oracle_source_mask: 1, max_leverage: 20,
           taker_fee_dbps: 45, maker_fee_dbps: 12, deployer_fee_bps: 6, rebate_bps: 2,
           min_order_size: 1000, sub_deployer: addr(0xaa), add: true, bid: '1' },
         1n,
@@ -491,13 +491,33 @@ describe('typed wire shape — MIP-3 perp deployer lane', () => {
     expect(open).not.toBe(close);
   });
 
+  /// The DEX name RIDES the digest, so a relay can neither insert nor swap it.
+  /// A stale client that omits the name signs a different digest and is
+  /// refused, instead of landing a market in the wrong namespace.
+  it('perp_register_asset binds the dex name into the digest', async () => {
+    const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
+    const digestFor = async (name: string) =>
+      toHex(
+        await typedActionDigest(
+          buildTyped('perp_register_asset', { symbol: 'WIF', decimals: 8, name }, 201n, CHAIN_ID),
+        ),
+      );
+    expect(await digestFor('GRAD')).not.toBe(await digestFor(''));
+    expect(await digestFor('GRAD')).not.toBe(await digestFor('grad'));
+  });
+
   /// `decimals` of `0` reads as the handler's default of 8. The SDK must pass
   /// the value through untouched: silently rewriting 0 to 8 here would sign a
   /// digest the deployer never agreed to.
   it('perp_register_asset passes decimals through verbatim, including 0', async () => {
     const { buildTyped, typedDataV4 } = await import('../src/native/typed.js');
     for (const decimals of [0, 8, 18]) {
-      const built = buildTyped('perp_register_asset', { symbol: 'WIF', decimals }, 201n, CHAIN_ID);
+      const built = buildTyped(
+        'perp_register_asset',
+        { symbol: 'GRAD:WIF', decimals, name: 'GRAD' },
+        201n,
+        CHAIN_ID,
+      );
       expect(JSON.parse(built.actionJson).params.decimals).toBe(decimals);
       expect(typedDataV4(built).message.decimals).toBe(decimals);
     }

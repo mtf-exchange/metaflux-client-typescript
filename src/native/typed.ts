@@ -614,6 +614,7 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
     fields: [
       f('symbol', 'string', 'symbol'),
       f('decimals', 'uint8', 'decimals'),
+      f('name', 'string', 'name'),
     ],
   },
   perp_set_oracle: {

@@ -335,9 +335,11 @@ export interface AccountMarginDetail {
 export interface ClearinghouseState {
   /// Echo of the requested 0x address.
   address: string;
-  /// Open positions grouped by perp dex. The core dex key is the empty string
-  /// `""` and is ALWAYS present, so an empty account still has an anchor. A
-  /// MIP-3 deployer dex key is the deployer's lowercase 0x address.
+  /// Open positions grouped by perp dex, keyed by the DEX NAME. The core dex
+  /// key is the empty string `""` and is ALWAYS present, so an empty account
+  /// still has an anchor. A MIP-3 deployer dex uses the name its deployer
+  /// registered, such as `"GRAD"`, which is also the symbol namespace of every
+  /// coin in the group. Join to a `PerpDex` row by `name`.
   clearinghouse_state: Record<string, DexPositions>;
   /// Committed block height of the snapshot.
   height: number;

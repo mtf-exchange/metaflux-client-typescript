@@ -283,8 +283,17 @@ export interface ValidatorL1Votes {
 
 /// One perp DEX entry inside `PerpDexs.dexs`.
 export interface PerpDex {
-  /// DEX index in the exchange's perp-dex list.
+  /// DEX index in the exchange's perp-dex list. A list subscript, not an
+  /// identifier — join on `name` instead.
   index: number;
+  /// The DEX name, and the only stable identifier of a DEX. It is the asset
+  /// namespace, so every market here has the symbol `<name>:<suffix>`, and it
+  /// is the `clearinghouse_state` group key. The core DEX is `""`. Absent on a
+  /// node that predates named DEXes.
+  name?: string;
+  /// The deployer that created this DEX, 0x hex. `null` on the core DEX, which
+  /// has no deployer. Absent on a node that predates named DEXes.
+  deployer?: string | null;
   /// Number of asset books in the DEX.
   n_assets: number;
   /// Market symbols in the DEX.

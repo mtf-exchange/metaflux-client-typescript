@@ -400,9 +400,9 @@ const VECTORS: Vector[] = [
   // 1000, and the chain's own perps sit below that.
   {
     actionType: 'perp_register_asset',
-    payload: { symbol: 'WIF', decimals: 8 },
+    payload: { symbol: 'WIF', decimals: 8, name: 'GRAD' },
     nonce: 201n,
-    digest: 'ed8d4dbc9462484893615eb0dba08fe55b08d187e9346ad66e6a0e0f2ba786c8',
+    digest: '2302f970b71374d0bd974e880c867f2206eaa1ccbd0fa0cc794400cac57a94a3',
   },
   {
     actionType: 'perp_set_oracle',

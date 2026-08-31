@@ -1754,6 +1754,9 @@ export class Client {
 
   /// Allocate a fresh MIP-3 perp market (`perp_register_asset`). The signer
   /// becomes its deployer. `decimals` of `0` reads as the handler default of 8.
+  ///
+  /// The first call by a deployer also creates its perp DEX, so `params.name`
+  /// must be valid on it and `params.symbol` must carry that name as a prefix.
   async perpRegisterAsset(
     params: PerpRegisterAsset,
     opts: { nonce?: bigint; chainId?: number } = {},

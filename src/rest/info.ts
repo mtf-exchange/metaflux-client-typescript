@@ -147,11 +147,14 @@ export class InfoApi {
   }
 
   /// `clearinghouse_state` — one account's open PERP POSITIONS, grouped by
-  /// perp dex, keyed by `address` (0x hex).
+  /// perp dex, for the account named by `address` (0x hex).
   ///
-  /// This is the position detail that left the `account_state` body. The core
-  /// dex key is `""` and is always present; a MIP-3 deployer dex key is the
-  /// deployer's lowercase 0x address.
+  /// This is the position detail that left the `account_state` body. The group
+  /// key is the DEX NAME: the core dex is `""` and is always present, and a
+  /// MIP-3 deployer dex uses the name its deployer registered, such as
+  /// `"GRAD"`. That name is also the symbol namespace, so a position on dex
+  /// `GRAD` has a coin like `"GRAD:000001SH"`. Join a group to its `perpDexs`
+  /// row by `name`.
   ///
   /// The body carries NO equity, NO balances and NO health. Those are one
   /// commit-consistent set on `accountState`, and joining two frames to rebuild

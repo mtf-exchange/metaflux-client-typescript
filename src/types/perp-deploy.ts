@@ -34,14 +34,28 @@
 /// A deployer cannot pick the asset id: the node allocates it. Read the id back
 /// before calling any of the other eight actions.
 export interface PerpRegisterAsset {
-  /// Market symbol, 1 to 32 bytes (e.g. `"WIF"`). The node refuses an empty
-  /// symbol and one above the cap.
+  /// Market symbol, 1 to 32 bytes (e.g. `"GRAD:WIF"`). The node refuses an
+  /// empty symbol and one above the cap.
+  ///
+  /// The symbol must read `<name>:<suffix>` with a NON-EMPTY suffix. The node
+  /// compares the prefix against `name` byte-exact.
   symbol: string;
   /// Token decimals (`u8`, at most 18).
   ///
   /// **`0` is not "zero decimals".** The handler reads `0` as its default of 8.
   /// Send the value you mean; there is no way to ask for a decimal-free market.
   decimals: number;
+  /// The perp DEX this market joins, e.g. `"GRAD"`.
+  ///
+  /// 1 to 16 ASCII alphanumeric bytes, unique across DEXes ignoring case, and
+  /// WRITE-ONCE — there is no rename. The FIRST registration by a deployer
+  /// creates the DEX and must carry a valid name; the node REJECTS a missing or
+  /// empty one rather than defaulting it. A later registration on the same DEX
+  /// must repeat the stored name.
+  ///
+  /// The name is also the account-read key: `clearinghouse_state` groups
+  /// positions by it, and `""` is the core DEX.
+  name: string;
 }
 
 /// `perp_set_oracle` — bind the market's enabled oracle-source subset.
