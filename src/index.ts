@@ -320,8 +320,6 @@ export {
   type WsOrderUpdate,
   type WsOrderUpdateOrder,
   type WsUserFunding,
-  type ExplorerBlock,
-  type ExplorerTx,
   // Per-channel WS body types.
   type WsL2Level,
   type WsL2Book,

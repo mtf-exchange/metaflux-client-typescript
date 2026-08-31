@@ -90,8 +90,6 @@ export type WsChannel =
   | 'trades'
   // global (no params)
   | 'markets'
-  | 'explorer_block'
-  | 'explorer_txs'
   // per-market + interval (`candles` needs `coin` + `interval`)
   | 'candles'
   // per-account (require `user`)
@@ -116,8 +114,6 @@ export const WS_CHANNELS: readonly WsChannel[] = [
   'bbo',
   'trades',
   'markets',
-  'explorer_block',
-  'explorer_txs',
   'candles',
   'fills',
   'order_updates',
@@ -148,7 +144,7 @@ export const WS_CHANNELS: readonly WsChannel[] = [
 ///                  `spot_margin_state`, `active_asset_data`); the 0x address.
 ///   - `interval` — `candles` only (`1m`/`5m`/`15m`/`1h`/`4h`/`1d`)
 ///   - `candle_type` — `candles` only (`mark` / `oracle`)
-/// Global channels (`markets`, `explorer_block`, `explorer_txs`) take none.
+/// Global channels (`markets`) take none.
 ///
 /// `candles` routes on all three of `coin`, `interval` and `candle_type`, so
 /// `mark` and `oracle` at one interval are independent subscriptions.
@@ -201,7 +197,11 @@ export interface WsTrade {
   /// Trade timestamp (consensus ms).
   time: number;
   /// Deterministic trade id (shared by both legs of the print).
-  tid: number;
+  ///
+  /// A decimal-digit STRING. It is a 64-bit hash-derived value that routinely
+  /// exceeds `Number.MAX_SAFE_INTEGER`, so a JSON number would silently lose
+  /// its low digits. Compare it as a string, or convert with `BigInt`.
+  tid: string;
   /// `[taker, maker]` 0x addresses on live pushes; `null` on snapshot rows.
   users: [string] | null;
   /// Committed block height the trade landed in.
@@ -223,12 +223,13 @@ export interface WsFill {
   sz: string;
   /// Fill timestamp (consensus ms).
   time: number;
-  /// This party's order id.
-  oid: number;
+  /// This party's order id, a decimal-digit STRING.
+  oid: string;
   /// Client order id (`0x`-hex); `null` on maker legs and snapshot rows.
   cloid: string | null;
-  /// Deterministic trade id.
-  tid: number;
+  /// Deterministic trade id, a decimal-digit STRING — it exceeds
+  /// `Number.MAX_SAFE_INTEGER`. Join fills to trades by string equality.
+  tid: string;
   /// `true` on the taker (aggressor) leg, `false` on the maker leg; `null` on
   /// snapshot rows (the committed tape does not retain the role).
   crossed: boolean | null;
@@ -257,8 +258,8 @@ export interface WsOrderUpdateOrder {
   sz: string | null;
   /// Original order size (whole units), or `null`.
   orig_sz: string | null;
-  /// Order id; `null` on a rejected placement.
-  oid: number | null;
+  /// Order id, a decimal-digit STRING; `null` on a rejected placement.
+  oid: string | null;
   /// Client order id (`0x`-hex), or `null`.
   cloid: string | null;
   /// Time-in-force token, or `null`.
@@ -313,47 +314,6 @@ export interface WsUserFunding {
   /// Per-hour rate applied at that settlement, decimal string.
   funding_rate: string;
   /// Settlement timestamp (consensus ms).
-  time: number;
-}
-
-/// One `explorer_block` channel record — a committed-block head. Each frame
-/// is an array of heads (usually one).
-export interface ExplorerBlock {
-  /// Committed block height.
-  height: number;
-  /// Consensus round.
-  round: number;
-  /// Epoch.
-  epoch: number;
-  /// Lowercase 0x block hash.
-  hash: string;
-  /// Leader's validator-set index.
-  proposer: number;
-  /// Decoded transaction count.
-  tx_count: number;
-  /// Block timestamp (consensus ms).
-  time: number;
-}
-
-/// One `explorer_txs` channel record — the global order-status firehose row.
-export interface ExplorerTx {
-  /// Order id (`0` on a rejected placement).
-  oid: number;
-  /// Acting account address (0x).
-  user: string;
-  /// Market symbol (e.g. `"BTC"`).
-  coin: string;
-  /// Compact lifecycle label: `"open"` / `"filled"` / `"rejected"`.
-  action: string;
-  /// Stable status code: 0 = open, 1 = filled, 2 = rejected.
-  status: number;
-  /// Side code: 0 = bid, 1 = ask.
-  side: number;
-  /// Side token (`"B"` / `"A"`), matching the trade tape.
-  side_str: TradeSide;
-  /// Originating action's transaction hash (`0x`-hex); empty when systemic.
-  hash: string;
-  /// Record timestamp (consensus ms).
   time: number;
 }
 
@@ -654,8 +614,6 @@ export interface WsChannelData {
   bbo: WsBbo;
   trades: WsTrade[];
   markets: WsMarketRow[];
-  explorer_block: ExplorerBlock[];
-  explorer_txs: ExplorerTx[];
   /// Served by the GATEWAY only. The node does not aggregate OHLCV, so a
   /// node-direct subscribe is refused as an unknown channel.
   candles: WsCandleFrame;
@@ -935,17 +893,6 @@ export class WsClient {
   /// `active_asset_ctx` channels each answered in part.
   async subscribeMarkets(): Promise<void> {
     return this.subscribe({ type: 'markets' });
-  }
-
-  /// Subscribe to the global committed-block head tape.
-  async subscribeExplorerBlock(): Promise<void> {
-    return this.subscribe({ type: 'explorer_block' });
-  }
-
-  /// Subscribe to the global transaction (order-status) tape. Rows carry the
-  /// originating action's `hash`.
-  async subscribeExplorerTxs(): Promise<void> {
-    return this.subscribe({ type: 'explorer_txs' });
   }
 
   /// Subscribe to per-user fills (0x address).

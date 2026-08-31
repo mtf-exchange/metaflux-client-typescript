@@ -507,14 +507,24 @@ export class InfoApi {
   // ── P2 wave-1 typed reads (order / history / spot-margin / earn / pm) ────
 
   /// `order_status` — single-order lifecycle lookup. Pass EXACTLY one of `oid`
-  /// (u64) or `cloid` (`0x` + 32 hex). Returns a `status`-tagged union
-  /// (`resting` / `triggered` / `filled` / `unknown`); resolution order is
-  /// resting → triggered → filled.
+  /// or `cloid` (`0x` + 32 hex). Returns a `status`-tagged union (`resting` /
+  /// `triggered` / `filled` / `canceled` / `cancel_rejected` / `rejected` /
+  /// `unknown`); resolution order is resting → triggered → filled → terminal.
   ///
-  /// A `cloid`-only query resolves resting / triggered hits only — the fill
-  /// ring is oid-keyed, so a cloid that hit no live order returns `unknown`.
+  /// `cancel_rejected` means the CANCEL request failed after the order left
+  /// this node's live view. There is no `expired` token — the node never
+  /// emits one.
+  ///
+  /// `filled` carries EVERY matching leg in `fills` plus `total_filled_sz`, so
+  /// a partially filled order reports its whole executed size, not one leg.
+  /// `unknown` means the order is outside this node's retention view — it is
+  /// NOT proof the order never existed.
+  ///
+  /// `oid` takes a number, a `bigint` or a decimal-digit string. The request
+  /// carries a `bigint` past `Number.MAX_SAFE_INTEGER` as a STRING, which the
+  /// node accepts, rather than truncating it to a `Number`.
   async orderStatus(query: {
-    oid?: number | bigint;
+    oid?: number | bigint | string;
     cloid?: string;
   }): Promise<OrderStatusInfo> {
     const hasOid = query.oid !== undefined;
@@ -528,19 +538,13 @@ export class InfoApi {
       type: 'order_status',
     };
     if (hasOid) {
-      const oid = query.oid as number | bigint;
-      if (typeof oid === 'bigint') {
-        // Fail LOUD rather than silently truncate an oid beyond the f64 safe
-        // integer range (Number(bigint) would lose precision).
-        if (oid > BigInt(Number.MAX_SAFE_INTEGER)) {
-          throw new RangeError(
-            `orderStatus oid ${oid} exceeds Number.MAX_SAFE_INTEGER; would lose precision`,
-          );
-        }
-        body.oid = Number(oid);
-      } else {
-        body.oid = oid;
-      }
+      const oid = query.oid as number | bigint | string;
+      body.oid =
+        typeof oid === 'bigint' && oid > BigInt(Number.MAX_SAFE_INTEGER)
+          ? oid.toString()
+          : typeof oid === 'bigint'
+            ? Number(oid)
+            : oid;
     }
     if (hasCloid) body.cloid = query.cloid;
     return this.post<OrderStatusInfo>(body);

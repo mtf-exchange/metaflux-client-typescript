@@ -415,7 +415,7 @@ describe('InfoApi request shapes', () => {
           px: '61643.70000000',
           sz: '0.00024',
           time: 1_700_000_000_555,
-          tid: 1234567890,
+          tid: '1234567890',
           block: 38997,
           hash: '0x4660d9ccf52ef1abde5e03d1b3f1c110b948d2f71331f086239666781dbde91c',
         },
@@ -425,7 +425,7 @@ describe('InfoApi request shapes', () => {
     expect(res.trades[0]?.coin).toBe('BTC');
     expect(res.trades[0]?.side).toBe('A');
     expect(typeof res.trades[0]?.px).toBe('string');
-    expect(typeof res.trades[0]?.tid).toBe('number');
+    expect(typeof res.trades[0]?.tid).toBe('string');
     expect(res.end_time).toBeNull();
   });
 
@@ -723,6 +723,23 @@ describe('InfoApi request shapes', () => {
             day_ntl_vlm: '0',
             circulating_supply: '0',
           },
+          {
+            signing_id: 111,
+            name: 'MTF/USDC',
+            base: 102,
+            quote: 100,
+            // No deployer override — the node sends an explicit null here, and
+            // this is the COMMON case.
+            taker_fee_bps: null,
+            min_notional: '1',
+            active: true,
+            sz_decimals: 5,
+            mark_px: null,
+            mid_px: null,
+            prev_day_px: null,
+            day_ntl_vlm: '0',
+            circulating_supply: '0',
+          },
         ],
         tokens: [
           {
@@ -754,8 +771,10 @@ describe('InfoApi request shapes', () => {
     // numeric pair id spot prints carry as `coin` on the WS feeds.
     expect(res.pairs[0]?.signing_id).toBe(110);
     expect(res.pairs[0]?.name).toBe('BTC/USDC');
-    // taker_fee_bps is a decimal STRING on this surface.
+    // taker_fee_bps is a decimal STRING when the deployer set an override, and
+    // an explicit null when it did not. Both decode.
     expect(res.pairs[0]?.taker_fee_bps).toBe('5');
+    expect(res.pairs[1]?.taker_fee_bps).toBeNull();
     expect(res.tokens[0]?.wei_decimals).toBe(8);
     expect(res.tokens[0]?.is_canonical).toBe(true);
     // `variant` folds in from the retired `evm_contract_bindings` read.
@@ -899,7 +918,7 @@ describe('InfoApi deployed-gateway read shapes', () => {
       address: ADDR,
       orders: [
         {
-          oid: 12345,
+          oid: '12345',
           coin: 'BTC',
           side: 'B',
           px: '25000',
@@ -919,7 +938,7 @@ describe('InfoApi deployed-gateway read shapes', () => {
     expect(row.side).toBe('B');
     expect(row.px).toBe('25000');
     expect(row.sz).toBe('60');
-    expect(row.oid).toBe(12345);
+    expect(row.oid).toBe('12345');
     expect(row.cloid).toBeNull();
     expect(row.tif).toBe('gtc');
     expect(row.reduce_only).toBe(false);
@@ -933,7 +952,7 @@ describe('InfoApi deployed-gateway read shapes', () => {
       address: ADDR,
       orders: [
         {
-          oid: 777,
+          oid: '777',
           coin: 'MTF/USDC',
           side: 'A',
           px: null,
@@ -1030,8 +1049,8 @@ describe('InfoApi deployed-gateway read shapes', () => {
           px: '0.12126000',
           sz: '112.22',
           time: 1_784_820_001_998,
-          oid: 42,
-          tid: 7,
+          oid: '42',
+          tid: '16613428288414605024',
           fee: '0.000952',
           closed_pnl: '0',
           dir: 'Open Long',
@@ -1051,7 +1070,9 @@ describe('InfoApi deployed-gateway read shapes', () => {
     expect(f.dir).toBe('Open Long');
     expect(typeof f.fee).toBe('string');
     expect(typeof f.closed_pnl).toBe('string');
-    expect(f.tid).toBe(7);
+    // Past 2^53 — the id survives the JSON round trip only as a string.
+    expect(f.tid).toBe('16613428288414605024');
+    expect(f.oid).toBe('42');
     // The trace-hash empty sentinel means "no on-chain tx".
     expect(f.hash).toBe('');
   });
@@ -1082,32 +1103,39 @@ describe('InfoApi P2 wave-1 reads', () => {
     );
   });
 
-  it('orderStatus decodes the filled branch (canonical fill record)', async () => {
+  it('orderStatus decodes the filled branch (every leg, summed size)', async () => {
     const api = new InfoApi(BASE);
     nextData = {
       status: 'filled',
-      fill: {
+      total_filled_sz: '112.22',
+      fills: [{
         coin: 'MTF',
         side: 'B',
         px: '0.12126000',
         sz: '112.22',
         time: 1_784_820_001_998,
-        oid: 42,
-        tid: 7,
+        oid: '42',
+        // Past 2^53 — the reason every id on the wire is a string.
+        tid: '16613428288414605024',
         fee: '0.000952',
+        fee_token: 'USDC',
         closed_pnl: '0',
         dir: 'Open Long',
         start_position: '-357795.12',
         block: 8_416_000,
         hash: '',
-      },
+      }],
     };
     const res = await api.orderStatus({ oid: 42 });
     expect(res.status).toBe('filled');
     if (res.status === 'filled') {
-      expect(res.fill.coin).toBe('MTF');
-      expect(res.fill.px).toBe('0.12126000');
-      expect(typeof res.fill.sz).toBe('string');
+      expect(res.fills[0]!.coin).toBe('MTF');
+      expect(res.fills[0]!.px).toBe('0.12126000');
+      expect(typeof res.fills[0]!.sz).toBe('string');
+      // The id survives a JSON round trip only because it is a string.
+      expect(res.fills[0]!.tid).toBe('16613428288414605024');
+      expect(res.fills[0]!.fee_token).toBe('USDC');
+      expect(res.total_filled_sz).toBe('112.22');
     }
   });
 
@@ -1116,7 +1144,7 @@ describe('InfoApi P2 wave-1 reads', () => {
     nextData = {
       status: 'resting',
       order: {
-        oid: 42,
+        oid: '42',
         coin: 'MTF',
         side: 'B',
         px: '0.12',
@@ -1132,7 +1160,7 @@ describe('InfoApi P2 wave-1 reads', () => {
       expect(res.order.sz).toBe('112.22');
       expect(res.order.inserted_at).toBe(1_784_820_001_000);
       expect(res.order.cloid).toBeNull();
-      expect(res.order.oid).toBe(42);
+      expect(res.order.oid).toBe('42');
     }
   });
 
@@ -1141,7 +1169,7 @@ describe('InfoApi P2 wave-1 reads', () => {
     nextData = {
       status: 'triggered',
       trigger: {
-        oid: 43,
+        oid: '43',
         coin: 'MTF',
         side: 'A',
         trigger_px: '0.20',
@@ -1163,6 +1191,71 @@ describe('InfoApi P2 wave-1 reads', () => {
     }
   });
 
+  it('orderStatus decodes the terminal branches (canceled / cancel_rejected)', async () => {
+    const api = new InfoApi(BASE);
+    // Node bytes: the five outcome fields sit under `outcome`, beside a
+    // top-level `status`. A cancel names the order, not its side, so `side` is
+    // null and `reason` is null on the successful cancel.
+    nextData = {
+      status: 'canceled',
+      outcome: {
+        oid: '42',
+        coin: 'MTF',
+        side: null,
+        time: 1_784_820_002_500,
+        reason: null,
+      },
+    };
+    let res = await api.orderStatus({ oid: 42 });
+    expect(res.status).toBe('canceled');
+    if (res.status === 'canceled') {
+      expect(res.outcome.oid).toBe('42');
+      expect(res.outcome.coin).toBe('MTF');
+      expect(res.outcome.side).toBeNull();
+      expect(res.outcome.time).toBe(1_784_820_002_500);
+      expect(res.outcome.reason).toBeNull();
+    }
+
+    // `cancel_rejected` = the CANCEL failed after the order left this node's
+    // live view. Branch on `status`, never on `reason`.
+    nextData = {
+      status: 'cancel_rejected',
+      outcome: {
+        oid: '43',
+        coin: 'MTF',
+        side: null,
+        time: 1_784_820_003_000,
+        reason: 'order not found',
+      },
+    };
+    res = await api.orderStatus({ oid: 43 });
+    expect(res.status).toBe('cancel_rejected');
+    if (res.status === 'cancel_rejected') {
+      expect(res.outcome.oid).toBe('43');
+      expect(res.outcome.reason).toBe('order not found');
+    }
+
+    // A rejected placement can carry a null oid — the node rejected it by
+    // cloid, before the order held an id.
+    nextData = {
+      status: 'rejected',
+      outcome: {
+        oid: null,
+        coin: 'MTF',
+        side: 'B',
+        time: 1_784_820_004_000,
+        reason: 'insufficient margin',
+      },
+    };
+    res = await api.orderStatus({ cloid: '0x00000000000000000000000000000abc' });
+    expect(res.status).toBe('rejected');
+    if (res.status === 'rejected') {
+      expect(res.outcome.oid).toBeNull();
+      expect(res.outcome.side).toBe('B');
+      expect(res.outcome.reason).toBe('insufficient margin');
+    }
+  });
+
   it('historicalOrders sends address + optional limit, decodes the canonical row', async () => {
     const api = new InfoApi(BASE);
     nextData = { address: ADDR, orders: [] };
@@ -1176,7 +1269,7 @@ describe('InfoApi P2 wave-1 reads', () => {
       address: ADDR,
       orders: [
         {
-          oid: 9,
+          oid: '9',
           coin: 'MTF',
           side: 'A',
           status: 'filled',
@@ -1201,7 +1294,7 @@ describe('InfoApi P2 wave-1 reads', () => {
       limit: 50,
     });
     const o = res.orders[0]!;
-    expect(o.oid).toBe(9);
+    expect(o.oid).toBe('9');
     expect(o.side).toBe('A');
     expect(o.status).toBe('filled');
     expect(o.px).toBe('194.78000000');
@@ -1267,7 +1360,7 @@ describe('InfoApi P2 wave-1 reads', () => {
       ledgerUpdates: [
         { coin: 'USDC', time: 1_784_800_000_001, kind: 'deposit', delta: '100', counterparty: '0xabc' },
         { coin: 'PURR', time: 1_784_800_000_002, kind: 'spot_transfer', delta: '5' },
-        { coin: 'MTF', time: 1_784_800_000_003, kind: 'trade', tid: 77, realized_pnl: '1.5', fee: '0.02', fee_token: 'USDC' },
+        { coin: 'MTF', time: 1_784_800_000_003, kind: 'trade', tid: '16613428288414605024', realized_pnl: '1.5', fee: '0.02', fee_token: 'USDC' },
       ],
     };
     const res = await api.userNonFundingLedgerUpdates(ADDR, 1, 2);
@@ -1280,7 +1373,7 @@ describe('InfoApi P2 wave-1 reads', () => {
     expect(res.ledgerUpdates).toHaveLength(3);
     expect(res.ledgerUpdates[0]?.coin).toBe('USDC');
     expect(res.ledgerUpdates[1]?.kind).toBe('spot_transfer');
-    expect(res.ledgerUpdates[2]?.tid).toBe(77);
+    expect(res.ledgerUpdates[2]?.tid).toBe('16613428288414605024');
     expect(res.ledgerUpdates[2]?.fee_token).toBe('USDC');
   });
 

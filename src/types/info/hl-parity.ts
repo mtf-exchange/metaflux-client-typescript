@@ -23,8 +23,10 @@ export interface SpotPair {
   base: number;
   /// Quote asset id.
   quote: number;
-  /// Taker fee, decimal bps string; `"0"` if unset.
-  taker_fee_bps: string;
+  /// Taker fee, decimal bps string. `null` when the pair carries no deployer
+  /// override, which is the COMMON case — fall back to the global fee
+  /// schedule there.
+  taker_fee_bps: string | null;
   /// Min notional (USDC cents), decimal string; `"0"` if unset.
   min_notional: string;
   /// Whether the pair is active for trading.

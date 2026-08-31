@@ -73,8 +73,8 @@ export interface OrderTrigger {
 /// planes. Parked TP / SL / stop triggers are in the row set too: they carry
 /// `tif: "trigger"` and a populated `trigger` block.
 export interface OpenOrder {
-  /// Server order id.
-  oid: number;
+  /// Server order id, a decimal-digit STRING.
+  oid: string;
   /// Market symbol the order rests on — a perp symbol (`"BTC"`) or a spot pair
   /// name (`"BTC/USDC"`).
   coin: string;
@@ -162,7 +162,11 @@ export interface TradeRecord {
   /// Trade timestamp (consensus ms).
   time: number;
   /// Deterministic trade id (shared by both legs of the print).
-  tid: number;
+  ///
+  /// A decimal-digit STRING. It is a 64-bit hash-derived value that routinely
+  /// exceeds `Number.MAX_SAFE_INTEGER`, so a JSON number would silently lose
+  /// its low digits here. Compare it as a string, or convert with `BigInt`.
+  tid: string;
   /// Committed block height the trade landed in.
   block: number;
   /// Transaction hash of the originating taker action (`0x`-hex).
@@ -219,12 +223,20 @@ export interface UserFill {
   sz: string;
   /// Fill timestamp (consensus ms).
   time: number;
-  /// This party's order id.
-  oid: number;
-  /// Deterministic trade id (shared by both legs of the print).
-  tid: number;
-  /// Fee this party paid, whole-USDC decimal string.
+  /// This party's order id, a decimal-digit STRING.
+  oid: string;
+  /// Deterministic trade id (shared by both legs of the print), a
+  /// decimal-digit STRING — it exceeds `Number.MAX_SAFE_INTEGER`, so a JSON
+  /// number would lose its low digits. Compare it as a string, or use `BigInt`.
+  tid: string;
+  /// Fee this party paid, decimal string. See `fee_token` for the denomination.
   fee: string;
+  /// Coin symbol the `fee` is denominated in.
+  ///
+  /// Read this before summing `fee`. A perp fee is always `"USDC"`. A spot SELL
+  /// charges USDC, but a spot BUY charges the BASE token — a BTC/USDC buy pays
+  /// its fee in BTC. Summing `fee` without this field adds BTC to USDC.
+  fee_token?: string;
   /// Realized PnL on the closed portion, whole-USDC (signed) decimal string.
   closed_pnl: string;
   /// Direction label, e.g. `"Open Long"` / `"Close Short"`.
@@ -512,8 +524,8 @@ export interface Mip3ActiveBids {
 /// The `resting` branch of an `OrderStatusInfo` — a live order in a perp or
 /// spot book.
 export interface RestingOrderStatus {
-  /// Server order id.
-  oid: number;
+  /// Server order id, a decimal-digit STRING.
+  oid: string;
   /// Market symbol (perp `"MTF"`) or spot pair name (`"MTF/USDC"`).
   coin: string;
   /// Order side token.
@@ -531,8 +543,8 @@ export interface RestingOrderStatus {
 /// The `triggered` branch of an `OrderStatusInfo` — a parked TP / SL / stop
 /// entry awaiting its mark cross.
 export interface TriggerOrderStatus {
-  /// Server order id.
-  oid: number;
+  /// Server order id, a decimal-digit STRING.
+  oid: string;
   /// Market symbol (perp `"MTF"`) or spot pair name (`"MTF/USDC"`).
   coin: string;
   /// Order side token.
@@ -568,22 +580,53 @@ export interface TriggerOrderStatus {
 export type OrderStatusInfo =
   | { status: 'resting'; order: RestingOrderStatus }
   | { status: 'triggered'; trigger: TriggerOrderStatus }
-  | { status: 'filled'; fill: UserFill }
+  | { status: 'filled'; fills: UserFill[]; total_filled_sz: string }
+  | { status: 'canceled'; outcome: OrderOutcome }
+  | { status: 'cancel_rejected'; outcome: OrderOutcome }
+  | { status: 'rejected'; outcome: OrderOutcome }
   | { status: 'unknown' };
+
+/// The terminal record behind the `canceled` / `cancel_rejected` / `rejected`
+/// branches of an `OrderStatusInfo`.
+///
+/// It is a SEPARATE key from the `order` of a live resting hit. The two answer
+/// different questions, and one name over two field sets is how a caller reads
+/// the wrong one.
+///
+/// The node carries no size on a terminal record. A cancel event names the
+/// order, not its size, and an order with even one fill answers `filled`
+/// before the terminal branch runs — so a filled size here could only ever be
+/// zero. There is no `sz`, `filled_sz` or `cloid` field.
+export interface OrderOutcome {
+  /// Server order id, a decimal-digit STRING. `null` on an order the node
+  /// rejected by `cloid` before it held an id.
+  oid: string | null;
+  /// Market symbol (perp `"MTF"`) or spot pair name (`"MTF/USDC"`).
+  coin: string;
+  /// Order side token. `null` on a cancel outcome — a cancel names the order,
+  /// not its side.
+  side: TradeSide | null;
+  /// Consensus timestamp the order reached this state (ms).
+  time: number;
+  /// Why the order ended; `null` on a successful cancel. Branch on `status`,
+  /// never on this string.
+  reason: string | null;
+}
 
 /// One record inside a `HistoricalOrders` response. The node fold emits the
 /// eight Always fields; a gateway archive row is a documented SUPERSET that
 /// adds the converted `limit_px` / `avg_px` / `sz` / `orig_sz` / `total_sz`
 /// plus order-control fields — all optional here.
 export interface HistoricalOrder {
-  /// Server order id.
-  oid: number;
+  /// Server order id, a decimal-digit STRING.
+  oid: string;
   /// Market symbol (perp `"MTF"`) or spot pair name (`"MTF/USDC"`).
   coin: string;
   /// Side token — `"B"` = buy, `"A"` = sell.
   side: TradeSide;
-  /// Order status. `"filled"` only today (the committed ring carries executed
-  /// legs); cancel / reject / expire arrive with the retention seam.
+  /// Order status. The node serves `"filled"` only today: this read folds the
+  /// committed fill ring, so an order reaches it by executing.
+  /// Treat it as an open set: match the value, never assume the list is closed.
   status: string;
   /// Fill price, 8-dp tape decimal string.
   px: string;
@@ -691,8 +734,8 @@ export interface LedgerUpdate {
   delta?: string;
   /// Counterparty address (`0x`), when applicable.
   counterparty?: string;
-  /// Deterministic trade id (trade rows).
-  tid?: number;
+  /// Deterministic trade id (trade rows), a decimal-digit STRING.
+  tid?: string;
   /// Realized PnL, decimal string (trade rows).
   realized_pnl?: string;
   /// Fee paid, decimal string (trade rows).

@@ -198,8 +198,6 @@ describe('WsClient wire protocol', () => {
       'bbo',
       'trades',
       'markets',
-      'explorer_block',
-      'explorer_txs',
       'candles',
       'fills',
       'order_updates',
@@ -215,7 +213,7 @@ describe('WsClient wire protocol', () => {
       'spot_margin_state',
       'active_asset_data',
     ]);
-    expect(WS_CHANNELS).toHaveLength(20);
+    expect(WS_CHANNELS).toHaveLength(18);
     expect(WS_CHANNELS).toContain('spot_margin_state');
     // The perp position detail and the option legs left `account_state` and
     // each got its own channel. Both REQUIRE a `user` on subscribe.
@@ -313,14 +311,6 @@ describe('WsClient wire protocol', () => {
     await ws.subscribeCandles('ETH', '5m', 'oracle');
     expect(sock.sent).toContain(
       '{"method":"subscribe","subscription":{"type":"candles","coin":"ETH","interval":"5m","candle_type":"oracle"}}',
-    );
-    await ws.subscribeExplorerBlock();
-    expect(sock.sent).toContain(
-      '{"method":"subscribe","subscription":{"type":"explorer_block"}}',
-    );
-    await ws.subscribeExplorerTxs();
-    expect(sock.sent).toContain(
-      '{"method":"subscribe","subscription":{"type":"explorer_txs"}}',
     );
     await ws.subscribeUserFundings('0x00000000000000000000000000000000000000aa');
     expect(sock.sent).toContain(
@@ -882,8 +872,8 @@ describe('WS channel body decode', () => {
   it('the TWAP channels keep their camelCase wire keys', async () => {
     const slice = await inbound(
       '{"channel":"user_twap_slice_fills","data":[{"fill":{"coin":"BTC",' +
-        '"side":"B","px":"25000","sz":"0.1","time":1784820001000,"oid":42,' +
-        '"cloid":null,"tid":7,"crossed":true,"block":8416000,"hash":"0xabc"},' +
+        '"side":"B","px":"25000","sz":"0.1","time":1784820001000,"oid":"42",' +
+        '"cloid":null,"tid":"16613428288414605024","crossed":true,"block":8416000,"hash":"0xabc"},' +
         '"twapId":9}]}',
     );
     if (!isChannelFrame(slice, 'user_twap_slice_fills')) {
@@ -892,6 +882,9 @@ describe('WS channel body decode', () => {
     // `twapId` is camelCase on the wire — a documented island, not a bug.
     expect(slice.data[0]!.twapId).toBe(9);
     expect(slice.data[0]!.fill.sz).toBe('0.1');
+    // `twapId` is a small counter and stays a number; the fill ids are strings.
+    expect(slice.data[0]!.fill.oid).toBe('42');
+    expect(slice.data[0]!.fill.tid).toBe('16613428288414605024');
 
     const hist = await inbound(
       '{"channel":"user_twap_history","data":[{"time":1784820001000,' +
@@ -936,7 +929,7 @@ describe('WS channel body decode', () => {
     // One read per channel, so a wrong map entry fails the typecheck gate.
     const trades = await inbound(
       '{"channel":"trades","data":[{"coin":"BTC","side":"B","px":"25000",' +
-        '"sz":"0.5","time":1784820001000,"tid":7,' +
+        '"sz":"0.5","time":1784820001000,"tid":"16613428288414605024",' +
         '"users":["0x00000000000000000000000000000000000000aa",' +
         '"0x00000000000000000000000000000000000000bb"],' +
         '"block":8416000,"hash":"0xabc"}]}',
@@ -946,20 +939,25 @@ describe('WS channel body decode', () => {
     expect(trades.data[0]!.users?.[0]).toBe(
       '0x00000000000000000000000000000000000000aa',
     );
+    // Past 2^53 — the id survives the JSON round trip only as a string.
+    expect(trades.data[0]!.tid).toBe('16613428288414605024');
 
     const fills = await inbound(
       '{"channel":"fills","data":[{"coin":"BTC","side":"A","px":"25000",' +
-        '"sz":"0.5","time":1784820001000,"oid":42,"cloid":null,"tid":7,' +
+        '"sz":"0.5","time":1784820001000,"oid":"42","cloid":null,' +
+        '"tid":"16613428288414605024",' +
         '"crossed":false,"block":8416000,"hash":""}]}',
     );
     if (!isChannelFrame(fills, 'fills')) throw new Error('narrow failed');
     // A maker leg carries no cloid and an empty trace hash.
     expect(fills.data[0]!.crossed).toBe(false);
     expect(fills.data[0]!.hash).toBe('');
+    expect(fills.data[0]!.oid).toBe('42');
+    expect(fills.data[0]!.tid).toBe('16613428288414605024');
 
     const updates = await inbound(
       '{"channel":"order_updates","data":[{"order":{"coin":"BTC","side":"B",' +
-        '"px":"25000","sz":"0.5","orig_sz":"1","oid":42,"cloid":null,' +
+        '"px":"25000","sz":"0.5","orig_sz":"1","oid":"42","cloid":null,' +
         '"tif":"gtc","reduce_only":false,"trigger":null,"inserted_at":null},' +
         '"status":"open","filled_sz":"0.5","avg_px":"25000","reason":null,' +
         '"time":1784820001000}]}',
@@ -969,36 +967,18 @@ describe('WS channel body decode', () => {
     }
     expect(updates.data[0]!.status).toBe('open');
     expect(updates.data[0]!.order.orig_sz).toBe('1');
+    expect(updates.data[0]!.order.oid).toBe('42');
 
     const open = await inbound(
-      '{"channel":"open_orders","data":[{"oid":42,"coin":"BTC","side":"B",' +
+      '{"channel":"open_orders","data":[{"oid":"42","coin":"BTC","side":"B",' +
         '"px":"25000","sz":"0.5","orig_sz":null,"cloid":null,"tif":"gtc",' +
         '"reduce_only":false,"trigger":null,"inserted_at":1784820001000}],' +
         '"is_snapshot":true}',
     );
     if (!isChannelFrame(open, 'open_orders')) throw new Error('narrow failed');
     // Every open_orders frame is a FULL snapshot of the resting set.
-    expect(open.data[0]!.oid).toBe(42);
+    expect(open.data[0]!.oid).toBe('42');
     expect(open.is_snapshot).toBe(true);
-
-    const block = await inbound(
-      '{"channel":"explorer_block","data":[{"height":8416000,"round":9,' +
-        '"epoch":2,"hash":"0xabc","proposer":1,"tx_count":4,' +
-        '"time":1784820001000}]}',
-    );
-    if (!isChannelFrame(block, 'explorer_block')) {
-      throw new Error('narrow failed');
-    }
-    expect(block.data[0]!.tx_count).toBe(4);
-
-    const txs = await inbound(
-      '{"channel":"explorer_txs","data":[{"oid":42,' +
-        '"user":"0x00000000000000000000000000000000000000aa","coin":"BTC",' +
-        '"action":"open","status":0,"side":0,"side_str":"B","hash":"0xabc",' +
-        '"time":1784820001000}]}',
-    );
-    if (!isChannelFrame(txs, 'explorer_txs')) throw new Error('narrow failed');
-    expect(txs.data[0]!.side_str).toBe('B');
 
     const aad = await inbound(
       '{"channel":"active_asset_data","data":{' +

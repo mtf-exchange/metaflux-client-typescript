@@ -377,7 +377,7 @@ describe.skipIf(!wasmBuilt)('Client.placeOrder submission', () => {
     reply = () => ({
       ok: true,
       status: 200,
-      body: '{"data":{"statuses":[{"resting":{"oid":11}},{"filled":{"oid":12,"total_sz":"1.5","avg_px":"50000.0"}}]}}',
+      body: '{"data":{"statuses":[{"resting":{"oid":"11"}},{"filled":{"oid":"12","total_sz":"1.5","avg_px":"50000.0"}}]}}',
     });
     const c = await client();
     const result = await c.placeOrder([
@@ -390,14 +390,15 @@ describe.skipIf(!wasmBuilt)('Client.placeOrder submission', () => {
     if (result.route !== 'batch_order') throw new Error('wrong route');
     expect(result.legs.length).toBe(2);
     expect(result.legs[0]?.cloid).toBe(CLOID);
-    expect(result.legs[0]?.status).toStrictEqual({ resting: { oid: 11 } });
+    // Every ACK id is a decimal-digit string, like every read surface.
+    expect(result.legs[0]?.status).toStrictEqual({ resting: { oid: '11' } });
     expect(result.legs[1]?.status).toStrictEqual({
-      filled: { oid: 12, total_sz: '1.5', avg_px: '50000.0' },
+      filled: { oid: '12', total_sz: '1.5', avg_px: '50000.0' },
     });
   });
 
   it('sends ONE spot_order POST PER spot order', async () => {
-    reply = () => ({ ok: true, status: 200, body: '{"data":{"statuses":[{"resting":{"oid":5}}]}}' });
+    reply = () => ({ ok: true, status: 200, body: '{"data":{"statuses":[{"resting":{"oid":"5"}}]}}' });
     const c = await client();
     const result = await c.placeOrder([
       spotLeg(),
@@ -430,7 +431,7 @@ describe.skipIf(!wasmBuilt)('Client.placeOrder submission', () => {
       call += 1;
       return call === 2
         ? { ok: false, status: 400, body: '{"error":{"code":"ASSET_INSUFFICIENT_BALANCE","message":"insufficient spot balance"}}' }
-        : { ok: true, status: 200, body: '{"data":{"statuses":[{"resting":{"oid":5}}]}}' };
+        : { ok: true, status: 200, body: '{"data":{"statuses":[{"resting":{"oid":"5"}}]}}' };
     };
     const c = await client();
 

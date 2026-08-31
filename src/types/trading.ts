@@ -501,12 +501,15 @@ export interface NativeSignedAction {
 /// (per the KB spec metaflux-knowledges/api/rest/exchange.md): a tagged union selected by
 /// the single present key, one entry per submitted order, in submission order.
 /// `total_sz` / `avg_px` are 8-decimal fixed-point u128 STRINGS (native JSON
-/// numbers lose precision past 2^53); `oid` / `nonce` are JSON numbers.
+/// numbers lose precision past 2^53). Every ACK id — `oid`, `chase_oid`,
+/// `leg_oid` — is a decimal-digit STRING for the same reason. Parse one back
+/// to a number or a `bigint` before you sign it: the signed action digest
+/// still binds a uint64. `nonce` stays a JSON number.
 export type OrderStatus =
   /// Posted to the book; not (fully) filled. `cloid` echoed only when supplied.
-  | { resting: { oid: number; cloid?: string } }
+  | { resting: { oid: string; cloid?: string } }
   /// Crossed for `total_sz` at `avg_px`.
-  | { filled: { oid: number; total_sz: string; avg_px: string } }
+  | { filled: { oid: string; total_sz: string; avg_px: string } }
   /// This entry was rejected at admission/commit (the rest of a batch may still
   /// have succeeded). Carries the SAME `{code, message, details?}` object the
   /// envelope's `error` half uses.
@@ -518,7 +521,7 @@ export type OrderStatus =
   /// `cancelChase`. `leg_oid` is the CURRENT resting leg, re-stamped on every
   /// reprice, so correlate reprices by `cloid`, NOT `leg_oid`. `leg_px` is an
   /// 8-decimal fixed-point integer STRING.
-  | { chase: { chase_oid: number; leg_oid: number; leg_px: string; cloid?: string } };
+  | { chase: { chase_oid: string; leg_oid: string; leg_px: string; cloid?: string } };
 
 /// Server response to `POST /exchange`. Mirrors the node `ExchangeResponse`
 /// (per the KB spec metaflux-knowledges/api/rest/exchange.md).
