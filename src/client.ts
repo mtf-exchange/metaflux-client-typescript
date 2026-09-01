@@ -103,6 +103,7 @@ import type {
   PerpSetMinSize,
   PerpSetOracle,
   PerpSetSubDeployers,
+  PerpSetSubDeployerPerms,
   RegisterMetaliquidityOperator,
   RfqAccept,
   RfqQuote,
@@ -1769,6 +1770,10 @@ export class Client {
   }
 
   /// Bind the market's enabled oracle-source subset (`perp_set_oracle`).
+  ///
+  /// @deprecated RETIRED. The node refuses this action from the release that
+  /// lands per-handler sub-deployer permissions. Nothing replaces it; the
+  /// deployer price control is `mip3SetOraclePx`.
   async perpSetOracle(
     params: PerpSetOracle,
     opts: { nonce?: bigint; chainId?: number } = {},
@@ -1865,6 +1870,24 @@ export class Client {
   ): Promise<NativeExchangeAck> {
     return this.submitTyped(
       'perp_set_sub_deployers',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Grant ONE delegate an exact permission mask
+  /// (`perp_set_sub_deployer_perms`). One bit is one deployer action, so a grant
+  /// can hand out the price push without the fee rates. A grant REPLACES: send
+  /// the full mask the delegate must end with; `0` revokes.
+  ///
+  /// Both the address and the mask are signed, so no relay can re-target the
+  /// delegate or widen the mask.
+  async perpSetSubDeployerPerms(
+    params: PerpSetSubDeployerPerms,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'perp_set_sub_deployer_perms',
       params as unknown as Record<string, unknown>,
       opts,
     );

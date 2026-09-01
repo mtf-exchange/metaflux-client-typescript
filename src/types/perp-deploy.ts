@@ -59,6 +59,10 @@ export interface PerpRegisterAsset {
 }
 
 /// `perp_set_oracle` — bind the market's enabled oracle-source subset.
+///
+/// @deprecated RETIRED. The mask was never read, and the node refuses the action
+/// from the release that lands per-handler sub-deployer permissions. Nothing
+/// replaces it; the deployer price control is `mip3_set_oracle_px`.
 export interface PerpSetOracle {
   /// Target market asset id (`u32`).
   asset: number;
@@ -151,6 +155,34 @@ export interface PerpSetSubDeployers {
   sub_deployer: string;
   /// `true` adds the delegate, `false` removes it.
   add: boolean;
+}
+
+/// `perp_set_sub_deployer_perms` — grant ONE delegate an exact permission mask.
+///
+/// One bit is one deployer action, so a grant can hand out the price push
+/// without the fee rates. A grant REPLACES: send the full mask the delegate must
+/// end with. `0` revokes.
+///
+/// Bit 0 `mip3_set_oracle_px`, 1 `perp_set_leverage`, 2 `perp_set_fee_tier`,
+/// 3 `perp_set_maker_rebate`, 4 `perp_set_min_size`, 5 `perp_activate_market`,
+/// 6 `perp_deactivate_market`, 7 `perp_set_fba_mode`, 8 `perp_register_asset`
+/// into this dex. `511` is every bit.
+///
+/// **Both `sub_deployer` and `permissions` sit inside the signed digest.** A
+/// relay therefore cannot re-target the delegate, and cannot widen the mask,
+/// under a replayed signature.
+///
+/// A delegate committed through [`PerpSetSubDeployers`] reads as every bit. To
+/// narrow one, send this action with the mask it must keep.
+export interface PerpSetSubDeployerPerms {
+  /// Target market asset id (`u32`).
+  asset: number;
+  /// The delegate address (`0x`-hex). The node refuses an unparsable address at
+  /// admission.
+  sub_deployer: string;
+  /// The permission bitmask (`u16`, `0`–`511`). A bit above the defined set is
+  /// refused. `0` revokes every bit.
+  permissions: number;
 }
 
 /// `mip3_set_oracle_px` — push the market's index px from its deployer oracle.

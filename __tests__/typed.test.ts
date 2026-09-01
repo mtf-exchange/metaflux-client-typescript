@@ -454,6 +454,13 @@ const VECTORS: Vector[] = [
     nonce: 209n,
     digest: '6e39d36bdd1f80375e71c3609d10ee15ad030004d3c41c246fcfbcb93df6750d',
   },
+  // The granular grant. Both the delegate and the MASK are inside the digest.
+  {
+    actionType: 'perp_set_sub_deployer_perms',
+    payload: { asset: 1001, sub_deployer: addr(0xaa), permissions: 0x1ff },
+    nonce: 210n,
+    digest: '236b8ff7a7c11b0a7cf1221d60815ca9df77a8273f8af963add190a93fa896b7',
+  },
   // The tenth MIP-3 deployer action: the repeating index-px push. The px is
   // hashed VERBATIM, so this pin also fixes its SPELLING — a re-formatted
   // string is a different digest and an unsigned push.
@@ -500,10 +507,10 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     }
   });
 
-  it('reproduces all 58 contract KAT digests byte-for-byte (chain 114514)', async () => {
+  it('reproduces all 59 contract KAT digests byte-for-byte (chain 114514)', async () => {
     const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
     // 59 vectors, 58 actions: the two approve-fee keys share one digest pin.
-    expect(VECTORS.length).toBe(59);
+    expect(VECTORS.length).toBe(60);
     for (const v of VECTORS) {
       const built = buildTyped(v.actionType, v.payload, v.nonce, CHAIN_ID);
       const digest = await typedActionDigest(built);
@@ -726,11 +733,11 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(toHex(base)).not.toBe(toHex(otherChain));
   });
 
-  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 67 reachable actions', async () => {
+  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 68 reachable actions', async () => {
     const { isTypedAction, TYPED_ACTION_TYPES } = await import('../src/native/typed.js');
     // 68 keys, 67 actions: `approve_builder_fee` is the old key for
     // `approve_broker_fee` and shares its spec.
-    expect(TYPED_ACTION_TYPES.length).toBe(68);
+    expect(TYPED_ACTION_TYPES.length).toBe(69);
     // `noop` (132) burns a nonce and does nothing else.
     expect(isTypedAction('noop')).toBe(true);
     // MIP-3 perp deployer lane (9). Landed in the node, NOT yet released: the
@@ -744,6 +751,7 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(isTypedAction('perp_activate_market')).toBe(true);
     expect(isTypedAction('perp_deactivate_market')).toBe(true);
     expect(isTypedAction('perp_set_sub_deployers')).toBe(true);
+    expect(isTypedAction('perp_set_sub_deployer_perms')).toBe(true);
     // The tenth deployer action. It rides its own fork feature,
     // `mip3_deployer_oracle`, active from genesis on a fresh chain.
     expect(isTypedAction('mip3_set_oracle_px')).toBe(true);

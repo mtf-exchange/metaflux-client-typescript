@@ -678,6 +678,15 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('add', 'bool', 'add'),
     ],
   },
+  perp_set_sub_deployer_perms: {
+    pascal: 'PerpSetSubDeployerPerms',
+    wireType: 'perp_set_sub_deployer_perms',
+    fields: [
+      f('asset', 'uint32', 'asset'),
+      f('subDeployer', 'address', 'sub_deployer'),
+      f('permissions', 'uint16', 'permissions'),
+    ],
+  },
   // ---- MIP-3 deployer oracle (1) ----
   //
   // The tenth deployer action and the only repeating one. `asset` and the

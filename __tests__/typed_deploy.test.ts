@@ -372,7 +372,7 @@ describe.skipIf(!wasmBuilt)('typed digest binding — every field enters its dig
 
 // ── MIP-3 perp-deployer lane ─────────────────────────────────────────────────
 //
-// The nine tags landed in the node but that binary is NOT released, so the live
+// The ten tags landed in the node but that binary is NOT released, so the live
 // chain refuses every one of them today. The type strings are frozen all the
 // same: they are what the node will verify against at the swap height.
 
@@ -396,16 +396,18 @@ describe('typed encodeType — MIP-3 perp deployer lane', () => {
       'MetaFluxTransaction:PerpDeactivateMarket(string metafluxChain,uint32 asset,uint64 nonce)',
     perp_set_sub_deployers:
       'MetaFluxTransaction:PerpSetSubDeployers(string metafluxChain,uint32 asset,address subDeployer,bool add,uint64 nonce)',
+    perp_set_sub_deployer_perms:
+      'MetaFluxTransaction:PerpSetSubDeployerPerms(string metafluxChain,uint32 asset,address subDeployer,uint16 permissions,uint64 nonce)',
   };
 
-  it('matches the node type string for all nine actions', async () => {
+  it('matches the node type string for all ten actions', async () => {
     const { encodeType } = await import('../src/native/typed.js');
     for (const [actionType, frozen] of Object.entries(FROZEN_PERP)) {
       expect(encodeType(actionType)).toBe(frozen);
     }
   });
 
-  it('none of the nine takes an agent-resolved owner', async () => {
+  it('none of the ten takes an agent-resolved owner', async () => {
     const { accountSupportsOwner } = await import('../src/native/typed.js');
     for (const actionType of Object.keys(FROZEN_PERP)) {
       expect(accountSupportsOwner(actionType)).toBe(false);
@@ -424,7 +426,7 @@ describe('typed encodeType — MIP-3 perp deployer lane', () => {
         actionType,
         { symbol: 'GRAD:WIF', decimals: 8, name: 'GRAD', asset: 1001, oracle_source_mask: 1, max_leverage: 20,
           taker_fee_dbps: 45, maker_fee_dbps: 12, deployer_fee_bps: 6, rebate_bps: 2,
-          min_order_size: 1000, sub_deployer: addr(0xaa), add: true, bid: '1' },
+          min_order_size: 1000, sub_deployer: addr(0xaa), add: true, permissions: 0x1ff, bid: '1' },
         1n,
         CHAIN_ID,
       );
@@ -475,6 +477,25 @@ describe('typed wire shape — MIP-3 perp deployer lane', () => {
     const revoke = toHex(await typedActionDigest(grant(addr(0xaa), false)));
     expect(otherDelegate).not.toBe(base);
     expect(revoke).not.toBe(base);
+  });
+
+  /// SECURITY: the granular grant must bind the MASK too. A relay that could
+  /// widen `permissions` under a replayed signature would hand a narrow delegate
+  /// every deployer power.
+  it('perp_set_sub_deployer_perms binds both the delegate and the mask', async () => {
+    const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
+    const grant = (subDeployer: string, permissions: number) =>
+      buildTyped(
+        'perp_set_sub_deployer_perms',
+        { asset: 1001, sub_deployer: subDeployer, permissions },
+        210n,
+        CHAIN_ID,
+      );
+    const base = toHex(await typedActionDigest(grant(addr(0xaa), 0x1ff)));
+    const otherDelegate = toHex(await typedActionDigest(grant(addr(0xbb), 0x1ff)));
+    const narrower = toHex(await typedActionDigest(grant(addr(0xaa), 0x002)));
+    expect(otherDelegate).not.toBe(base);
+    expect(narrower).not.toBe(base);
   });
 
   /// `perp_activate_market` and `perp_deactivate_market` carry the SAME single

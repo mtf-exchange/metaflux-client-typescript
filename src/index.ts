@@ -412,6 +412,7 @@ export type {
   PerpActivateMarket,
   PerpDeactivateMarket,
   PerpSetSubDeployers,
+  PerpSetSubDeployerPerms,
   // The tenth deployer action. It rides its own fork feature,
   // `mip3_deployer_oracle`, active from genesis on a fresh chain.
   Mip3SetOraclePx,

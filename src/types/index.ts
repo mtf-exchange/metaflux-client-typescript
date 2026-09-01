@@ -101,6 +101,7 @@ export type {
   PerpActivateMarket,
   PerpDeactivateMarket,
   PerpSetSubDeployers,
+  PerpSetSubDeployerPerms,
   Mip3SetOraclePx,
 } from './perp-deploy.js';
 export type {
