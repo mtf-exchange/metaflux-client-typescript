@@ -506,8 +506,14 @@ describe.skipIf(!wasmBuilt)('P0 redirected methods == typed submitTyped path', (
         c.mbWithdraw({ chain: 'Base', asset: 0, amount: 1_000_000, dst_addr: ADDR }, { nonce: n }),
     },
     {
-      name: 'claimBuilderRewards',
-      tag: 'claim_builder_rewards',
+      name: 'claimBrokerRewards',
+      tag: 'claim_broker_rewards',
+      payload: {},
+      conv: (c, n) => c.claimBrokerRewards({ nonce: n }),
+    },
+    {
+      name: 'claimBuilderRewards (legacy name, canonical tag)',
+      tag: 'claim_broker_rewards',
       payload: {},
       conv: (c, n) => c.claimBuilderRewards({ nonce: n }),
     },

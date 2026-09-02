@@ -514,6 +514,14 @@ export type OrderStatus =
   /// have succeeded). Carries the SAME `{code, message, details?}` object the
   /// envelope's `error` half uses.
   | { error: ApiError }
+  /// Accepted, and it changed nothing: a `reduce_only` entry with nothing left
+  /// to reduce. It burned the nonce, placed no order and carries NO `oid`.
+  ///
+  /// **This is a SUCCESS. Do not retry it.** `error` and `noop` need opposite
+  /// handling, which is the whole reason they are two keys — branch on the key,
+  /// never on `reason`. NOT LIVE YET: it ships with the next node release, and
+  /// until then the same outcome arrives as `error`.
+  | { noop: { reason: string } }
   /// Admitted, but no commit observed within the wait window — track via
   /// `/info` / WS. NOT a fabricated oid.
   | { pending: { action_hash: string; nonce: number } }

@@ -552,7 +552,8 @@ export class InfoApi {
 
   /// `historical_orders` — the account's past (executed) orders, keyed by
   /// `address` (0x). Optional `limit` caps the most-recent records (sent ONLY
-  /// when provided). Newest first; statuses are `"filled"` only today.
+  /// when provided). Newest first; one record per order transition, so `oid`
+  /// repeats.
   async historicalOrders(
     address: string,
     limit?: number,
@@ -752,7 +753,7 @@ export class InfoApi {
   /// `builder_state` — a broker's accrued broker-code fee credit, keyed by
   /// `user` (see `referralState` on the key name).
   ///
-  /// Read it BEFORE `claim_builder_rewards`, for the same reason.
+  /// Read it BEFORE `claim_broker_rewards`, for the same reason.
   async builderState(user: string): Promise<BuilderState> {
     return this.post<BuilderState>({ type: 'builder_state', user });
   }

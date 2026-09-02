@@ -359,9 +359,16 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
     wireType: 'claim_referral_rewards',
     fields: [],
   },
+  // `pascal` stays `ClaimBuilderRewards`: the EIP-712 type string is
+  // consensus-frozen, so only the wire tag moves to the broker name.
+  claim_broker_rewards: {
+    pascal: 'ClaimBuilderRewards',
+    wireType: 'claim_broker_rewards',
+    fields: [],
+  },
   claim_builder_rewards: {
     pascal: 'ClaimBuilderRewards',
-    wireType: 'claim_builder_rewards',
+    wireType: 'claim_broker_rewards',
     fields: [],
   },
   vault_distribute: {

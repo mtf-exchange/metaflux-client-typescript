@@ -624,9 +624,12 @@ export interface HistoricalOrder {
   coin: string;
   /// Side token — `"B"` = buy, `"A"` = sell.
   side: TradeSide;
-  /// Order status. The node serves `"filled"` only today: this read folds the
-  /// committed fill ring, so an order reaches it by executing.
+  /// Order status: `"resting"`, `"filled"`, `"error"` or `"noop"`. One record
+  /// per transition, and a maker order gets one `"filled"` record per block it
+  /// executed in — so `"filled"` is not a terminal flag and `oid` repeats.
   /// Treat it as an open set: match the value, never assume the list is closed.
+  /// `"noop"` is an ACCEPTED order that changed nothing; do not count it as a
+  /// rejection. Not live yet — it ships with the next node release.
   status: string;
   /// Fill price, 8-dp tape decimal string.
   px: string;
@@ -648,8 +651,10 @@ export interface HistoricalOrder {
   orig_sz?: string;
   /// Total order size, normalized decimal string (gateway archive superset).
   total_sz?: string;
-  /// Time-in-force token (gateway archive superset).
-  tif?: string;
+  /// Time-in-force token (gateway archive superset). `null` on a maker
+  /// execution record: a fill does not carry the order's time in force. Read
+  /// it from that order's own `"resting"` record, same `oid`.
+  tif?: string | null;
   /// Whether the order was reduce-only (gateway archive superset).
   reduce_only?: boolean;
   /// Client order id (`0x`-hex) (gateway archive superset).

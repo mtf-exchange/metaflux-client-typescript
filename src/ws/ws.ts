@@ -286,7 +286,12 @@ export interface WsOrderUpdate {
   /// `filled` = taker completion (cumulative `filled_sz` + `avg_px`; a maker
   /// leg reports per-match `filled_sz` with `status` still `open` while size
   /// rests); `rejected` carries `reason` + null `oid`.
-  status: 'open' | 'filled' | 'canceled' | 'rejected' | 'cancel_rejected';
+  ///
+  /// `noop` is a SUCCESS, not a rejection: a `reduce_only` order with nothing
+  /// left to reduce. It placed nothing, carries a null `oid`, and must not be
+  /// retried. Not live yet — until the next node release the same outcome
+  /// arrives as `rejected`.
+  status: 'open' | 'filled' | 'canceled' | 'rejected' | 'cancel_rejected' | 'noop';
   /// Filled size (whole units decimal string), or `null`. On a MAKER record
   /// this is THIS match's size, not the cumulative filled amount.
   filled_sz: string | null;

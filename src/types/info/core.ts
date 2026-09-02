@@ -788,7 +788,7 @@ export interface ReferralState {
 /// `builder_state` — one broker's accrued broker-code fee credit. Keyed by
 /// `user` (0x hex), like `referral_state`.
 ///
-/// READ THE CREDIT BEFORE YOU CLAIM IT. `claim_builder_rewards` returns an
+/// READ THE CREDIT BEFORE YOU CLAIM IT. `claim_broker_rewards` returns an
 /// admission ack and no amount.
 ///
 /// It carries NO rate. What a broker may charge is the per-order `builder_fee`,

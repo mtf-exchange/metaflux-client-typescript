@@ -489,8 +489,12 @@ describe.skipIf(!wasmBuilt)('P0+P1 node-authoritative typed digests', () => {
     const { buildTyped } = await import('../src/native/typed.js');
     // The node struct-variants carry `params: Claim*RewardsParams {}` (no serde
     // default), so the key MUST be present — a bare `{"type":...}` would 400.
+    expect(buildTyped('claim_broker_rewards', {}, 1n, CHAIN_ID).actionJson).toBe(
+      '{"type":"claim_broker_rewards","params":{}}',
+    );
+    // The legacy key signs the SAME digest and now emits the canonical tag.
     expect(buildTyped('claim_builder_rewards', {}, 1n, CHAIN_ID).actionJson).toBe(
-      '{"type":"claim_builder_rewards","params":{}}',
+      '{"type":"claim_broker_rewards","params":{}}',
     );
     expect(buildTyped('claim_referral_rewards', {}, 1n, CHAIN_ID).actionJson).toBe(
       '{"type":"claim_referral_rewards","params":{}}',
