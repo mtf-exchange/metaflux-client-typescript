@@ -733,12 +733,28 @@ export interface LedgerUpdate {
   coin: string;
   /// Event timestamp (consensus ms).
   time: number;
-  /// Event kind, e.g. `"deposit"` / `"spot_transfer"` / `"trade"`.
+  /// Event kind. Live today: `"deposit"`, `"withdraw"`, `"transfer"`,
+  /// `"liquidation"`. A VAULT deposit or withdrawal arrives as `"transfer"`.
+  ///
+  /// The next release adds `"staking_deposit"`, `"staking_withdraw"`,
+  /// `"delegate"`, `"undelegate"`, `"staking_reward"`, `"earn_deposit"` and
+  /// `"earn_withdraw"`. The type stays an open string, so a kind your build
+  /// predates must never throw.
   kind?: string;
-  /// Signed balance delta, decimal string (money-movement rows).
+  /// Signed balance delta, decimal string (money-movement rows). Signed from
+  /// the side the holder could spend a moment earlier: `-` leaves that side.
   delta?: string;
   /// Counterparty address (`0x`), when applicable.
   counterparty?: string;
+  /// Perp market ID the forced close ran on, NOT a symbol — this is the one
+  /// market reference on the read the gateway does not resolve. `"liquidation"`
+  /// rows only.
+  market?: number;
+  /// Whole-USDC mark the forced close was priced from. `"liquidation"` rows
+  /// only, and absent when the market had no usable mark.
+  mark_px?: string;
+  /// Source chain of a bridge inbound credit. `"deposit"` rows only.
+  chain?: string;
   /// Deterministic trade id (trade rows), a decimal-digit STRING.
   tid?: string;
   /// Realized PnL, decimal string (trade rows).

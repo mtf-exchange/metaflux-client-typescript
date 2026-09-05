@@ -735,9 +735,17 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
 
   it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 68 reachable actions', async () => {
     const { isTypedAction, TYPED_ACTION_TYPES } = await import('../src/native/typed.js');
-    // 68 keys, 67 actions: `approve_builder_fee` is the old key for
-    // `approve_broker_fee` and shares its spec.
-    expect(TYPED_ACTION_TYPES.length).toBe(69);
+    // 70 keys, 68 actions. Two legacy keys share a spec with their canonical
+    // name: `approve_builder_fee` with `approve_broker_fee`, and
+    // `claim_builder_rewards` with `claim_broker_rewards`.
+    expect(TYPED_ACTION_TYPES.length).toBe(70);
+    for (const [legacy, canonical] of [
+      ['approve_builder_fee', 'approve_broker_fee'],
+      ['claim_builder_rewards', 'claim_broker_rewards'],
+    ] as const) {
+      expect(isTypedAction(legacy)).toBe(true);
+      expect(isTypedAction(canonical)).toBe(true);
+    }
     // `noop` (132) burns a nonce and does nothing else.
     expect(isTypedAction('noop')).toBe(true);
     // MIP-3 perp deployer lane (9). Landed in the node, NOT yet released: the
