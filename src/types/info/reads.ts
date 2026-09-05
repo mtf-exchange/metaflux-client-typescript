@@ -749,15 +749,20 @@ export interface LedgerUpdate {
   fee_token?: string;
 }
 
-/// `user_non_funding_ledger_updates` — the gateway-served normalized ledger
-/// union, keyed by `address`. Optional `start_time` / `end_time` filter the
-/// window.
+/// `user_non_funding_ledger_updates` — every NON-TRADING movement of an
+/// account's money, keyed by `address`. Optional `start_time` / `end_time`
+/// filter the window.
 ///
-/// NOTE the camelCase collection key `ledgerUpdates` — it is the only camelCase
-/// key on this read surface (the gateway passthrough emits it verbatim).
+/// Funding is excluded — it has `user_funding`. A fill's realized PnL is
+/// excluded — it is trading, and it has `user_fills`. In scope: deposits,
+/// withdrawals, transfers between accounts and sub-accounts, staking including
+/// a reward claim, Earn, and vaults.
+///
+/// The key WAS camelCase `ledgerUpdates`, the only one on this surface. It is
+/// `ledger_updates` now.
 export interface UserNonFundingLedgerUpdates {
-  /// Ledger union rows.
-  ledgerUpdates: LedgerUpdate[];
+  /// Ledger rows.
+  ledger_updates: LedgerUpdate[];
 }
 
 /// One validator's unclaimed delegation reward inside a `DelegatorRewards`.

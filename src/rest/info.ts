@@ -601,9 +601,10 @@ export class InfoApi {
     return this.post<UserLedgerUpdates>(body);
   }
 
-  /// `user_non_funding_ledger_updates` — the GATEWAY-served normalized ledger
-  /// union, keyed by `address` (0x). Optional window bounds as above. NOTE the
-  /// response collection key is camelCase `ledgerUpdates`.
+  /// `user_non_funding_ledger_updates` — every NON-TRADING movement of an
+  /// account's money, keyed by `address` (0x). Optional window bounds as above.
+  /// The collection key is `ledger_updates`; it was camelCase until the wire
+  /// was made consistent.
   async userNonFundingLedgerUpdates(
     address: string,
     startTime?: number,

@@ -1357,7 +1357,7 @@ describe('InfoApi P2 wave-1 reads', () => {
     const api = new InfoApi(BASE);
     // ledger_canonical 3-row union (money-movement / spot-token / trade).
     nextData = {
-      ledgerUpdates: [
+      ledger_updates: [
         { coin: 'USDC', time: 1_784_800_000_001, kind: 'deposit', delta: '100', counterparty: '0xabc' },
         { coin: 'PURR', time: 1_784_800_000_002, kind: 'spot_transfer', delta: '5' },
         { coin: 'MTF', time: 1_784_800_000_003, kind: 'trade', tid: '16613428288414605024', realized_pnl: '1.5', fee: '0.02', fee_token: 'USDC' },
@@ -1370,11 +1370,11 @@ describe('InfoApi P2 wave-1 reads', () => {
       start_time: 1,
       end_time: 2,
     });
-    expect(res.ledgerUpdates).toHaveLength(3);
-    expect(res.ledgerUpdates[0]?.coin).toBe('USDC');
-    expect(res.ledgerUpdates[1]?.kind).toBe('spot_transfer');
-    expect(res.ledgerUpdates[2]?.tid).toBe('16613428288414605024');
-    expect(res.ledgerUpdates[2]?.fee_token).toBe('USDC');
+    expect(res.ledger_updates).toHaveLength(3);
+    expect(res.ledger_updates[0]?.coin).toBe('USDC');
+    expect(res.ledger_updates[1]?.kind).toBe('spot_transfer');
+    expect(res.ledger_updates[2]?.tid).toBe('16613428288414605024');
+    expect(res.ledger_updates[2]?.fee_token).toBe('USDC');
   });
 
   it('spotMarginState is keyed by `user` (NOT address)', async () => {

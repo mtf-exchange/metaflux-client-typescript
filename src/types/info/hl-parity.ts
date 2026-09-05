@@ -123,6 +123,17 @@ export interface ExchangeStatus {
   /// Consensus block time, ms — the "as of" for every field above.
   timestamp: number;
 
+  /// WHICH chain answered: `c<chain_id>-t<genesis ms>-g<16 hex of genesis hash>`,
+  /// or `underivable` on a node with no genesis file.
+  ///
+  /// Two chains can carry the same `chain_id`, so the id alone does not identify
+  /// a chain. Assert this against a configured constant at startup and refuse to
+  /// run on a mismatch. It moves only on a re-genesis of the chain you read.
+  ///
+  /// Absent on a node older than the release that added it. Treat absence as
+  /// UNKNOWN, never as a match.
+  chain_identity?: string;
+
   /// @deprecated Removed from the public status. Present only while an older
   /// gateway is still deployed; read `post_only` instead.
   post_only_until_time?: number;
