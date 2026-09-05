@@ -2,6 +2,84 @@
 
 All notable changes to the TypeScript SDK are documented here.
 
+## [0.27.0] - 2026-09-05
+
+Six releases of wire drift land together. Three of them are breaking, and two
+of those break SILENTLY — a wrong value, not an error.
+
+### Breaking
+
+- **`oid` and `tid` are decimal-digit STRINGS on every response**, including the
+  `/exchange` ACK. The previous `number` typing was not merely imprecise: a
+  `tid` is past 2^53, so `JSON.parse` rewrites it and the consumer receives a
+  wrong id with no error. Every id comparison — a `user_fills` to `trades` join,
+  fill de-duplication — fails silently against the old typing.
+
+- **`UserNonFundingLedgerUpdates.ledgerUpdates` is `ledger_updates`.** It was
+  the only camelCase collection key on a wire that is snake_case everywhere
+  else. A client reading `data.ledgerUpdates` gets `undefined`, not an error.
+
+- **A perp dex is named, not addressed.** The dex key on a position is the dex
+  NAME; the dex list carries the name and the deployer, so the two can be
+  joined. Registering an asset carries the dex name, which moves the EIP-712
+  type string and therefore the digest. A stale signing type does not lag the
+  chain — it makes the action unsignable.
+
+### Added
+
+- `perpSetSubDeployerPerms` grants ONE delegate an exact permission mask, so a
+  grant can hand out the price push without the fee rates. `permissions` of `0`
+  revokes, and a grant REPLACES: send the full mask the delegate must end with.
+  Both the delegate and the mask sit inside the digest, so no relay can
+  re-target or widen a grant. The type string is byte-pinned against the node's
+  frozen string and the digest golden is taken FROM THE NODE, because a client
+  that hashes its own construction only ever agrees with its own bug.
+
+- WebSocket zstd frames decode without a dictionary. The client offers
+  `mtf-zstd.v1`; a server that grants no protocol stays on text. `fzstd` is this
+  package's first runtime dependency, a named breach of the zero-dependency
+  posture taken because both alternatives are worse.
+
+- `claim_broker_rewards`, the canonical wire string. `claim_builder_rewards`
+  stays as a documented legacy alias.
+
+- The order status a reduce-only order gets when it correctly does nothing. The
+  node reported that as an error, which invites retry logic that must not run.
+
+### Changed
+
+- `LedgerUpdate` gains `market`, `mark_px` and `chain`, three fields the read
+  sends that this type silently dropped. `market` is a market ID, NOT a symbol —
+  it is the one market reference on that read the gateway does not resolve.
+
+- `LedgerUpdate.kind` documents all eleven kinds. Seven of them —
+  `staking_deposit`, `staking_withdraw`, `delegate`, `undelegate`,
+  `staking_reward`, `earn_deposit`, `earn_withdraw` — arrive with node 0.9.5.
+  The field stays an open string, so a kind your build predates must not throw.
+
+- `order_status` terminal answers wrap their payload in `outcome`, with the
+  token set the node writes: `canceled`, `cancel_rejected`, `rejected`.
+  `expired` is REMOVED — no node path emits it.
+
+### Deprecated
+
+- `PerpSetOracle` / `perpSetOracle`. The action wrote a mask nothing read, and
+  the node refuses it from the release that lands per-handler permissions.
+  Nothing replaces it; the deployer price control is `mip3SetOraclePx`. The type
+  and the method stay so no caller stops compiling.
+
+### Fixed
+
+- The WS goldens carry the bytes the node serves. They previously fed numeric
+  ids and asserted `toBe(42)` while the types beside them said string — they
+  passed because nothing validated them against the node, which is how a stale
+  golden hides.
+
+- `HistoricalOrder.status` listed four tokens and three were invented.
+
+- The typed-action count assertion read 69 after `claim_broker_rewards` took it
+  to 70, so CI was red on main.
+
 ## [0.26.0] - 2026-08-30
 
 **The chain does not serve this shape yet.** The standard-European reshape is
