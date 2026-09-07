@@ -181,6 +181,8 @@ export type {
   AccountSpotLane,
   AccountMarginLane,
   AccountOptionLane,
+  ProductReservation,
+  Reservations,
   ClearinghouseState,
   AccountPosition,
   DexPositions,

@@ -204,6 +204,50 @@ export interface AccountOptionLane {
   next_expiry?: number;
 }
 
+/// One scope's row of the `standard`-mode reservation ledger.
+///
+/// Served from the release AFTER 0.9.6. A 0.9.6 node omits the ledger, so
+/// `AccountState.reservations` is `undefined` against such a node in every mode
+/// — read that as "this node is older", never as "reserved nothing".
+export interface ProductReservation {
+  /// The cap the owner set for this scope, whole-USDC decimal string.
+  ///
+  /// A scope the owner never set reads `'0'`, and in `standard` mode `0` admits
+  /// NOTHING. The mode is fail-closed: a fresh `standard` account trades
+  /// nothing until it allocates.
+  reserved: string;
+  /// USDC this scope encumbers RIGHT NOW, whole-USDC decimal string: cross plus
+  /// isolated perp initial margin, spot-margin initial margin, or option
+  /// escrow.
+  held: string;
+  /// What the pre-trade gate still admits for NEW exposure in this scope,
+  /// whole-USDC decimal string, CLAMPED at zero.
+  ///
+  /// NOT `reserved - held`. A second arm subtracts every OTHER scope's unused
+  /// reservation from the pool, so this reads `'0'` while `reserved` still
+  /// exceeds `held` whenever the other scopes promised the rest away. It is the
+  /// figure that explains a margin rejection on an account that holds USDC.
+  available: string;
+}
+
+/// The per-product reservation ledger of a `standard`-mode account.
+///
+/// The three keys are reservation SCOPES, not markets. `spot` covers spot AND
+/// spot margin — one reservation binds both — so it is WIDER than the `spot` of
+/// the fee-schedule product rows, which splits `spot_margin` off.
+///
+/// The ledger binds ADMISSION only. No engine path and no cash path reads it, so
+/// a reservation never holds back the owner's own money and never makes the
+/// account harder to liquidate.
+export interface Reservations {
+  /// Perps.
+  perp: ProductReservation;
+  /// Spot AND spot margin.
+  spot: ProductReservation;
+  /// Options.
+  option: ProductReservation;
+}
+
 /// `account_state` — ONE coherent per-account snapshot: the ACCOUNT truths at
 /// the top level, then one summary per LANE.
 ///
@@ -257,6 +301,14 @@ export interface AccountState {
   health_deferred?: boolean;
   /// Margin abstraction class (`abstraction === 'portfolio'` = PM enrolled).
   abstraction: Abstraction;
+  /// The per-product reservation ledger. Present ONLY when `abstraction` is
+  /// `'standard'` — the other two modes have no ledger, because
+  /// `userSetAbstraction` clears the reservations on the way back to `unified`
+  /// and refuses to set one in any other mode. Branch on `abstraction`.
+  ///
+  /// Served from the release AFTER 0.9.6, so a 0.9.6 node leaves it
+  /// `undefined` in every mode.
+  reservations?: Reservations;
   /// Portfolio-margin net account value, whole-USDC decimal string. Always
   /// present — `"0"` when the account is not PM-enrolled.
   ///
