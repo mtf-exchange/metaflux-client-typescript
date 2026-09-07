@@ -805,3 +805,46 @@ export interface DelegatorRewards {
   /// One row per active delegation. Empty when the account delegates nothing.
   rewards: DelegatorRewardRow[];
 }
+
+/// One UTC day inside a `UserVolumeHistory`.
+///
+/// The three volumes are on the RAW node plane: `px` is scaled by `1e8` and
+/// `sz` by `10^sz_decimals`, so a total across markets is not a dollar amount.
+/// It is a true USDC notional only within ONE market. Read `fee_schedule` for
+/// volume in whole USDC.
+export interface VolumeDay {
+  /// The UTC day, `YYYY-MM-DD`.
+  date: string;
+  /// EVERY account's traded notional that day, each print counted once.
+  exchange_volume: string;
+  /// This account's notional as the RESTING side.
+  maker_volume: string;
+  /// This account's notional as the AGGRESSOR.
+  taker_volume: string;
+}
+
+/// `user_volume_history` — per UTC day, the exchange's traded volume beside one
+/// account's own maker and taker volume, newest day first.
+///
+/// THE CURRENT UTC DAY IS NEVER PRESENT. A partial day reads as a collapse in
+/// volume and makes a fee tier look like it moved; `end_time` cannot open it.
+///
+/// A quiet day has NO ROW. A day the EXCHANGE traded but this account did not
+/// IS present, with the account's two figures at `"0"`.
+///
+/// **This is NOT the fee tier.** The ladder reads a 30-day window, counts each
+/// product separately, and rolls only volume that PAID a protocol fee. Read the
+/// tier, and the volume the tier saw, from `fee_schedule` with an `address`.
+export interface UserVolumeHistory {
+  /// Echo of the requested account, 0x hex.
+  address: string;
+  /// One row per UTC day, newest first.
+  days: VolumeDay[];
+  /// `maker_volume / exchange_volume` over the trailing 14 FULL days. A
+  /// fraction, not a percent: `"0.0002"` is 0.02%. `"0"` when the exchange
+  /// traded nothing. It does NOT follow the requested window — every page of
+  /// `days` carries the same share.
+  maker_volume_share_14d: string;
+  /// The scope and plane caveats, in prose.
+  flag: string;
+}

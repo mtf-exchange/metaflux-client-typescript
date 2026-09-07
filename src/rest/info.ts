@@ -31,7 +31,7 @@
 // typed `string` in `../types/info/index.js` to match the node's decimal-string
 // encoding; ids / counts stay `number`.
 
-import { envelopeRequest } from './http.js';
+import { envelopeRequest } from "./http.js";
 import type {
   AccountOverview,
   AccountState,
@@ -68,10 +68,12 @@ import type {
   SpotMeta,
   StakingState,
   Trades,
+  UserInterest,
   UserFills,
   UserFunding,
   UserLedgerUpdates,
   UserNonFundingLedgerUpdates,
+  UserVolumeHistory,
   UserPositionHistory,
   UserRateLimit,
   UserTwaps,
@@ -79,14 +81,14 @@ import type {
   ValidatorSummaries,
   VaultState,
   VaultSummaries,
-} from '../types/info/index.js';
+} from "../types/info/index.js";
 
 /// Response depth for `InfoApi.accountState`.
 ///
 /// `"adl"` is NOT here any more: the position rows it widened moved to
 /// `clearinghouseState`, which takes the same parameter. `account_state`
 /// REFUSES it.
-export type AccountDetail = 'full' | 'margin';
+export type AccountDetail = "full" | "margin";
 
 /// `/info` namespace handle. Each method POSTs a typed `{"type": ...}` body to
 /// `POST <baseUrl>/info`, validates the `{data}` envelope, and returns the
@@ -129,17 +131,17 @@ export class InfoApi {
   ///
   /// `height` / `time` stamp the committed snapshot at every depth. The WS
   /// `account_state` frame carries the DEFAULT depth.
-  async accountState(address: string, detail?: 'full'): Promise<AccountState>;
+  async accountState(address: string, detail?: "full"): Promise<AccountState>;
   async accountState(
     address: string,
-    detail: 'margin',
+    detail: "margin",
   ): Promise<AccountMarginDetail>;
   async accountState(
     address: string,
     detail?: AccountDetail,
   ): Promise<AccountState | AccountMarginDetail> {
     const body: { type: string; [k: string]: unknown } = {
-      type: 'account_state',
+      type: "account_state",
       address,
     };
     if (detail !== undefined) body.detail = detail;
@@ -171,10 +173,10 @@ export class InfoApi {
   /// answers `unknown info type`.
   async clearinghouseState(
     address: string,
-    detail?: 'adl',
+    detail?: "adl",
   ): Promise<ClearinghouseState> {
     const body: { type: string; [k: string]: unknown } = {
-      type: 'clearinghouse_state',
+      type: "clearinghouse_state",
       address,
     };
     if (detail !== undefined) body.detail = detail;
@@ -193,9 +195,9 @@ export class InfoApi {
   /// same `AccountOverview` shape.
   async accountOverview(address: string): Promise<AccountOverview> {
     return this.post<AccountOverview>({
-      type: 'account_state',
+      type: "account_state",
       address,
-      detail: 'overview',
+      detail: "overview",
     });
   }
 
@@ -212,7 +214,7 @@ export class InfoApi {
   /// not change the shape, so a caller that wants one market pays one round
   /// trip and parses one shape. An unknown symbol answers 404.
   async markets(coin?: string): Promise<Markets> {
-    const body: { type: string; [k: string]: unknown } = { type: 'markets' };
+    const body: { type: string; [k: string]: unknown } = { type: "markets" };
     if (coin !== undefined) body.coin = coin;
     return this.post<Markets>(body);
   }
@@ -237,7 +239,7 @@ export class InfoApi {
   /// `coin` narrows the answer to ONE market; an unknown symbol answers 404.
   async marketsMeta(coin?: string): Promise<MarketsMeta> {
     const body: { type: string; [k: string]: unknown } = {
-      type: 'markets_meta',
+      type: "markets_meta",
     };
     if (coin !== undefined) body.coin = coin;
     return this.post<MarketsMeta>(body);
@@ -245,12 +247,12 @@ export class InfoApi {
 
   /// `vault_state` — per-vault snapshot keyed by vault `address` (0x hex).
   async vaultState(vaultAddress: string): Promise<VaultState> {
-    return this.post<VaultState>({ type: 'vault_state', vault: vaultAddress });
+    return this.post<VaultState>({ type: "vault_state", vault: vaultAddress });
   }
 
   /// `staking_state` — per-account staking snapshot keyed by `address` (0x).
   async stakingState(address: string): Promise<StakingState> {
-    return this.post<StakingState>({ type: 'staking_state', address });
+    return this.post<StakingState>({ type: "staking_state", address });
   }
 
   /// `fee_schedule` — protocol fee schedule.
@@ -262,8 +264,8 @@ export class InfoApi {
   async feeSchedule(address?: string): Promise<FeeSchedule> {
     return this.post<FeeSchedule>(
       address === undefined
-        ? { type: 'fee_schedule' }
-        : { type: 'fee_schedule', address },
+        ? { type: "fee_schedule" }
+        : { type: "fee_schedule", address },
     );
   }
 
@@ -292,7 +294,7 @@ export class InfoApi {
     chain?: number,
   ): Promise<BridgeWithdrawalHistory> {
     const body: { type: string; [k: string]: unknown } = {
-      type: 'bridge_withdrawal_history',
+      type: "bridge_withdrawal_history",
       address,
     };
     if (chain !== undefined) body.chain = chain;
@@ -309,7 +311,7 @@ export class InfoApi {
   /// `tif: "trigger"` plus a populated `trigger` block. This read replaces the
   /// removed `frontend_open_orders` kind, which carried that same detail.
   async openOrders(address: string): Promise<OpenOrders> {
-    return this.post<OpenOrders>({ type: 'open_orders', address });
+    return this.post<OpenOrders>({ type: "open_orders", address });
   }
 
   /// `l2_book` — market-scoped aggregated bid/ask levels, keyed by `coin`.
@@ -322,7 +324,7 @@ export class InfoApi {
   /// `mantissa`).
   async l2Book(coin: string, params?: L2BookParams): Promise<L2Book> {
     const body: { type: string; [k: string]: unknown } = {
-      type: 'l2_book',
+      type: "l2_book",
       coin,
     };
     if (params?.nSigFigs !== undefined) body.n_sig_figs = params.nSigFigs;
@@ -343,7 +345,7 @@ export class InfoApi {
     opts?: { limit?: number; startTime?: number; endTime?: number },
   ): Promise<Trades> {
     const body: { type: string; [k: string]: unknown } = {
-      type: 'trades',
+      type: "trades",
       coin,
     };
     if (opts?.limit !== undefined) body.limit = opts.limit;
@@ -364,7 +366,7 @@ export class InfoApi {
     opts?: { limit?: number; startTime?: number; endTime?: number },
   ): Promise<UserFills> {
     const body: { type: string; [k: string]: unknown } = {
-      type: 'user_fills',
+      type: "user_fills",
       address,
     };
     if (opts?.limit !== undefined) body.limit = opts.limit;
@@ -385,7 +387,7 @@ export class InfoApi {
     limit?: number,
   ): Promise<UserPositionHistory> {
     const body: { type: string; [k: string]: unknown } = {
-      type: 'user_position_history',
+      type: "user_position_history",
       address,
     };
     if (limit !== undefined) body.limit = limit;
@@ -404,7 +406,7 @@ export class InfoApi {
     endTime?: number,
   ): Promise<UserPositionHistory> {
     const body: { type: string; [k: string]: unknown } = {
-      type: 'user_position_history_by_time',
+      type: "user_position_history_by_time",
       address,
     };
     if (startTime !== undefined) body.start_time = startTime;
@@ -416,7 +418,7 @@ export class InfoApi {
   /// Each sample carries the raw `premium` and the clamped `funding_rate`
   /// that settlement actually charges.
   async fundingHistory(coin: string): Promise<FundingHistory> {
-    return this.post<FundingHistory>({ type: 'funding_history', coin });
+    return this.post<FundingHistory>({ type: "funding_history", coin });
   }
 
   /// `candle_snapshot` — historical price bars for `(coin, interval,
@@ -445,7 +447,7 @@ export class InfoApi {
     candleType?: CandleType,
   ): Promise<CandleSnapshot> {
     const body: { type: string; [k: string]: unknown } = {
-      type: 'candle_snapshot',
+      type: "candle_snapshot",
       coin,
       interval,
     };
@@ -457,7 +459,7 @@ export class InfoApi {
 
   /// `mip3_active_bids` — MIP-3 permissionless perp-deploy auction snapshot.
   async mip3ActiveBids(): Promise<Mip3ActiveBids> {
-    return this.post<Mip3ActiveBids>({ type: 'mip3_active_bids' });
+    return this.post<Mip3ActiveBids>({ type: "mip3_active_bids" });
   }
 
   /// `option_series` — every live option series, oldest first. No parameters.
@@ -471,7 +473,7 @@ export class InfoApi {
   /// is `'1'` and it is a coin, not dollars. A caller that reads it as dollars
   /// sizes a call writer's collateral wrong by the whole coin price.
   async optionSeries(): Promise<OptionSeriesRegistry> {
-    return this.post<OptionSeriesRegistry>({ type: 'option_series' });
+    return this.post<OptionSeriesRegistry>({ type: "option_series" });
   }
 
   /// `option_state` — one account's open option legs, by `address`.
@@ -501,7 +503,7 @@ export class InfoApi {
   /// The node serves this read at HEAD. A node that predates the rename answers
   /// `unknown info type`.
   async optionState(address: string): Promise<OptionState> {
-    return this.post<OptionState>({ type: 'option_state', address });
+    return this.post<OptionState>({ type: "option_state", address });
   }
 
   // ── P2 wave-1 typed reads (order / history / spot-margin / earn / pm) ────
@@ -531,18 +533,18 @@ export class InfoApi {
     const hasCloid = query.cloid !== undefined;
     if (hasOid === hasCloid) {
       throw new TypeError(
-        'orderStatus requires exactly one of `oid` or `cloid`',
+        "orderStatus requires exactly one of `oid` or `cloid`",
       );
     }
     const body: { type: string; [k: string]: unknown } = {
-      type: 'order_status',
+      type: "order_status",
     };
     if (hasOid) {
       const oid = query.oid as number | bigint | string;
       body.oid =
-        typeof oid === 'bigint' && oid > BigInt(Number.MAX_SAFE_INTEGER)
+        typeof oid === "bigint" && oid > BigInt(Number.MAX_SAFE_INTEGER)
           ? oid.toString()
-          : typeof oid === 'bigint'
+          : typeof oid === "bigint"
             ? Number(oid)
             : oid;
     }
@@ -559,7 +561,7 @@ export class InfoApi {
     limit?: number,
   ): Promise<HistoricalOrders> {
     const body: { type: string; [k: string]: unknown } = {
-      type: 'historical_orders',
+      type: "historical_orders",
       address,
     };
     if (limit !== undefined) body.limit = limit;
@@ -575,7 +577,7 @@ export class InfoApi {
     endTime?: number,
   ): Promise<UserFunding> {
     const body: { type: string; [k: string]: unknown } = {
-      type: 'user_funding',
+      type: "user_funding",
       address,
     };
     if (startTime !== undefined) body.start_time = startTime;
@@ -593,7 +595,7 @@ export class InfoApi {
     endTime?: number,
   ): Promise<UserLedgerUpdates> {
     const body: { type: string; [k: string]: unknown } = {
-      type: 'user_ledger_updates',
+      type: "user_ledger_updates",
       address,
     };
     if (startTime !== undefined) body.start_time = startTime;
@@ -611,7 +613,7 @@ export class InfoApi {
     endTime?: number,
   ): Promise<UserNonFundingLedgerUpdates> {
     const body: { type: string; [k: string]: unknown } = {
-      type: 'user_non_funding_ledger_updates',
+      type: "user_non_funding_ledger_updates",
       address,
     };
     if (startTime !== undefined) body.start_time = startTime;
@@ -619,19 +621,69 @@ export class InfoApi {
     return this.post<UserNonFundingLedgerUpdates>(body);
   }
 
+  /// `user_volume_history` — per UTC day, the exchange's traded volume beside
+  /// this account's own maker and taker volume, newest day first, plus the
+  /// account's trailing 14-day maker share.
+  ///
+  /// THE CURRENT UTC DAY IS NEVER RETURNED. A partial day makes a fee tier look
+  /// like it moved, so `endTime` cannot open it. Both bounds snap to a UTC day.
+  ///
+  /// The volumes are on the RAW node plane and are a true USDC notional only
+  /// within one market. `maker_volume_share_14d` is the trailing 14 FULL days
+  /// and is the same on every page.
+  ///
+  /// This is NOT the fee tier: the ladder reads 30 days, counts each product
+  /// apart, and rolls only volume that PAID a fee. Read `feeSchedule(address)`
+  /// for the tier itself.
+  ///
+  /// Served by the historical archive, not by a validator.
+  ///
+  /// **NOT LIVE YET.** The archive serves this and the gateway routes it, but
+  /// neither is released — a live gateway answers `400 UNKNOWN_TYPE` until both
+  /// swap. This method ships ahead so you can build against the shape; a
+  /// rejection before that release is not a bug in your call.
+  async userVolumeHistory(
+    address: string,
+    startTime?: number,
+    endTime?: number,
+    limit?: number,
+  ): Promise<UserVolumeHistory> {
+    const body: { type: string; [k: string]: unknown } = {
+      type: "user_volume_history",
+      address,
+    };
+    if (startTime !== undefined) body.start_time = startTime;
+    if (endTime !== undefined) body.end_time = endTime;
+    if (limit !== undefined) body.limit = limit;
+    return this.post<UserVolumeHistory>(body);
+  }
+
   /// `spot_margin_state` — every spot-margin position of one user.
   ///
   /// REQUEST KEY is `user` (0x hex), NOT `address` — the spot-margin read
   /// surface keys by `user`.
   async spotMarginState(user: string): Promise<SpotMarginState> {
-    return this.post<SpotMarginState>({ type: 'spot_margin_state', user });
+    return this.post<SpotMarginState>({ type: "spot_margin_state", user });
+  }
+
+  /// `user_interest` — the borrow interest one account owes, per open borrow,
+  /// whatever lane charged it.
+  ///
+  /// REQUEST KEY is `user` (0x hex), NOT `address`. Build an "Interest" view on
+  /// this read: a second interest-charging lane joins its `borrows` array
+  /// rather than getting its own query type.
+  ///
+  /// **NOT LIVE YET.** The node read is landed and unreleased; a live node
+  /// answers `unknown info type` until the next swap.
+  async userInterest(user: string): Promise<UserInterest> {
+    return this.post<UserInterest>({ type: "user_interest", user });
   }
 
   /// `earn_state` — every Earn lending pool. Pass the optional `user` (0x hex)
   /// to also get that user's per-pool `user_shares` / `user_value` (sent ONLY
   /// when provided).
   async earnState(user?: string): Promise<EarnState> {
-    const body: { type: string; [k: string]: unknown } = { type: 'earn_state' };
+    const body: { type: string; [k: string]: unknown } = { type: "earn_state" };
     if (user !== undefined) body.user = user;
     return this.post<EarnState>(body);
   }
@@ -655,22 +707,25 @@ export class InfoApi {
   /// is the account's whole token ledger, USDC and spot tokens alike.
   async spotMeta(): Promise<SpotMeta> {
     const d = await this.post<{ spot: SpotMeta }>({
-      type: 'markets_meta',
-      kind: 'spot',
+      type: "markets_meta",
+      kind: "spot",
     });
     return d.spot;
   }
 
   /// `exchange_status` — global trading status. No parameters.
   async exchangeStatus(): Promise<ExchangeStatus> {
-    return this.post<ExchangeStatus>({ type: 'exchange_status' });
+    return this.post<ExchangeStatus>({ type: "exchange_status" });
   }
 
   /// `active_asset_data` — a user's per-asset leverage / margin-mode / max
   /// trade, keyed by `address` (0x) + `coin` (market symbol).
-  async activeAssetData(address: string, coin: string): Promise<ActiveAssetData> {
+  async activeAssetData(
+    address: string,
+    coin: string,
+  ): Promise<ActiveAssetData> {
     return this.post<ActiveAssetData>({
-      type: 'active_asset_data',
+      type: "active_asset_data",
       address,
       coin,
     });
@@ -681,12 +736,12 @@ export class InfoApi {
   /// Each row names its `leader`. To list the vaults ONE address leads, filter
   /// the rows on `leader`; there is no per-leader read.
   async vaultSummaries(): Promise<VaultSummaries> {
-    return this.post<VaultSummaries>({ type: 'vault_summaries' });
+    return this.post<VaultSummaries>({ type: "vault_summaries" });
   }
 
   /// `user_rate_limit` — a user's action stats / rate-limit budget by `address`.
   async userRateLimit(address: string): Promise<UserRateLimit> {
-    return this.post<UserRateLimit>({ type: 'user_rate_limit', address });
+    return this.post<UserRateLimit>({ type: "user_rate_limit", address });
   }
 
   /// `spot_deploy_auction` — MIP-1 spot-pair-deploy gas-auction state. No
@@ -695,28 +750,28 @@ export class InfoApi {
   /// UPGRADE NOTICE: the node answers this read under the older name
   /// `spot_deploy_state` until the release that ships the rename.
   async spotDeployAuction(): Promise<SpotDeployAuction> {
-    return this.post<SpotDeployAuction>({ type: 'spot_deploy_auction' });
+    return this.post<SpotDeployAuction>({ type: "spot_deploy_auction" });
   }
 
   /// `validator_l1_votes` — current validator L1 votes. No parameters.
   async validatorL1Votes(): Promise<ValidatorL1Votes> {
-    return this.post<ValidatorL1Votes>({ type: 'validator_l1_votes' });
+    return this.post<ValidatorL1Votes>({ type: "validator_l1_votes" });
   }
 
   /// `perp_dexs` — the perp DEX(es) plus the governed MIP-3 deploy and
   /// per-market limits, under `limits`. No parameters.
   async perpDexs(): Promise<PerpDexs> {
-    return this.post<PerpDexs>({ type: 'perp_dexs' });
+    return this.post<PerpDexs>({ type: "perp_dexs" });
   }
 
   /// `validator_summaries` — per-validator snapshot. No parameters.
   async validatorSummaries(): Promise<ValidatorSummaries> {
-    return this.post<ValidatorSummaries>({ type: 'validator_summaries' });
+    return this.post<ValidatorSummaries>({ type: "validator_summaries" });
   }
 
   /// `gossip_root_ips` — the advertised peer roster. No params.
   async gossipRootIps(): Promise<GossipRootIps> {
-    return this.post<GossipRootIps>({ type: 'gossip_root_ips' });
+    return this.post<GossipRootIps>({ type: "gossip_root_ips" });
   }
 
   /// `rfq_open` — every open RFQ session, with its resting maker quotes. No
@@ -728,7 +783,7 @@ export class InfoApi {
   ///
   /// Poll it — no WebSocket channel carries an RFQ event.
   async rfqOpen(): Promise<RfqOpen> {
-    return this.post<RfqOpen>({ type: 'rfq_open' });
+    return this.post<RfqOpen>({ type: "rfq_open" });
   }
 
   /// `rfq_user` — the RFQ sessions one account is party to, by `address`.
@@ -737,7 +792,7 @@ export class InfoApi {
   /// admission ack, not a session id. Read `requested` after the request
   /// commits, then accept against `quotes` on that session.
   async rfqUser(address: string): Promise<RfqUser> {
-    return this.post<RfqUser>({ type: 'rfq_user', address });
+    return this.post<RfqUser>({ type: "rfq_user", address });
   }
 
   /// `referral_state` — an account's referral credit and bound referrer.
@@ -748,7 +803,7 @@ export class InfoApi {
   /// Read it BEFORE `claim_referral_rewards`: the claim answers with an
   /// admission ack and no amount, so this is the only view of the credit.
   async referralState(user: string): Promise<ReferralState> {
-    return this.post<ReferralState>({ type: 'referral_state', user });
+    return this.post<ReferralState>({ type: "referral_state", user });
   }
 
   /// `builder_state` — a broker's accrued broker-code fee credit, keyed by
@@ -756,7 +811,7 @@ export class InfoApi {
   ///
   /// Read it BEFORE `claim_broker_rewards`, for the same reason.
   async builderState(user: string): Promise<BuilderState> {
-    return this.post<BuilderState>({ type: 'builder_state', user });
+    return this.post<BuilderState>({ type: "builder_state", user });
   }
 
   /// `user_twaps` — an account's ACTIVE TWAP parents, by `address`.
@@ -764,7 +819,7 @@ export class InfoApi {
   /// The live set only: a completed or cancelled parent leaves the tracker, so
   /// an empty list is not a history answer.
   async userTwaps(address: string): Promise<UserTwaps> {
-    return this.post<UserTwaps>({ type: 'user_twaps', address });
+    return this.post<UserTwaps>({ type: "user_twaps", address });
   }
 
   /// `approved_builders` — every broker-fee grant an account has approved, by
@@ -774,7 +829,7 @@ export class InfoApi {
   /// charges. An order whose `builder_fee` exceeds the row is refused, and an
   /// empty list means every broker-fee order this account signs is refused.
   async approvedBuilders(address: string): Promise<ApprovedBuilders> {
-    return this.post<ApprovedBuilders>({ type: 'approved_builders', address });
+    return this.post<ApprovedBuilders>({ type: "approved_builders", address });
   }
 
   /// `delegator_rewards` — an account's staking rewards, by `address`.
@@ -782,7 +837,7 @@ export class InfoApi {
   /// Claim against `claimable_rewards`. It may exceed the sum of the per-
   /// validator rows, which carry no per-account carry.
   async delegatorRewards(address: string): Promise<DelegatorRewards> {
-    return this.post<DelegatorRewards>({ type: 'delegator_rewards', address });
+    return this.post<DelegatorRewards>({ type: "delegator_rewards", address });
   }
 
   // ── escape hatches ──────────────────────────────────────────────────────
@@ -795,7 +850,10 @@ export class InfoApi {
   /// `fba_batch_state` are refused on the public API with the same error an
   /// unknown type gets. `node_info`, `block_info` and `protocol_metrics` are
   /// deleted outright — no lane serves them.
-  async raw<T = unknown>(body: { type: string; [k: string]: unknown }): Promise<T> {
+  async raw<T = unknown>(body: {
+    type: string;
+    [k: string]: unknown;
+  }): Promise<T> {
     return this.post<T>(body);
   }
 
@@ -804,9 +862,12 @@ export class InfoApi {
   /// every typed method routes through here.
   ///
   /// `data` keeps its `type` key, so a payload field stays exactly where it was.
-  private async post<T>(body: { type: string; [k: string]: unknown }): Promise<T> {
-    const data = await envelopeRequest<T>(this.baseUrl, '/info', {
-      method: 'POST',
+  private async post<T>(body: {
+    type: string;
+    [k: string]: unknown;
+  }): Promise<T> {
+    const data = await envelopeRequest<T>(this.baseUrl, "/info", {
+      method: "POST",
       json: body,
     });
     const echoed = (data as { type?: unknown } | null)?.type;

@@ -844,6 +844,47 @@ export interface SpotMarginState {
   accounts: SpotMarginAccount[];
 }
 
+/// One open borrow inside a `UserInterest`.
+///
+/// `accrued = principal × pool_index / index_snapshot`. Divide before you
+/// multiply: the chain's settlement path does, and on a non-terminating ratio
+/// the other order lands on a different last digit.
+export interface InterestBorrow {
+  /// What created the debt. `"spot_margin"` is the only value today.
+  lane: string;
+  /// Spot pair SYMBOL (e.g. `"MTF/USDC"`), not a numeric id.
+  pair: string;
+  /// Loan principal before interest, decimal string.
+  principal: string;
+  /// The debt now — principal plus interest, decimal string.
+  accrued: string;
+  /// `accrued − principal`, decimal string.
+  interest: string;
+  /// Pool borrow index captured at open — the basis interest is measured from.
+  /// `"0"` is the pre-accrual basis and reads as `1`.
+  index_snapshot: string;
+  /// The pool's borrow index now, or `null` when the pair has no committed
+  /// pool — in which case nothing can accrue and `interest` is `"0"`.
+  pool_index: string | null;
+}
+
+/// `user_interest` — the borrow interest one account owes, whatever lane
+/// charged it.
+///
+/// REQUEST KEY is `user` (0x hex), NOT `address`.
+export interface UserInterest {
+  /// Echoed user address (0x).
+  user: string;
+  /// Sum of `borrows[*].interest`, decimal string.
+  owed: string;
+  /// Open borrows, in pair-id order. A zero-principal borrow is not listed.
+  borrows: InterestBorrow[];
+  /// ALWAYS `null`. The chain stores a supplier's shares but no cost basis, so
+  /// lending profit is not derivable. Read `earn_state` with `user` for the
+  /// stake and its current value.
+  earned: null;
+}
+
 /// One Earn lending pool inside an `EarnState`. `user_shares` / `user_value`
 /// appear ONLY when the request carried a `user`. All magnitudes are
 /// full-precision normalized decimal strings.

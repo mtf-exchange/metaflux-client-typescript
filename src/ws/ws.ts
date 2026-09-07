@@ -38,8 +38,8 @@ import type {
   Funding,
   MarketKind,
   SpotMarginState,
-} from '../types/info/core.js';
-import type { OptionState } from '../types/info/options.js';
+} from "../types/info/core.js";
+import type { OptionState } from "../types/info/options.js";
 import type {
   Candle,
   CandleType,
@@ -48,28 +48,28 @@ import type {
   OrderTif,
   OrderTrigger,
   TradeSide,
-} from '../types/info/reads.js';
+} from "../types/info/reads.js";
 import {
   buildNativeCancelAction,
   buildNativeOrderAction,
-} from '../native/actions.js';
-import { nextNonce } from '../native/digest.js';
-import { signTypedAction } from '../native/typed.js';
+} from "../native/actions.js";
+import { nextNonce } from "../native/digest.js";
+import { signTypedAction } from "../native/typed.js";
 import {
   signTypedOrder,
   type TypedOrderPayload,
-} from '../native/typed_orders.js';
+} from "../native/typed_orders.js";
 import type {
   NativeCancel,
   NativeExchangeAck,
   NativeOrder,
-} from '../types/index.js';
-import { decompress } from 'fzstd';
+} from "../types/index.js";
+import { decompress } from "fzstd";
 
 /// Subprotocol token for zstd binary frames without a dictionary. The gateway
 /// also serves a dictionary token; this SDK does not offer it, because no pure
 /// JavaScript decoder accepts a raw zstd dictionary.
-const ZSTD_PROTOCOL = 'mtf-zstd.v1';
+const ZSTD_PROTOCOL = "mtf-zstd.v1";
 
 const UTF8 = new TextDecoder();
 
@@ -85,49 +85,49 @@ const UTF8 = new TextDecoder();
 /// `account_state` `detail: "overview"` read for what `web_data` carried.
 export type WsChannel =
   // per-market (require `coin` — the market SYMBOL, e.g. "BTC")
-  | 'l2_book'
-  | 'bbo'
-  | 'trades'
+  | "l2_book"
+  | "bbo"
+  | "trades"
   // global (no params)
-  | 'markets'
+  | "markets"
   // per-market + interval (`candles` needs `coin` + `interval`)
-  | 'candles'
+  | "candles"
   // per-account (require `user`)
-  | 'fills'
-  | 'order_updates'
-  | 'open_orders'
-  | 'notifications'
-  | 'ledger_updates'
-  | 'user_fundings'
-  | 'user_twap_slice_fills'
-  | 'user_twap_history'
-  | 'account_state'
-  | 'clearinghouse_state'
-  | 'option_state'
-  | 'spot_margin_state'
+  | "fills"
+  | "order_updates"
+  | "open_orders"
+  | "notifications"
+  | "ledger_updates"
+  | "user_fundings"
+  | "user_twap_slice_fills"
+  | "user_twap_history"
+  | "account_state"
+  | "clearinghouse_state"
+  | "option_state"
+  | "spot_margin_state"
   // per-account + market (`active_asset_data` needs `user` + `coin`)
-  | 'active_asset_data';
+  | "active_asset_data";
 
 /// All known channels — handy for callers that want to subscribe broadly.
 export const WS_CHANNELS: readonly WsChannel[] = [
-  'l2_book',
-  'bbo',
-  'trades',
-  'markets',
-  'candles',
-  'fills',
-  'order_updates',
-  'open_orders',
-  'notifications',
-  'ledger_updates',
-  'user_fundings',
-  'user_twap_slice_fills',
-  'user_twap_history',
-  'account_state',
-  'clearinghouse_state',
-  'option_state',
-  'spot_margin_state',
-  'active_asset_data',
+  "l2_book",
+  "bbo",
+  "trades",
+  "markets",
+  "candles",
+  "fills",
+  "order_updates",
+  "open_orders",
+  "notifications",
+  "ledger_updates",
+  "user_fundings",
+  "user_twap_slice_fills",
+  "user_twap_history",
+  "account_state",
+  "clearinghouse_state",
+  "option_state",
+  "spot_margin_state",
+  "active_asset_data",
 ] as const;
 
 /// A subscription request body — the inner `subscription` object of a
@@ -178,7 +178,8 @@ export interface WsSubscription {
 /// margin-mode / tradeable-size snapshot. The body is the EXACT REST
 /// `active_asset_data` read for the same pair, so the two never drift. Named
 /// `*Frame` for continuity with earlier SDK versions.
-export type ActiveAssetDataFrame = import('../types/info/index.js').ActiveAssetData;
+export type ActiveAssetDataFrame =
+  import("../types/info/index.js").ActiveAssetData;
 
 /// One `trades` channel record. The on-subscribe snapshot is a NON-EMPTY
 /// array of recent tape prints (`users: null` on snapshot rows — the
@@ -291,7 +292,8 @@ export interface WsOrderUpdate {
   /// left to reduce. It placed nothing, carries a null `oid`, and must not be
   /// retried. Not live yet — until the next node release the same outcome
   /// arrives as `rejected`.
-  status: 'open' | 'filled' | 'canceled' | 'rejected' | 'cancel_rejected' | 'noop';
+  status:
+    "open" | "filled" | "canceled" | "rejected" | "cancel_rejected" | "noop";
   /// Filled size (whole units decimal string), or `null`. On a MAKER record
   /// this is THIS match's size, not the cumulative filled amount.
   filled_sz: string | null;
@@ -381,16 +383,22 @@ export interface WsCandleFrame {
 
 /// The `kind` tag on a `notifications` record.
 export type WsNotificationKind =
-  | 'yellow_card'
-  | 'forced_close_tier'
-  | 'tier_cleared'
-  | 'forced_close'
-  | 'backstop_residual'
-  | 'backstop_residual_cleared'
-  | 'mlp_backstop_takeover';
+  | "yellow_card"
+  | "forced_close_tier"
+  | "tier_cleared"
+  | "forced_close"
+  | "backstop_residual"
+  | "backstop_residual_cleared"
+  | "mlp_backstop_takeover"
+  | "action_dropped";
 
-/// One `notifications` channel record — a per-account risk / liquidation
-/// notice derived from a committed-state diff. Each push is an array.
+/// One `notifications` channel record — a per-account notice. The risk kinds
+/// come from a committed-state diff; `action_dropped` comes from the commit
+/// loop. Each push is an array.
+///
+/// **`action_dropped` IS NOT LIVE YET** — the node emits it from the next
+/// release. Until then a dropped action stays silent until your 5 s timeout,
+/// which is the defect it closes. The other kinds are live.
 ///
 /// `kind` tags the record. Only `kind`, `message` and `time` are on every
 /// record; the rest depend on the kind.
@@ -407,7 +415,7 @@ export interface WsNotification {
   /// Market symbol. Present on the per-market kinds.
   coin?: string;
   /// Position leg (`"long"` / `"short"`). Present on the per-leg kinds.
-  side?: 'long' | 'short';
+  side?: "long" | "short";
   /// Size closed by the forced close, whole units as a decimal string.
   closed_sz?: string;
   /// Un-fillable residual lots parked for the backstop executor.
@@ -416,6 +424,14 @@ export interface WsNotification {
   signed_sz?: string;
   /// Strike price of the takeover, whole-USDC decimal string.
   px?: string;
+  /// Trace hash of the dropped action — the value `/exchange` returned.
+  /// Present on `action_dropped`.
+  action_hash?: string;
+  /// Replay nonce the dropped action carried. Present on `action_dropped`.
+  nonce?: number;
+  /// Machine-readable drop code, e.g. `DROPPED_EXPIRED`. Present on
+  /// `action_dropped`.
+  code?: string;
 }
 
 /// The `kind` tag on a `ledger_updates` record.
@@ -429,19 +445,19 @@ export interface WsNotification {
 /// seen. The node adds kinds as it attributes more causes, and a closed union
 /// would make every one of them a type error on arrival.
 export type WsLedgerUpdateKind =
-  | 'usd_send'
-  | 'usd_receive'
-  | 'spot_send'
-  | 'spot_receive'
-  | 'asset_send'
-  | 'asset_receive'
-  | 'withdraw'
-  | 'deposit'
-  | 'liquidation'
-  | 'system_credit'
-  | 'sub_account_transfer'
-  | 'sub_account_spot_transfer'
-  | 'vault_transfer'
+  | "usd_send"
+  | "usd_receive"
+  | "spot_send"
+  | "spot_receive"
+  | "asset_send"
+  | "asset_receive"
+  | "withdraw"
+  | "deposit"
+  | "liquidation"
+  | "system_credit"
+  | "sub_account_transfer"
+  | "sub_account_spot_transfer"
+  | "vault_transfer"
   | (string & {});
 
 /// One `ledger_updates` channel record — a per-account money movement drawn
@@ -723,9 +739,9 @@ export interface WsSigner {
 /// `subscribe`/`unsubscribe` also dedupe `l2_book` by coin — see there.
 function subKey(s: WsSubscription): string {
   return (
-    `${s.type}:${s.coin ?? ''}:${s.user ?? ''}:${s.interval ?? ''}` +
-    `:${s.candle_type ?? ''}` +
-    `:${s.n_sig_figs ?? ''}:${s.mantissa ?? ''}:${s.n_levels ?? ''}`
+    `${s.type}:${s.coin ?? ""}:${s.user ?? ""}:${s.interval ?? ""}` +
+    `:${s.candle_type ?? ""}` +
+    `:${s.n_sig_figs ?? ""}:${s.mantissa ?? ""}:${s.n_levels ?? ""}`
   );
 }
 
@@ -784,10 +800,12 @@ export class WsClient {
 
   constructor(url: string, config: Partial<WsConfig> = {}, signer?: WsSigner) {
     if (url.length === 0) {
-      throw new RangeError('WsClient url must be non-empty');
+      throw new RangeError("WsClient url must be non-empty");
     }
     if (signer !== undefined && signer.privateKey.length !== 32) {
-      throw new RangeError('WsClient signer privateKey must be exactly 32 bytes');
+      throw new RangeError(
+        "WsClient signer privateKey must be exactly 32 bytes",
+      );
     }
     this.url = url;
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -822,30 +840,30 @@ export class WsClient {
   /// first drop any active `l2_book` entry for the same coin — otherwise a
   /// stale-params entry would be replayed on reconnect and clobber the view.
   async subscribe(sub: WsSubscription): Promise<void> {
-    if (sub.type === 'l2_book') {
+    if (sub.type === "l2_book") {
       for (const [k, s] of this.active) {
-        if (s.type === 'l2_book' && s.coin === sub.coin) this.active.delete(k);
+        if (s.type === "l2_book" && s.coin === sub.coin) this.active.delete(k);
       }
     }
     const key = subKey(sub);
     if (!this.active.has(key)) {
       this.active.set(key, sub);
     }
-    this.send({ method: 'subscribe', subscription: sub });
+    this.send({ method: "subscribe", subscription: sub });
   }
 
   /// Unsubscribe from a channel. For `l2_book` the server's unsubscribe is
   /// keyed by coin alone (params-blind), so any active `l2_book` entry for the
   /// coin is dropped regardless of its aggregation params.
   async unsubscribe(sub: WsSubscription): Promise<void> {
-    if (sub.type === 'l2_book') {
+    if (sub.type === "l2_book") {
       for (const [k, s] of this.active) {
-        if (s.type === 'l2_book' && s.coin === sub.coin) this.active.delete(k);
+        if (s.type === "l2_book" && s.coin === sub.coin) this.active.delete(k);
       }
     } else {
       this.active.delete(subKey(sub));
     }
-    this.send({ method: 'unsubscribe', subscription: sub });
+    this.send({ method: "unsubscribe", subscription: sub });
   }
 
   // ── convenience subscribe helpers ─────────────────────────────────────────
@@ -861,7 +879,7 @@ export class WsClient {
   /// server holds one book view per coin and REPLACES it on a re-subscribe with
   /// new params. The ack echoes the params (`mantissa` only when ≠ 1).
   async subscribeL2Book(coin: string, params?: L2BookParams): Promise<void> {
-    const sub: WsSubscription = { type: 'l2_book', coin };
+    const sub: WsSubscription = { type: "l2_book", coin };
     if (params?.nSigFigs !== undefined) sub.n_sig_figs = params.nSigFigs;
     if (params?.mantissa !== undefined) sub.mantissa = params.mantissa;
     if (params?.nLevels !== undefined) sub.n_levels = params.nLevels;
@@ -871,12 +889,12 @@ export class WsClient {
   /// Subscribe to public trades for a market. The on-subscribe snapshot is a
   /// non-empty array of recent tape prints (`users: null` on snapshot rows).
   async subscribeTrades(coin: string): Promise<void> {
-    return this.subscribe({ type: 'trades', coin });
+    return this.subscribe({ type: "trades", coin });
   }
 
   /// Subscribe to best-bid-best-offer ticks for a market.
   async subscribeBbo(coin: string): Promise<void> {
-    return this.subscribe({ type: 'bbo', coin });
+    return this.subscribe({ type: "bbo", coin });
   }
 
   /// Subscribe to price bars for a market + interval token. `candleType` picks
@@ -886,7 +904,7 @@ export class WsClient {
     interval: string,
     candleType?: CandleType,
   ): Promise<void> {
-    const sub: WsSubscription = { type: 'candles', coin, interval };
+    const sub: WsSubscription = { type: "candles", coin, interval };
     if (candleType !== undefined) sub.candle_type = candleType;
     return this.subscribe(sub);
   }
@@ -897,33 +915,33 @@ export class WsClient {
   /// ONE subscription answers what the retired `all_mids` and
   /// `active_asset_ctx` channels each answered in part.
   async subscribeMarkets(): Promise<void> {
-    return this.subscribe({ type: 'markets' });
+    return this.subscribe({ type: "markets" });
   }
 
   /// Subscribe to per-user fills (0x address).
   async subscribeFills(user: string): Promise<void> {
-    return this.subscribe({ type: 'fills', user });
+    return this.subscribe({ type: "fills", user });
   }
 
   /// Subscribe to per-user order lifecycle updates (0x address).
   async subscribeOrderUpdates(user: string): Promise<void> {
-    return this.subscribe({ type: 'order_updates', user });
+    return this.subscribe({ type: "order_updates", user });
   }
 
   /// Subscribe to the per-user resting-order snapshot stream (`open_orders`,
   /// 0x address). Carries the account's open perp AND spot orders.
   async subscribeOpenOrders(user: string): Promise<void> {
-    return this.subscribe({ type: 'open_orders', user });
+    return this.subscribe({ type: "open_orders", user });
   }
 
   /// Subscribe to per-user money movement (deposit / withdraw / transfer).
   async subscribeLedgerUpdates(user: string): Promise<void> {
-    return this.subscribe({ type: 'ledger_updates', user });
+    return this.subscribe({ type: "ledger_updates", user });
   }
 
   /// Subscribe to per-user realized funding payments (0x address).
   async subscribeUserFundings(user: string): Promise<void> {
-    return this.subscribe({ type: 'user_fundings', user });
+    return this.subscribe({ type: "user_fundings", user });
   }
 
   /// Subscribe to the per-user live account-state stream (0x address). The
@@ -932,7 +950,7 @@ export class WsClient {
   /// instead. With the REST `detail: "overview"` read, this covers the whole
   /// account.
   async subscribeAccountState(user: string): Promise<void> {
-    return this.subscribe({ type: 'account_state', user });
+    return this.subscribe({ type: "account_state", user });
   }
 
   /// Subscribe to the per-user PERP POSITION stream (0x address). Each frame
@@ -942,24 +960,24 @@ export class WsClient {
   /// channels for the whole picture, and compare `height` before you read a
   /// summary and a detail together.
   async subscribeClearinghouseState(user: string): Promise<void> {
-    return this.subscribe({ type: 'clearinghouse_state', user });
+    return this.subscribe({ type: "clearinghouse_state", user });
   }
 
   /// Subscribe to the per-user option-leg stream (0x address). Each frame is
   /// the same body the REST `option_state` read returns.
   async subscribeOptionState(user: string): Promise<void> {
-    return this.subscribe({ type: 'option_state', user });
+    return this.subscribe({ type: "option_state", user });
   }
 
   /// Subscribe to the per-user spot-margin position stream (0x address). Each
   /// frame is the same body the REST `spot_margin_state` read returns.
   async subscribeSpotMarginState(user: string): Promise<void> {
-    return this.subscribe({ type: 'spot_margin_state', user });
+    return this.subscribe({ type: "spot_margin_state", user });
   }
 
   /// Subscribe to per-(user, market) leverage / margin-mode context.
   async subscribeActiveAssetData(user: string, coin: string): Promise<void> {
-    return this.subscribe({ type: 'active_asset_data', coin, user });
+    return this.subscribe({ type: "active_asset_data", coin, user });
   }
 
   // ── `post` request/response (signed exchange actions + info reads) ─────────
@@ -993,7 +1011,7 @@ export class WsClient {
   ): Promise<unknown> {
     if (this.signer === undefined) {
       throw new Error(
-        'postAction requires a WsSigner (this WsClient was opened read-only)',
+        "postAction requires a WsSigner (this WsClient was opened read-only)",
       );
     }
     const nonce = opts.nonce ?? nextNonce();
@@ -1010,13 +1028,16 @@ export class WsClient {
       nonce: Number(signed.nonce),
       action: JSON.parse(signed.actionJson) as unknown,
     };
-    return this.postRequest('action', body);
+    return this.postRequest("action", body);
   }
 
   /// Issue an `info` read over the WS `post` channel, returning the info response
   /// payload. `payload` is the usual `{"type":"<info>",...}` body. No signing.
-  async postInfo(payload: { type: string; [k: string]: unknown }): Promise<unknown> {
-    return this.postRequest('info', payload);
+  async postInfo(payload: {
+    type: string;
+    [k: string]: unknown;
+  }): Promise<unknown> {
+    return this.postRequest("info", payload);
   }
 
   /// Submit a limit / market / trigger order over the WS `post` channel under
@@ -1032,11 +1053,11 @@ export class WsClient {
   /// is the authority and rejects a signer that may not act.
   async submitOrder(order: NativeOrder): Promise<NativeExchangeAck> {
     if (this.signer === undefined) {
-      throw new Error('submitOrder requires a WsSigner (read-only WsClient)');
+      throw new Error("submitOrder requires a WsSigner (read-only WsClient)");
     }
     const actionJson = buildNativeOrderAction(order);
     return (await this.postTypedTrade(
-      'submit_order',
+      "submit_order",
       { order },
       actionJson,
     )) as NativeExchangeAck;
@@ -1048,11 +1069,11 @@ export class WsClient {
   /// The typed digest binds `oid`, so a cloid-only cancel throws (no typed form).
   async cancelOrder(cancel: NativeCancel): Promise<NativeExchangeAck> {
     if (this.signer === undefined) {
-      throw new Error('cancelOrder requires a WsSigner (read-only WsClient)');
+      throw new Error("cancelOrder requires a WsSigner (read-only WsClient)");
     }
     const actionJson = buildNativeCancelAction(cancel);
     return (await this.postTypedTrade(
-      'cancel_order',
+      "cancel_order",
       { cancel },
       actionJson,
     )) as NativeExchangeAck;
@@ -1082,24 +1103,24 @@ export class WsClient {
       nonce: Number(signed.nonce),
       action: JSON.parse(signed.actionJson) as unknown,
     };
-    return this.postRequest('action', body);
+    return this.postRequest("action", body);
   }
 
   /// Core `post` machinery: assign a correlation id, ship the frame, and await
   /// the matching response. Rejects on a `{type:"error"}` response, on timeout,
   /// or if the socket is not open. Returns the inner `payload` on success.
   private postRequest(
-    requestType: 'action' | 'info',
+    requestType: "action" | "info",
     payload: unknown,
   ): Promise<unknown> {
     if (this.socket?.readyState !== 1) {
-      return Promise.reject(new Error('ws post: socket is not open'));
+      return Promise.reject(new Error("ws post: socket is not open"));
     }
     const id = this.postIdSeq++;
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingPosts.delete(id);
-        reject(new Error('ws post: timed out'));
+        reject(new Error("ws post: timed out"));
       }, this.config.postTimeoutMs);
 
       this.pendingPosts.set(id, {
@@ -1108,19 +1129,19 @@ export class WsClient {
           // carries the message as a string `payload`.
           if (
             response !== null &&
-            typeof response === 'object' &&
-            (response as { type?: unknown }).type === 'error'
+            typeof response === "object" &&
+            (response as { type?: unknown }).type === "error"
           ) {
             const msg = (response as { payload?: unknown }).payload;
             reject(
               new Error(
-                `ws post error: ${typeof msg === 'string' ? msg : 'unknown post error'}`,
+                `ws post error: ${typeof msg === "string" ? msg : "unknown post error"}`,
               ),
             );
             return;
           }
           const inner =
-            response !== null && typeof response === 'object'
+            response !== null && typeof response === "object"
               ? (response as { payload?: unknown }).payload
               : undefined;
           resolve(inner);
@@ -1130,7 +1151,7 @@ export class WsClient {
       });
 
       this.send({
-        method: 'post',
+        method: "post",
         id,
         request: { type: requestType, payload },
       });
@@ -1143,17 +1164,18 @@ export class WsClient {
   /// unkeyed, so concurrent pings are paired to pongs in FIFO order.
   ping(): Promise<number> {
     if (this.socket?.readyState !== 1) {
-      return Promise.reject(new Error('ws ping: socket is not open'));
+      return Promise.reject(new Error("ws ping: socket is not open"));
     }
-    const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const t0 =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
     return new Promise<number>((resolve, reject) => {
       const timer = setTimeout(() => {
         const i = this.pendingPings.findIndex((p) => p.resolve === resolve);
         if (i >= 0) this.pendingPings.splice(i, 1);
-        reject(new Error('ws ping: timed out'));
+        reject(new Error("ws ping: timed out"));
       }, this.config.postTimeoutMs);
       this.pendingPings.push({ resolve, reject, timer, t0 });
-      this.send({ method: 'ping' });
+      this.send({ method: "ping" });
     });
   }
 
@@ -1171,13 +1193,13 @@ export class WsClient {
     // just closed unblocks with an error rather than hanging until timeout.
     for (const [, pending] of this.pendingPosts) {
       clearTimeout(pending.timer);
-      pending.reject(new Error('ws post: client closed'));
+      pending.reject(new Error("ws post: client closed"));
     }
     this.pendingPosts.clear();
     // Unblock any in-flight pings on a closed socket.
     for (const pending of this.pendingPings) {
       clearTimeout(pending.timer);
-      pending.reject(new Error('ws ping: client closed'));
+      pending.reject(new Error("ws ping: client closed"));
     }
     this.pendingPings.length = 0;
     if (this.socket !== undefined) {
@@ -1200,7 +1222,7 @@ export class WsClient {
       let zstd = false;
       const offered = !this.plainHandshake;
       const sock = new WebSocket(this.url, offered ? [ZSTD_PROTOCOL] : []);
-      sock.binaryType = 'arraybuffer';
+      sock.binaryType = "arraybuffer";
       this.socket = sock;
 
       sock.onopen = () => {
@@ -1209,7 +1231,7 @@ export class WsClient {
         this.backoffMs = this.config.initialBackoffMs;
         // Replay active subscriptions on (re)connect.
         for (const sub of this.active.values()) {
-          this.send({ method: 'subscribe', subscription: sub });
+          this.send({ method: "subscribe", subscription: sub });
         }
         this.startPing();
         settled = true;
@@ -1217,7 +1239,7 @@ export class WsClient {
       };
 
       sock.onmessage = (ev: MessageEvent) => {
-        if (typeof ev.data === 'string') {
+        if (typeof ev.data === "string") {
           this.dispatch(ev.data);
           return;
         }
@@ -1278,7 +1300,7 @@ export class WsClient {
   private startPing(): void {
     this.clearPing();
     this.pingTimer = setInterval(() => {
-      this.send({ method: 'ping' });
+      this.send({ method: "ping" });
     }, this.config.pingIntervalMs);
   }
 
@@ -1294,9 +1316,9 @@ export class WsClient {
     let frame: WsFrame;
     try {
       const parsed = JSON.parse(raw) as Partial<WsFrame>;
-      if (typeof parsed.channel !== 'string') return; // ignore malformed
+      if (typeof parsed.channel !== "string") return; // ignore malformed
       frame = { channel: parsed.channel, data: parsed.data };
-      if (typeof parsed.is_snapshot === 'boolean') {
+      if (typeof parsed.is_snapshot === "boolean") {
         frame.is_snapshot = parsed.is_snapshot;
       }
     } catch {
@@ -1306,13 +1328,13 @@ export class WsClient {
     // is consumed here — it does NOT fan out to subscription handlers. Every
     // other frame (data channels, subscriptionResponse ack, error, bare pong)
     // is passed through to the registered handlers unchanged.
-    if (frame.channel === 'post') {
+    if (frame.channel === "post") {
       this.resolvePost(frame.data);
       return;
     }
     // A bare `pong` resolves the oldest in-flight ping() with its round-trip
     // time, then still fans out to handlers (preserves the pong pass-through).
-    if (frame.channel === 'pong') {
+    if (frame.channel === "pong") {
       this.resolvePong();
     }
     for (const h of this.handlers) {
@@ -1324,9 +1346,9 @@ export class WsClient {
   /// wraps every reply as `data.response = {type, payload}`; a `{type:"error"}`
   /// response surfaces as a rejection.
   private resolvePost(data: unknown): void {
-    if (data === null || typeof data !== 'object') return;
+    if (data === null || typeof data !== "object") return;
     const { id, response } = data as { id?: unknown; response?: unknown };
-    if (typeof id !== 'number') return;
+    if (typeof id !== "number") return;
     const pending = this.pendingPosts.get(id);
     if (pending === undefined) return;
     this.pendingPosts.delete(id);
@@ -1340,7 +1362,8 @@ export class WsClient {
     const pending = this.pendingPings.shift();
     if (pending === undefined) return;
     clearTimeout(pending.timer);
-    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const now =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
     pending.resolve(Math.round(now - pending.t0));
   }
 
