@@ -1436,7 +1436,8 @@ export class Client {
   }
 
   /// Move USD notional between the spot and perp classes (`usd_class_transfer`,
-  /// typed scheme).
+  /// typed scheme). Accepted only by a split `standard` account (node 0.9.7 and
+  /// later); every other account holds ONE USDC balance and is refused.
   async usdClassTransfer(
     params: UsdClassTransfer,
     opts: { nonce?: bigint; chainId?: number } = {},

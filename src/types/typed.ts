@@ -31,6 +31,8 @@ export interface SendAsset {
 }
 
 /// `usd_class_transfer` — move USD notional between the spot and perp classes.
+/// Accepted only by a split `standard` account (node 0.9.7 and later); every
+/// other account holds ONE USDC balance and is refused.
 export interface UsdClassTransfer {
   /// Notional amount as a canonical decimal string.
   ntl: string;

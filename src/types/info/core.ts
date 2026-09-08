@@ -308,6 +308,11 @@ export interface AccountState {
   ///
   /// Served from the release AFTER 0.9.6, so a 0.9.6 node leaves it
   /// `undefined` in every mode.
+  ///
+  /// A split `standard` account (node 0.9.7 and later) has its own spot wallet,
+  /// so its `spot` row reads `reserved: "0"` and `available` is that wallet. A
+  /// `standard` account that entered before the split keeps the pooled row
+  /// until it re-enters the mode.
   reservations?: Reservations;
   /// Portfolio-margin net account value, whole-USDC decimal string. Always
   /// present — `"0"` when the account is not PM-enrolled.
