@@ -314,6 +314,12 @@ export interface AccountState {
   /// `standard` account that entered before the split keeps the pooled row
   /// until it re-enters the mode.
   reservations?: Reservations;
+  /// Present ONLY when `abstraction` is `'standard'`. `true` = the account
+  /// holds two USDC wallets (it entered `standard` under the live split gate);
+  /// `false` = one pooled balance, the posture of an account that entered
+  /// before the arm. Read it before you interpret `reservations.spot`.
+  /// Served from node 0.9.7; an older node leaves it `undefined`.
+  split?: boolean;
   /// Portfolio-margin net account value, whole-USDC decimal string. Always
   /// present — `"0"` when the account is not PM-enrolled.
   ///
