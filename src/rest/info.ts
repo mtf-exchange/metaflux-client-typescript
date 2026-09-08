@@ -356,14 +356,29 @@ export class InfoApi {
 
   /// `user_fills` — account-scoped fill history, keyed by `address` (0x).
   ///
-  /// One read, two asks. Omit the window for the recent records, newest first;
-  /// `limit` then caps them. Pass `startTime` / `endTime` (unix ms, sent as
-  /// `start_time` / `end_time` ONLY when provided) to filter on each record's
-  /// consensus `time`, which returns them oldest first. The reply echoes both
-  /// bounds, `null` for one you omitted.
+  /// One read, two asks. Omit the window for the recent records; `limit` then
+  /// caps them. Pass `startTime` / `endTime` (unix ms, sent as `start_time` /
+  /// `end_time` ONLY when provided) to filter on each record's consensus
+  /// `time`. Both return newest first, and the reply echoes both bounds,
+  /// `null` for one you omitted.
+  ///
+  /// `aggregate` folds the legs of ONE order's execution in ONE block into a
+  /// single row and adds `n` (the leg count). `limit` then counts FOLDED rows.
+  /// Use it on the recent window only: a window old enough to reach the deep
+  /// archive returns those rows per-leg beside the folded ones.
+  ///
+  /// NOT LIVE YET. A node without it does not reject the field — it IGNORES it
+  /// and answers the per-leg rows, so the call succeeds and the fold silently
+  /// did not happen. Detect it by the presence of `n`, never by the row count:
+  /// a folded response always carries `n`, and `n` is 1 for a lone fill.
   async userFills(
     address: string,
-    opts?: { limit?: number; startTime?: number; endTime?: number },
+    opts?: {
+      limit?: number;
+      startTime?: number;
+      endTime?: number;
+      aggregate?: boolean;
+    },
   ): Promise<UserFills> {
     const body: { type: string; [k: string]: unknown } = {
       type: "user_fills",
@@ -372,6 +387,7 @@ export class InfoApi {
     if (opts?.limit !== undefined) body.limit = opts.limit;
     if (opts?.startTime !== undefined) body.start_time = opts.startTime;
     if (opts?.endTime !== undefined) body.end_time = opts.endTime;
+    if (opts?.aggregate !== undefined) body.aggregate = opts.aggregate;
     return this.post<UserFills>(body);
   }
 

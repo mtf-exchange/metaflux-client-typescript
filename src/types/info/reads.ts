@@ -230,6 +230,11 @@ export interface UserFill {
   /// number would lose its low digits. Compare it as a string, or use `BigInt`.
   tid: string;
   /// Fee this party paid, decimal string. See `fee_token` for the denomination.
+  ///
+  /// A SPOT fill reads `'0'` on BOTH legs today. The seller's USDC fee IS
+  /// charged, but the spot lane records no fee on the fill, so the row cannot
+  /// report it. Derive a spot fee from the balance delta or from rate ×
+  /// notional; do not read `'0'` as free.
   fee: string;
   /// Coin symbol the `fee` is denominated in.
   ///
@@ -238,10 +243,19 @@ export interface UserFill {
   /// its fee in BTC. Summing `fee` without this field adds BTC to USDC.
   fee_token?: string;
   /// Realized PnL on the closed portion, whole-USDC (signed) decimal string.
+  /// Always `'0'` on a spot fill: spot holds no position, so it realizes no PnL.
   closed_pnl: string;
-  /// Direction label, e.g. `"Open Long"` / `"Close Short"`.
+  /// Direction label.
+  ///
+  /// A PERP fill uses six tokens: `'Open Long'`, `'Close Long'`,
+  /// `'Open Short'`, `'Close Short'`, and — when the fill crosses through zero
+  /// — `'Long > Short'` or `'Short > Long'`.
+  ///
+  /// A SPOT fill uses `'Buy'` (side `'B'`) or `'Sell'` (side `'A'`): spot holds
+  /// no position, so no open/close token applies.
   dir: string;
-  /// Signed leg size BEFORE the fill, same size plane as `sz` (signed).
+  /// Signed leg size BEFORE the fill, same size plane as `sz` (signed). Always
+  /// `'0'` on a spot fill: spot holds no position leg.
   start_position: string;
   /// Committed block height the fill settled in. The node ring always carries
   /// it; a gateway archive-normalized fill may omit it.
@@ -269,13 +283,19 @@ export interface UserFill {
   broker_fee?: string;
   /// The parent TWAP this slice belongs to. Present when `cause` is `'twap'`.
   twap_id?: number;
+  /// How many legs this row folds. Present ONLY when the request set
+  /// `aggregate: true`; `1` on a fill that stands alone.
+  ///
+  /// Read it before you join `tid` to the trade tape: a folded row carries the
+  /// FIRST leg's `tid`, so it joins one of its `n` prints, not all of them.
+  n?: number;
 }
 
 /// `user_fills` — account-scoped fill history, keyed by `address`.
 ///
-/// One read, two asks. An UN-RANGED ask returns the recent ring, newest first
-/// (the gateway merges deep archive history when available). A RANGED ask
-/// filters on each record's consensus `time` and returns oldest first.
+/// One read, two asks. An UN-RANGED ask returns the recent ring; a RANGED ask
+/// filters on each record's consensus `time` and the gateway merges deep
+/// archive history into it. Both return NEWEST first.
 export interface UserFills {
   /// Resolved account address (0x).
   address: string;
