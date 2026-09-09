@@ -657,8 +657,28 @@ export interface Delegation {
   amount: string;
   /// Last-claim / since timestamp (unix ms).
   since_ts: number;
-  /// Accrued but unclaimed rewards, decimal string.
+  /// Accrued but unclaimed rewards, decimal string. Read `reward_weight`
+  /// first: `"0"` here means "not paid yet" ONLY when the weight is non-zero.
+  /// With a zero weight it means the row earns nothing.
   pending_rewards: string;
+  /// This row's lock tier in months — `0` (flexible), `1`, `6` or `24`.
+  ///
+  /// CONTEXT ONLY. It tells a delegator which tier to change to. Never compute
+  /// a reward weight from it. Absent on a node that predates the field.
+  lock_months?: number;
+  /// This row's weight in the reward split, decimal string. The chain's own
+  /// value.
+  ///
+  /// `"0"` means the row earns NOTHING at this tier, however large `amount`
+  /// is. A flexible row weighs zero, so `"0"` here is normal, not a fault.
+  ///
+  /// You cannot derive this from `lock_months`. The weight also follows the
+  /// row's stored multiplier and the validator's locked-stake allowlist entry.
+  /// A locked row on a validator outside that allowlist is capped to
+  /// `amount` x1.0, which is not zero. Read this field; never re-derive it.
+  ///
+  /// Absent on a node that predates the field.
+  reward_weight?: string;
 }
 
 /// One pending-unstake entry inside a `StakingState`.

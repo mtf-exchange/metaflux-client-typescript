@@ -9,6 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { InfoApi } from '../src/rest/info.js';
 import { MetaFluxApiError } from '../src/rest/http.js';
+import type { StakingState } from '../src/types/info/index.js';
 
 interface Captured {
   url: string;
@@ -248,6 +249,58 @@ describe('InfoApi request shapes', () => {
       type: 'staking_state',
       address: ADDR,
     });
+  });
+
+  it('a delegation row carries lock_months + reward_weight, and a zero weight is not "unpaid"', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      address: ADDR,
+      total_staked: '1000',
+      delegations: [
+        {
+          validator: ADDR,
+          amount: '1000',
+          since_ts: 1,
+          pending_rewards: '0',
+          lock_months: 0,
+          reward_weight: '0',
+        },
+        {
+          validator: ADDR,
+          amount: '1000',
+          since_ts: 1,
+          pending_rewards: '0',
+          lock_months: 24,
+          reward_weight: '4000',
+        },
+      ],
+      pending_unstakes: [],
+    };
+    const res: StakingState = await api.stakingState(ADDR);
+    const [flexible, locked] = res.delegations;
+    // Both rows read `pending_rewards: "0"`. Only the weight separates "earns
+    // nothing at this tier" from "not paid yet".
+    expect(flexible!.reward_weight).toBe('0');
+    expect(flexible!.lock_months).toBe(0);
+    // 1000 at the 24-month tier is x4.0 = 4000. The weight sits on the `amount`
+    // plane, not on the multiplier's.
+    expect(locked!.reward_weight).toBe('4000');
+    expect(locked!.lock_months).toBe(24);
+  });
+
+  it('a delegation row from a node that predates the fields leaves both undefined', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      address: ADDR,
+      total_staked: '1000',
+      delegations: [
+        { validator: ADDR, amount: '1000', since_ts: 1, pending_rewards: '0' },
+      ],
+      pending_unstakes: [],
+    };
+    const res: StakingState = await api.stakingState(ADDR);
+    expect(res.delegations[0]!.reward_weight).toBeUndefined();
+    expect(res.delegations[0]!.lock_months).toBeUndefined();
   });
 
   it('feeSchedule POSTs {"type":"fee_schedule"}', async () => {
