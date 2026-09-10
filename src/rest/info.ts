@@ -813,13 +813,12 @@ export class InfoApi {
 
   /// `referral_state` — an account's referral credit and bound referrer.
   ///
-  /// Keyed by `user`, NOT `address` — this read and `builderState` are the two
-  /// that name the account `user`.
+  /// Keyed by `address`. It shipped keyed by `user`, which still works.
   ///
   /// Read it BEFORE `claim_referral_rewards`: the claim answers with an
   /// admission ack and no amount, so this is the only view of the credit.
   async referralState(user: string): Promise<ReferralState> {
-    return this.post<ReferralState>({ type: "referral_state", user });
+    return this.post<ReferralState>({ type: "referral_state", address: user });
   }
 
   /// `builder_state` — a broker's accrued broker-code fee credit, keyed by
@@ -827,7 +826,7 @@ export class InfoApi {
   ///
   /// Read it BEFORE `claim_broker_rewards`, for the same reason.
   async builderState(user: string): Promise<BuilderState> {
-    return this.post<BuilderState>({ type: "builder_state", user });
+    return this.post<BuilderState>({ type: "broker_state", address: user });
   }
 
   /// `user_twaps` — an account's ACTIVE TWAP parents, by `address`.
@@ -845,7 +844,7 @@ export class InfoApi {
   /// charges. An order whose `builder_fee` exceeds the row is refused, and an
   /// empty list means every broker-fee order this account signs is refused.
   async approvedBuilders(address: string): Promise<ApprovedBuilders> {
-    return this.post<ApprovedBuilders>({ type: "approved_builders", address });
+    return this.post<ApprovedBuilders>({ type: "approved_brokers", address });
   }
 
   /// `delegator_rewards` — an account's staking rewards, by `address`.

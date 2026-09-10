@@ -2326,7 +2326,7 @@ describe('RFQ session + fee-credit reads', () => {
     const api = new InfoApi(BASE);
     nextData = { user: ADDR, claimable_rewards: '12.5', referrer: null };
     const res = await api.referralState(ADDR);
-    expect(JSON.parse(captured!.body)).toEqual({ type: 'referral_state', user: ADDR });
+    expect(JSON.parse(captured!.body)).toEqual({ type: 'referral_state', address: ADDR });
     // `null` = never bound a referrer. Binding is one-time.
     expect(res.referrer).toBeNull();
     expect(res.claimable_rewards).toBe('12.5');
@@ -2336,7 +2336,7 @@ describe('RFQ session + fee-credit reads', () => {
     const api = new InfoApi(BASE);
     nextData = { user: VAULT, claimable_rewards: '0' };
     const res = await api.builderState(VAULT);
-    expect(JSON.parse(captured!.body)).toEqual({ type: 'builder_state', user: VAULT });
+    expect(JSON.parse(captured!.body)).toEqual({ type: 'broker_state', address: VAULT });
     expect(res.claimable_rewards).toBe('0');
   });
 
@@ -2371,7 +2371,7 @@ describe('RFQ session + fee-credit reads', () => {
     nextData = { address: ADDR, builders: [{ builder: VAULT, max_fee_bps: '25' }] };
     const res = await api.approvedBuilders(ADDR);
     expect(JSON.parse(captured!.body)).toEqual({
-      type: 'approved_builders',
+      type: 'approved_brokers',
       address: ADDR,
     });
     expect(res.builders[0]!.max_fee_bps).toBe('25');

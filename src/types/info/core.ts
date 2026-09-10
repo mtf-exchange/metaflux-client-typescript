@@ -847,8 +847,8 @@ export interface FeeScheduleUser {
 }
 
 /// `referral_state` — one account's referral credit and the referrer it is bound
-/// to. Keyed by `user` (0x hex), NOT by `address`: this read and `builder_state`
-/// are the two `/info` reads that name the account `user`.
+/// to. Keyed by `address` (0x hex). It shipped keyed by `user`, which still
+/// works, and the reply carries the account under both names.
 ///
 /// READ THE CREDIT BEFORE YOU CLAIM IT. `claim_referral_rewards` returns an
 /// admission ack and no amount, so this is the only place the pending credit is
