@@ -622,6 +622,14 @@ export interface MarketDynamic {
   change_24h: string | null;
   /// Whether the market is halted.
   halted: boolean;
+  /// Present and `true` ONLY on a settled market. Every order is refused,
+  /// reduce-only included. The delist closed every open position at
+  /// `settled_px`, and the market never trades again. A settled market also
+  /// reads `halted: true`, so test `settled` first.
+  settled?: boolean;
+  /// Whole-USDC price the delist closed every position at, decimal string.
+  /// Absent when no position was open at the delist.
+  settled_px?: string;
 }
 
 /// `vault_state` — per-vault snapshot keyed by vault `address`.

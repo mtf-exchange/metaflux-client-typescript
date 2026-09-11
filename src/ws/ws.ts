@@ -598,6 +598,13 @@ export interface WsMarketRow {
   change_24h?: string | null;
   /// Whether the market is halted. Perp rows only.
   halted?: boolean;
+  /// Present and `true` ONLY on a settled market: every order is refused and
+  /// every position was closed at `settled_px`. A settled market also reads
+  /// `halted: true`. Perp rows only.
+  settled?: boolean;
+  /// Whole-USDC price the delist closed every position at. Absent when no
+  /// position was open. Perp rows only.
+  settled_px?: string;
 }
 
 /// `account_state` channel payload — the SAME body the REST `account_state`
