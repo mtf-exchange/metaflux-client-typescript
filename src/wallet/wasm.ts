@@ -264,7 +264,7 @@ export async function eip712TypedDataHash(
 /// the wasm-bindgen ABI. Omit for no cloid (the key is skipped; the node fills
 /// `None`).
 ///
-/// `builder` (ADR-012 §L.5.2) is optional. When supplied it is encoded
+/// `builder` (fee cap 8 bps) is optional. When supplied it is encoded
 /// INSIDE the body so the carve is covered by the EIP-712 signature; an
 /// omitted builder produces byte-identical output to the pre-builder
 /// encoder (the `builder` key is skipped, and the node defaults it to

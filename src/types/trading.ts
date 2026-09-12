@@ -30,7 +30,7 @@ export type Tif = 0 | 1 | 2;
 /// 3 = DecrementAndCancel.
 export type StpMode = 0 | 1 | 2 | 3;
 
-/// Builder-code carve attached to an order (ADR-012 §L.5.2; mirrors
+/// Builder-code carve attached to an order (mirrors
 /// `core_state::actions::trading::Builder`). When present it is encoded
 /// INSIDE the signed order body (see `encodeLimitOrder` / the WASM
 /// `encode_limit_order`), so the carve cannot be tampered post-signature.
@@ -82,7 +82,7 @@ export interface Order {
   /// requires this field on the signed wire (no serde default). Omit to default
   /// to `false` — the encoder fills it in.
   reduceOnly?: boolean;
-  /// Optional builder-code carve (ADR-012 §L.5.2). Omit for a vanilla
+  /// Optional builder-code carve (fee cap 8 bps). Omit for a vanilla
   /// order; when set it rides inside the EIP-712-signed body.
   builder?: Builder;
 }

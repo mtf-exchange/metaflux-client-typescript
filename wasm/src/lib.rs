@@ -280,7 +280,7 @@ pub fn derive_address_from_pubkey(pubkey: &[u8]) -> Vec<u8> {
 ///   key and still decodes as `cloid: None` (probe-verified:
 ///   `MISSING_CLOID_KEY => Ok(None)`).
 /// - `builder` mirrors `OrderParams.builder: Option<Builder>`
-///   (`#[serde(default)]`, ADR-012 §L.5.2). `None` skips the field entirely so
+///   (`#[serde(default)]`; fee cap 8 bps). `None` skips the field entirely so
 ///   a builder-less order encodes byte-identically to before this addition.
 ///   When present it rides INSIDE the signed body so the builder carve cannot
 ///   be tampered post-signature.
@@ -330,7 +330,7 @@ struct BuilderBody {
 /// of the 128-bit cloid; it rides the signed body as the raw `u128` (the wire
 /// form the node's `Cloid(u128)` decodes), NOT a hex string.
 ///
-/// Builder carve (ADR-012 §L.5.2): pass `has_builder = false` for a
+/// Builder carve (fee cap 8 bps): pass `has_builder = false` for a
 /// vanilla order (encodes identically to a no-builder body — the
 /// `builder` key is omitted). When `has_builder = true`, `builder_fee`
 /// is the rate in basis points and `builder_user` MUST be exactly 20

@@ -2163,7 +2163,7 @@ export class Client {
   }
 
   // NOTE: The CCXT market / position reads (`getMarkets` / `getPositions`, which
-  // hit the deleted `/ccxt/*` routes — ADR-028) were REMOVED. Use the MTF-native
+  // hit the deleted `/ccxt/*` routes) were REMOVED. Use the MTF-native
   // `/info` reads instead: `client.info.markets()` for the market universe,
   // `client.info.accountState(address)` for the account summary and balances,
   // and `client.info.clearinghouseState(address)` for the position rows.
