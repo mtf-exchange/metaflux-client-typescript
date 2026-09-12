@@ -4,9 +4,6 @@
 // secp256k1 sign -> address derive) runs through WASM. Pure-TS
 // responsibilities: HTTP plumbing, type coercion, optional JWT
 // session bookkeeping.
-//
-// Naming note: exported as `Client` (NOT `MtfClient`) per session
-// direction. Consumers import as `import { Client } from '@metaflux-dex/client'`.
 
 import { envelopeRequest, MetaFluxApiError } from './rest/http.js';
 import {
@@ -151,7 +148,7 @@ export interface ClientOpts {
   privateKey?: Uint8Array;
   /// LEGACY EVM chain id, retained for backward compatibility of the
   /// constructor. It is NOT used by any signing path today — the typed
-  /// `/exchange` scheme signs against the MTF-native chain id (`MTF_CHAIN_ID`,
+  /// `/exchange` scheme signs against the MTF-native chain id (`CHAIN_ID`,
   /// testnet 114514), overridable per call via `opts.chainId`.
   chainId?: number;
   /// OPTIONAL default action-expiry (unix-ms) folded into every typed action
@@ -170,13 +167,13 @@ export interface ClientOpts {
 export interface TradeOpts {
   /// Per-account replay nonce. Defaults to a strictly-increasing unix-ms clock.
   nonce?: bigint;
-  /// EIP-712 domain chain id. Defaults to `MTF_CHAIN_ID` (testnet 114514).
+  /// EIP-712 domain chain id. Defaults to `CHAIN_ID` (testnet 114514).
   chainId?: number;
 }
 
 /// Legacy default chain id for the (retired) `ClientOpts.chainId` field. No
 /// signing path reads it; the typed `/exchange` scheme signs against
-/// `MTF_CHAIN_ID`. Kept only so the constructor stays backward-compatible.
+/// `CHAIN_ID`. Kept only so the constructor stays backward-compatible.
 const DEFAULT_CHAIN_ID = 31337;
 
 /// The `0x0` 20-byte address sentinel. `claim_rewards` uses it for "claim across
@@ -263,7 +260,7 @@ export class Client {
   /// `Date.now()` (unix-ms) — supply an explicit monotonically-increasing
   /// value for back-to-back submissions in the same millisecond.
   ///
-  /// `chainId` defaults to the MTF-native chain id (`MTF_CHAIN_ID` = testnet
+  /// `chainId` defaults to the MTF-native chain id (`CHAIN_ID` = testnet
   /// 114514; mainnet is 8964).
   async submitOrderNative(
     order: NativeOrder,
@@ -1347,7 +1344,7 @@ export class Client {
   // carries the typed `/exchange` + the same canonical `action` JSON that was
   // hashed. Everything else keeps the legacy opaque scheme above.
   //
-  // The chain id for these is the MTF-native chain id (`MTF_CHAIN_ID`, testnet
+  // The chain id for these is the MTF-native chain id (`CHAIN_ID`, testnet
   // 114514 by default), NOT the legacy `ClientOpts.chainId` (a different domain).
   // ============================================================================
 
@@ -2139,7 +2136,7 @@ export class Client {
   /// If this client holds a private key, the returned `WsClient` is seeded with
   /// a signer so it can POST signed typed exchange actions over the socket
   /// (`ws.submitOrder` / `ws.cancelOrder` / `ws.postAction`) — signed against
-  /// the MTF-native chain id (`MTF_CHAIN_ID`), the same typed digest the REST
+  /// the MTF-native chain id (`CHAIN_ID`), the same typed digest the REST
   /// `/exchange` path uses. A read-only client yields a WS client that can still
   /// subscribe and `postInfo`, but not `postAction`.
   async connectWs(config: Partial<WsConfig> = {}): Promise<WsClient> {

@@ -41,7 +41,7 @@ export interface PlaceOrderOpts {
   /// The spot route sends one action per leg, so an explicit nonce is REJECTED
   /// for more than one spot leg — every action needs its own nonce.
   nonce?: bigint;
-  /// EIP-712 domain chain id. Defaults to `MTF_CHAIN_ID` (testnet 114514).
+  /// EIP-712 domain chain id. Defaults to `CHAIN_ID` (testnet 114514).
   chainId?: number;
   /// Agent-resolved owner (`0x`-hex) — an approved agent places AS that owner.
   /// The perp route puts it on the `batch_order` top level, and every perp leg

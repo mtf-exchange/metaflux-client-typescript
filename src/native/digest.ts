@@ -27,9 +27,9 @@ import {
 } from '../wallet/wasm.js';
 import type { NativeOrder, NativeSignedAction } from '../types/index.js';
 
-const MTF_DOMAIN_TYPE =
+const DOMAIN_TYPE =
   'EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)';
-const MTF_ACTION_TYPE = 'MetaFluxAction(string action,uint64 nonce)';
+const ACTION_TYPE = 'MetaFluxAction(string action,uint64 nonce)';
 
 /// MTF EIP-712 domain chain ids. MetaFlux runs its own verified-unregistered
 /// chain ids, distinct from Hyperliquid's testnet `998` (retired here to avoid
@@ -39,13 +39,13 @@ const MTF_ACTION_TYPE = 'MetaFluxAction(string action,uint64 nonce)';
 ///
 /// - mainnet `8964` (0x2304)
 /// - testnet `114514` (0x1bf52) — the live devnet/testnet runs this.
-export const MTF_MAINNET_CHAIN_ID = 8964;
-export const MTF_TESTNET_CHAIN_ID = 114514;
+export const MAINNET_CHAIN_ID = 8964;
+export const TESTNET_CHAIN_ID = 114514;
 
-/// Default MTF chain id (matches `MTF_CHAIN_ID` in the Rust SDK + the server
-/// KAT vector). Aliases the testnet id, since the live devnet/testnet is what
-/// the SDK signs against today.
-export const MTF_CHAIN_ID = MTF_TESTNET_CHAIN_ID;
+/// Default chain id. It matches the Rust SDK and the server KAT vector.
+/// It aliases the testnet id, because the live devnet/testnet is what the SDK
+/// signs against today.
+export const CHAIN_ID = TESTNET_CHAIN_ID;
 
 const enc = new TextEncoder();
 
@@ -91,7 +91,7 @@ export function concat32(...chunks: Uint8Array[]): Uint8Array {
 
 /// Compute the 5-field MTF-native EIP-712 domain separator.
 export async function domainSeparator(chainId: number): Promise<Uint8Array> {
-  const typeHash = await keccak256(enc.encode(MTF_DOMAIN_TYPE));
+  const typeHash = await keccak256(enc.encode(DOMAIN_TYPE));
   const nameHash = await keccak256(enc.encode('MetaFlux'));
   const versionHash = await keccak256(enc.encode('1'));
   const chainIdBe = be32(BigInt(chainId));
@@ -109,12 +109,12 @@ export async function domainSeparator(chainId: number): Promise<Uint8Array> {
 export async function nativeActionDigest(
   actionJson: string,
   nonce: bigint,
-  chainId: number = MTF_CHAIN_ID,
+  chainId: number = CHAIN_ID,
 ): Promise<Uint8Array> {
   if (nonce < 0n) throw new RangeError('nonce must be non-negative');
   if (nonce >= 1n << 64n) throw new RangeError('nonce overflows u64');
 
-  const actionTypeHash = await keccak256(enc.encode(MTF_ACTION_TYPE));
+  const actionTypeHash = await keccak256(enc.encode(ACTION_TYPE));
   const actionHash = await keccak256(enc.encode(actionJson));
   const nonceBe = be32(nonce);
   const structHash = await keccak256(
@@ -176,7 +176,7 @@ export async function signNativeAction(
   privateKey: Uint8Array,
   actionJson: string,
   nonce: bigint,
-  chainId: number = MTF_CHAIN_ID,
+  chainId: number = CHAIN_ID,
 ): Promise<NativeSignedAction> {
   if (privateKey.length !== 32) {
     throw new RangeError('privateKey must be exactly 32 bytes');
@@ -190,7 +190,7 @@ export async function signNativeAction(
 /// asserting the owner field locally before POSTing.
 export async function recoverNativeSigner(
   signed: NativeSignedAction,
-  chainId: number = MTF_CHAIN_ID,
+  chainId: number = CHAIN_ID,
 ): Promise<string> {
   const digest = await nativeActionDigest(
     signed.actionJson,

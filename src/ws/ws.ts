@@ -732,7 +732,7 @@ const DEFAULT_CONFIG: WsConfig = {
 export interface WsSigner {
   /// 32-byte ECDSA private key.
   privateKey: Uint8Array;
-  /// EIP-712 domain chain id. Defaults to `MTF_CHAIN_ID` (testnet 114514) when
+  /// EIP-712 domain chain id. Defaults to `CHAIN_ID` (testnet 114514) when
   /// omitted, matching the REST `/exchange` path.
   chainId?: number;
 }

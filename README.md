@@ -93,8 +93,8 @@ console.log(ack.statuses?.[0]);
 ```
 
 The signing flow (EIP-712 over the canonical action bytes, nonce auto-assigned,
-`chainId` defaults to `MTF_CHAIN_ID` = MTF testnet `114514`; mainnet is `8964`,
-exported as `MTF_TESTNET_CHAIN_ID` / `MTF_MAINNET_CHAIN_ID`) is handled inside
+`chainId` defaults to `CHAIN_ID` = MTF testnet `114514`; mainnet is `8964`,
+exported as `TESTNET_CHAIN_ID` / `MAINNET_CHAIN_ID`) is handled inside
 `submitOrderNative`. Cancel via `client.cancelOrderNative({ … })`.
 
 #### Signing as an approved agent

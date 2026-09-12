@@ -2,6 +2,31 @@
 
 All notable changes to the TypeScript SDK are documented here.
 
+## [0.28.0] - 2026-09-12
+
+### Breaking
+
+- **The three chain-id constants drop the `MTF_` prefix.** Inside a MetaFlux
+  package the product name says nothing, so the export is now the bare name:
+  `MTF_CHAIN_ID` is `CHAIN_ID`, `MTF_TESTNET_CHAIN_ID` is `TESTNET_CHAIN_ID`,
+  and `MTF_MAINNET_CHAIN_ID` is `MAINNET_CHAIN_ID`. The VALUES do not move:
+  testnet stays `114514` and mainnet stays `8964`. No alias is kept, so a stale
+  import fails at build time with an unresolved name. That is the wanted
+  outcome: this rename cannot change a signature, only a build.
+
+  Update an import to the new name:
+
+  ```ts
+  // before
+  import { MTF_CHAIN_ID } from '@metaflux-dex/client';
+  // after
+  import { CHAIN_ID } from '@metaflux-dex/client';
+  ```
+
+  The `MTF_*` shell and Vite environment variables are NOT part of this rename.
+  A bare `CHAIN_ID` in a process environment is a collision, so `VITE_MTF_CHAIN_ID`
+  and every other `MTF_*` environment name stays as it is.
+
 ## [0.27.0] - 2026-09-05
 
 Six releases of wire drift land together. Three of them are breaking, and two

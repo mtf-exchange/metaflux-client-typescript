@@ -33,7 +33,7 @@ import {
   hexToBytes,
   toHex,
   validateAddress,
-  MTF_CHAIN_ID,
+  CHAIN_ID,
 } from './digest.js';
 import {
   deriveAddressFromPubkey,
@@ -93,13 +93,13 @@ function checkNonce(nonce: bigint): void {
 ///
 /// NOTE on `chainId`: the chain verifies the inner digest under its EVM chain id
 /// (`meta_evm.chain_id`), which today equals the signing chain id (114514 /
-/// 8964) on every network. The SDK sources both from `MTF_CHAIN_ID`; were they
+/// 8964) on every network. The SDK sources both from `CHAIN_ID`; were they
 /// ever to diverge on-chain, this constant would need the EVM id instead.
 export async function multiSigInnerDigest(
   user: string,
   innerActionBlob: Uint8Array,
   nonce: bigint,
-  chainId: number = MTF_CHAIN_ID,
+  chainId: number = CHAIN_ID,
 ): Promise<Uint8Array> {
   checkNonce(nonce);
   const blob = normalizeBlob(innerActionBlob);
@@ -122,7 +122,7 @@ export async function multiSigInnerDigest(
 export async function multiSigInnerDigestLegacy(
   innerActionBlob: Uint8Array,
   nonce: bigint,
-  chainId: number = MTF_CHAIN_ID,
+  chainId: number = CHAIN_ID,
 ): Promise<Uint8Array> {
   checkNonce(nonce);
   const blob = normalizeBlob(innerActionBlob);
@@ -159,7 +159,7 @@ export async function signMultiSigInner(
     throw new RangeError('privateKey must be exactly 32 bytes');
   }
   const scheme: MultiSigInnerScheme = opts.scheme ?? 'user-bound';
-  const chainId = opts.chainId ?? MTF_CHAIN_ID;
+  const chainId = opts.chainId ?? CHAIN_ID;
   const digest =
     scheme === 'legacy'
       ? await multiSigInnerDigestLegacy(innerActionBlob, nonce, chainId)
@@ -179,7 +179,7 @@ export async function recoverMultiSigInner(
   opts: { scheme?: MultiSigInnerScheme; chainId?: number } = {},
 ): Promise<string> {
   const scheme: MultiSigInnerScheme = opts.scheme ?? 'user-bound';
-  const chainId = opts.chainId ?? MTF_CHAIN_ID;
+  const chainId = opts.chainId ?? CHAIN_ID;
   const digest =
     scheme === 'legacy'
       ? await multiSigInnerDigestLegacy(innerActionBlob, nonce, chainId)

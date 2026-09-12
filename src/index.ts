@@ -20,9 +20,9 @@ export { requestFaucet, type FaucetResponse } from './faucet.js';
 export {
   // MTF-native signed-action signing core. Exported so power users can build /
   // sign / inspect actions out-of-band.
-  MTF_CHAIN_ID,
-  MTF_MAINNET_CHAIN_ID,
-  MTF_TESTNET_CHAIN_ID,
+  CHAIN_ID,
+  MAINNET_CHAIN_ID,
+  TESTNET_CHAIN_ID,
   nativeActionDigest,
   signNativeAction,
   recoverNativeSigner,

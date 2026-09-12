@@ -42,7 +42,7 @@ import {
   validateCloid,
   toU64,
   type U64Input,
-  MTF_CHAIN_ID,
+  CHAIN_ID,
 } from './digest.js';
 import {
   metafluxChainTag,
@@ -923,7 +923,7 @@ export async function buildTypedOrder(
   payload: TypedOrderPayload,
   actionJson: string,
   nonce: bigint,
-  chainId: number = MTF_CHAIN_ID,
+  chainId: number = CHAIN_ID,
   owner?: string,
   expiresAfter: bigint = 0n,
 ): Promise<BuiltTypedOrder> {
@@ -1007,7 +1007,7 @@ export async function signTypedOrder(
   payload: TypedOrderPayload,
   actionJson: string,
   nonce: bigint,
-  chainId: number = MTF_CHAIN_ID,
+  chainId: number = CHAIN_ID,
   owner?: string,
   expiresAfter: bigint = 0n,
 ): Promise<TypedSignedAction> {
@@ -1032,7 +1032,7 @@ export async function recoverTypedOrderSigner(
   signed: TypedSignedAction,
   actionType: string,
   payload: TypedOrderPayload,
-  chainId: number = MTF_CHAIN_ID,
+  chainId: number = CHAIN_ID,
   owner?: string,
 ): Promise<string> {
   const built = await buildTypedOrder(

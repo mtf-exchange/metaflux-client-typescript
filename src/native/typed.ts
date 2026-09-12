@@ -27,7 +27,7 @@
 // drift apart.
 
 import { be32, jsonStr, toHex, hexToBytes, validateAddress } from './digest.js';
-import { MTF_CHAIN_ID } from './digest.js';
+import { CHAIN_ID } from './digest.js';
 import {
   deriveAddressFromPubkey,
   keccak256,
@@ -1412,7 +1412,7 @@ export function buildTyped(
   actionType: string,
   payload: Record<string, unknown>,
   nonce: bigint,
-  chainId: number = MTF_CHAIN_ID,
+  chainId: number = CHAIN_ID,
   owner?: string,
   expiresAfter: bigint = 0n,
 ): BuiltTyped {
@@ -1642,7 +1642,7 @@ export async function signTypedAction(
   actionType: string,
   payload: Record<string, unknown>,
   nonce: bigint,
-  chainId: number = MTF_CHAIN_ID,
+  chainId: number = CHAIN_ID,
   owner?: string,
   expiresAfter: bigint = 0n,
 ): Promise<TypedSignedAction> {
@@ -1664,7 +1664,7 @@ export async function recoverTypedSigner(
   signed: TypedSignedAction,
   actionType: string,
   payload: Record<string, unknown>,
-  chainId: number = MTF_CHAIN_ID,
+  chainId: number = CHAIN_ID,
   owner?: string,
 ): Promise<string> {
   const built = buildTyped(
