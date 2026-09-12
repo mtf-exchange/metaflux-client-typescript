@@ -87,7 +87,9 @@ export interface OpenOrder {
   /// Original order size, decimal string. `null` on a snapshot row — the
   /// committed book does not retain it.
   orig_sz: string | null;
-  /// Client order id (`0x`-hex), or `null` when the order carried none.
+  /// Client order id (`0x`-hex), or `null` when the order carried none. A
+  /// PARKED trigger row carries it too, from the next node release on; it was
+  /// always `null` before.
   cloid: string | null;
   /// Time-in-force token, or `null` when unknown.
   tif: OrderTif | null;
@@ -584,6 +586,9 @@ export interface TriggerOrderStatus {
   /// Limit price for a limit trigger, normalized decimal string; `null` for a
   /// market trigger.
   limit_px: string | null;
+  /// Client order id (`0x`-hex), or `null` when the leg carried none. NOT LIVE
+  /// YET: the field ships with the next node release.
+  cloid?: string | null;
   /// Scaled-TP/SL ladder handle — same rule as `OrderTrigger.group`. Absent
   /// unless this leg belongs to a ladder.
   group?: number;
@@ -596,7 +601,21 @@ export interface TriggerOrderStatus {
 /// `status`-tagged union; resolution order is resting → triggered → filled.
 ///
 /// A `cloid`-only query resolves resting / triggered hits only — the fill ring
-/// is oid-keyed, so a cloid that hit no live order returns `unknown`.
+/// is oid-keyed, so a cloid that hit no live order returns `unknown`. A cloid
+/// also resolves a PARKED leg straight from chain state, so it keeps resolving
+/// after a node restart.
+///
+/// Two answers that used to read `unknown` are terminal from the next node
+/// release on: a SPOT order or scale rung that neither rests nor matches
+/// resolves `rejected` with the reason
+/// `"Order could not immediately match against any resting orders."`, and a
+/// cancelled SPOT order resolves `canceled`.
+///
+/// Still `unknown` after the fact: the old oid of a `modify` (query the `cloid`
+/// or the new oid), and any order cancelled through `batchCancel`,
+/// `cancelAllOrders`, `cancelScale` or `cancelChase` — those carry ONE verdict
+/// for the whole action, so the node will not claim a per-order outcome it
+/// cannot prove.
 export type OrderStatusInfo =
   | { status: 'resting'; order: RestingOrderStatus }
   | { status: 'triggered'; trigger: TriggerOrderStatus }
@@ -644,7 +663,8 @@ export interface HistoricalOrder {
   coin: string;
   /// Side token — `"B"` = buy, `"A"` = sell.
   side: TradeSide;
-  /// Order status: `"resting"`, `"filled"`, `"error"` or `"noop"`. One record
+  /// Order status: `"resting"`, `"filled"`, `"error"`, `"noop"` or
+  /// `"parked"`. One record
   /// per transition, and a maker order gets one `"filled"` record per block it
   /// executed in — so `"filled"` is not a terminal flag and `oid` repeats.
   /// Treat it as an open set: match the value, never assume the list is closed.

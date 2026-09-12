@@ -178,6 +178,15 @@ export interface WsSubscription {
 /// margin-mode / tradeable-size snapshot. The body is the EXACT REST
 /// `active_asset_data` read for the same pair, so the two never drift. Named
 /// `*Frame` for continuity with earlier SDK versions.
+///
+/// The channel serves a REGISTERED PERP market. A spot pair, an unknown coin,
+/// or a coin that names no perp is refused with an `error` frame carrying
+/// `market not found`, and no subscription is created — the same refusal the
+/// REST read answers `404 MARKET_NOT_FOUND`. An unparseable `user` is refused
+/// as ``invalid `user` address``. There is no zeroed fallback snapshot any
+/// more. `coin` takes the market symbol; this channel also accepts the numeric
+/// asset id, which REST does not. NOT LIVE YET: the refusal ships with the next
+/// node release; until then a bad coin answers a zeroed body.
 export type ActiveAssetDataFrame =
   import("../types/info/index.js").ActiveAssetData;
 
@@ -292,8 +301,18 @@ export interface WsOrderUpdate {
   /// left to reduce. It placed nothing, carries a null `oid`, and must not be
   /// retried. Not live yet — until the next node release the same outcome
   /// arrives as `rejected`.
+  ///
+  /// `parked` is a TP/SL or stop leg registered off the book, awaiting its mark
+  /// cross. It holds a real `oid`; `filled_sz`, `avg_px` and `reason` are all
+  /// `null`. Not live yet — it ships with the next node release.
   status:
-    "open" | "filled" | "canceled" | "rejected" | "cancel_rejected" | "noop";
+    | "open"
+    | "filled"
+    | "canceled"
+    | "rejected"
+    | "cancel_rejected"
+    | "noop"
+    | "parked";
   /// Filled size (whole units decimal string), or `null`. On a MAKER record
   /// this is THIS match's size, not the cumulative filled amount.
   filled_sz: string | null;
@@ -671,6 +690,10 @@ export interface WsFrame {
   /// not send the flag never makes a delta look like a snapshot.
   ///
   /// The `candles` channel is the exception: read `data.snapshot` there.
+  ///
+  /// A subscribe answers exactly ONE `is_snapshot: true` frame. The only second
+  /// one is a re-snapshot after the feed reconnects. NOT LIVE YET: until the
+  /// next node release a subscribe can answer two.
   is_snapshot?: boolean;
 }
 

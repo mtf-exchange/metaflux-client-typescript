@@ -2,6 +2,97 @@
 
 All notable changes to the TypeScript SDK are documented here.
 
+## [0.29.0] - 2026-09-12
+
+Everything below is NOT LIVE YET. It ships with the next node release. Until
+that release the live chain still answers the old way, and `vaultModify` must
+still be signed with the old type. The doc comments carry the same notice per
+item.
+
+### Breaking
+
+- **`vaultModify` signs a NEW EIP-712 type.** The digest now binds EVERY field
+  the node applies, not the name alone:
+
+  ```
+  MetaFluxTransaction:VaultModify(string metafluxChain,uint64 vaultId,string newName,
+  bool hasNewLockPeriodSecs,uint64 newLockPeriodSecs,bool hasNewManagementFeeBps,
+  uint16 newManagementFeeBps,bool hasNewPaused,bool newPaused,uint64 nonce)
+  ```
+
+  Each optional field is two words: a presence flag and a value. An absent key
+  and a key sent as `0` are DIFFERENT digests, so one signature covers exactly
+  one wire form. `newName` signs the empty string when the caller sends no name,
+  and the key is then omitted from the POST params — the node refuses an empty
+  name, so `""` can only mean unchanged.
+
+  Why it moved: `vaultModify` applies the management fee, the paused flag and
+  the lock period, and none of the three were signed. A relay could add a fee
+  raise to a signature the leader gave for a rename.
+
+  What breaks: a signature made with the old four-field type is refused once the
+  node release lands. The client also stops dropping `new_lock_period_secs`,
+  `new_management_fee_bps` and `new_paused` from the POST body — before this
+  release it sent the vault id and the name alone, so those three fields never
+  reached the node.
+
+- **`OrderStatus` gains a `parked` member, and `WsOrderUpdate.status` gains a
+  `parked` token.** Both unions are closed, so an exhaustive switch needs the
+  new arm. A `parked` entry is a TP/SL or stop leg ACCEPTED and registered off
+  the book: it holds a real `oid`, it never rests, and `l2_book` does not show
+  it. Treat it as a success and do not retry it. A `positionTpsl` group used to
+  answer `"statuses": []`; it now answers one entry per leg, so the array is
+  longer than it was.
+
+### Added
+
+- `NONCE_REPLAYED` joins `ApiErrorCode`. An action the block builder drops as a
+  replay now answers a real rejection at HTTP 200 instead of timing out — inside
+  `statuses[0].error` on an order action, as the top-level `error` on any other.
+  Do not retry the same nonce; re-sign above the account's newest. The window is
+  64 wide and anchored on the highest nonce the account ever committed, so one
+  action signed far in the future moves the anchor and refuses every later
+  wall-clock nonce until the clock catches up.
+
+- `TriggerOrderStatus.cloid` — an `order_status` `triggered` answer echoes the
+  parked leg's client order id. A `cloid` also resolves a parked leg straight
+  from chain state, so it keeps resolving after a node restart, and
+  `cancelByCloid` reaches a parked leg.
+
+- `OpenOrder.cloid` is populated on a parked-trigger row. It was always `null`.
+
+### Changed
+
+- **`agentSetAbstraction` is deprecated and always refused.** Every call answers
+  `PRECONDITION_FAILED` with `agentSetAbstraction is not available; the account
+  owner must sign userSetAbstraction`. An approved agent holds trading authority
+  only. The signing type stays — the EIP-712 type string is consensus-frozen.
+
+- **A `cloid` is refused PER LEG.** A `batchOrder` dedups every leg that carries
+  one, and two legs of ONE action that share a `cloid` refuse the WHOLE action.
+  A `scaleOrder` handle is reserved: a later single order that reuses it is
+  refused with `ORDER_DUPLICATE_CLOID` instead of joining the group. An attempt
+  the COMMIT refused gives its cloid back, so a re-signed retry may reuse it.
+
+- **`order_status` answers two cases it used to call `unknown`.** A SPOT order
+  or scale rung that neither rests nor matches resolves `rejected`; a cancelled
+  SPOT order resolves `canceled`.
+
+- **`updateLeverage` refuses an asset with no perp market**
+  (`no perp market for asset`). It used to write a leverage row for a market
+  that does not exist.
+
+- **`cDeposit` and `cWithdraw` refuse an amount finer than the token's wei
+  quantum.** MTF declares 8 `wei_decimals`. Trailing zeros do not count.
+
+- **`topUpIsolatedOnlyMargin` takes a plain isolated position too**, not
+  strict-isolated only. The earlier doc was wrong; the node never enforced it.
+
+- **The `active_asset_data` WS channel refuses a spot pair and an unknown
+  coin** with an `error` frame carrying `market not found`, and creates no
+  subscription. There is no zeroed fallback snapshot any more. A subscribe
+  answers exactly one `is_snapshot: true` frame.
+
 ## [0.28.0] - 2026-09-12
 
 ### Breaking

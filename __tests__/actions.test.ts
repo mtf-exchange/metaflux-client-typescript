@@ -547,10 +547,20 @@ describe.skipIf(!wasmBuilt)('P0 redirected methods == typed submitTyped path', (
       conv: (c, n) => c.claimRewards({}, { nonce: n }),
     },
     {
-      name: 'vaultModify (defaults new_name)',
+      name: 'vaultModify (omits every absent optional)',
       tag: 'vault_modify',
-      payload: { vault_id: 7, new_name: '' },
+      payload: { vault_id: 7 },
       conv: (c, n) => c.vaultModify({ vault_id: 7 }, { nonce: n }),
+    },
+    {
+      name: 'vaultModify (carries the fee and the pause the digest binds)',
+      tag: 'vault_modify',
+      payload: { vault_id: 7, new_management_fee_bps: 250, new_paused: true },
+      conv: (c, n) =>
+        c.vaultModify(
+          { vault_id: 7, new_management_fee_bps: 250, new_paused: true },
+          { nonce: n },
+        ),
     },
   ];
 

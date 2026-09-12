@@ -935,6 +935,9 @@ export class Client {
 
   /// As an approved agent, set an abstraction config value for `params.user`
   /// via `POST /exchange`.
+  ///
+  /// @deprecated NOT AVAILABLE — see [`AgentSetAbstraction`]. Every call is
+  /// refused. The account owner signs `userSetAbstraction` instead.
   async agentSetAbstraction(
     params: AgentSetAbstraction,
     opts: { nonce?: bigint; chainId?: number } = {},
@@ -1047,16 +1050,24 @@ export class Client {
     return this.vaultTransferTyped(params, opts);
   }
 
-  /// Leader updates vault configuration via `POST /exchange`. Only the vault
-  /// NAME is signed / applied (the node's typed `vault_modify` binds `new_name`
-  /// alone); an omitted `new_name` signs the empty-string sentinel (no rename).
+  /// Leader updates vault configuration via `POST /exchange`.
+  ///
+  /// The digest binds EVERY field the node applies: the name, the lock period,
+  /// the management fee and the paused flag. Each optional field signs a
+  /// presence flag plus its value, so an absent key and a key sent as `0` are
+  /// different digests — one signature covers exactly one wire form.
+  ///
+  /// **BREAKING:** the type string gained six fields. A signature made with the
+  /// old four-field type is refused. **NOT LIVE YET:** the new type ships with
+  /// the next node release; until that release the live node still verifies the
+  /// four-field form.
   async vaultModify(
     params: VaultModify,
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
     return this.submitTyped(
       'vault_modify',
-      { vault_id: params.vault_id, new_name: params.new_name ?? '' },
+      params as unknown as Record<string, unknown>,
       opts,
     );
   }
@@ -1514,6 +1525,10 @@ export class Client {
 
   /// Agent sets an abstraction config value for a user (`agent_set_abstraction`,
   /// typed scheme; `value` is an EIP-712 string signed verbatim).
+  ///
+  /// @deprecated NOT AVAILABLE — see [`AgentSetAbstraction`]. Every call is
+  /// refused. The signing type stays: the EIP-712 type string is
+  /// consensus-frozen.
   async agentSetAbstractionTyped(
     params: AgentSetAbstraction,
     opts: { nonce?: bigint; chainId?: number } = {},

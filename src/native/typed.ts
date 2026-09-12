@@ -63,14 +63,23 @@ export function metafluxChainTag(chainId: number): MetafluxChainTag {
 
 /// Supported EIP-712 leaf solidity types for the typed actions.
 ///
-/// `presence-bool` / `opt-uint32` / `opt-uint64` are the halves of an OPTIONAL
+/// `presence-bool` / `opt-uint16` / `opt-uint32` / `opt-uint64` / `opt-bool` are
+/// the halves of an OPTIONAL
 /// wire field that the server flattens into a presence `bool` + value pair (the
 /// same `Option<T>` → `(hasX: bool, x)` rule the node's `to_typed` applies). Both
 /// read the SAME snake_case wire key: the presence half signs `true`/`false`
-/// for present/absent, the value half signs the value (or `0` when absent). The
+/// for present/absent, the value half signs the value (`0` / `false` when
+/// absent). The
 /// POST `action.params` carries only the original optional key (present or
 /// omitted), never the flattened pair — exactly like the server's native action.
-/// (`opt-uint64` is the 64-bit value half, for the RFQ / FBA optional u64s.)
+/// (`opt-uint64` is the 64-bit value half, for the RFQ / FBA optional u64s;
+/// `opt-uint16` and `opt-bool` are the `vault_modify` fee and pause halves.)
+///
+/// `opt-string` is an optional STRING with NO presence half: the node's typed
+/// struct declares a plain `string` and signs `""` for an absent key. It backs
+/// `vault_modify.new_name`. The key is omitted from the POST `params` when
+/// absent, because the node refuses an empty name — so `""` can only mean
+/// unchanged, and a written `""` would be refused.
 ///
 /// `side-u8` backs the RFQ / FBA `side`: the POST `params.side` carries the core
 /// `Side` PascalCase NAME (`"Bid"`/`"Ask"`), the signed word + v4 message value
@@ -125,6 +134,9 @@ type FieldSolidityType =
   | 'vault-kind'
   | 'side-u8'
   | 'presence-bool'
+  | 'opt-string'
+  | 'opt-bool'
+  | 'opt-uint16'
   | 'opt-uint32'
   | 'opt-uint64'
   | 'sentinel-uint64'
@@ -390,12 +402,21 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('kind', 'vault-kind', 'kind'),
     ],
   },
+  // SECURITY-LOAD-BEARING: every field `handle_vault_modify` applies is inside
+  // the digest, so no relay can add a fee raise or a pause to a signature the
+  // leader gave for a rename.
   vault_modify: {
     pascal: 'VaultModify',
     wireType: 'vault_modify',
     fields: [
       f('vaultId', 'uint64', 'vault_id'),
-      f('newName', 'string', 'new_name'),
+      f('newName', 'opt-string', 'new_name'),
+      f('hasNewLockPeriodSecs', 'presence-bool', 'new_lock_period_secs'),
+      f('newLockPeriodSecs', 'opt-uint64', 'new_lock_period_secs'),
+      f('hasNewManagementFeeBps', 'presence-bool', 'new_management_fee_bps'),
+      f('newManagementFeeBps', 'opt-uint16', 'new_management_fee_bps'),
+      f('hasNewPaused', 'presence-bool', 'new_paused'),
+      f('newPaused', 'opt-bool', 'new_paused'),
     ],
   },
   spot_margin_close: {
@@ -997,6 +1018,9 @@ function solidityTypeName(ty: FieldSolidityType): string {
   if (ty === 'borrow-kind') return 'uint8';
   if (ty === 'presence-bool') return 'bool';
   if (ty === 'const-false-bool') return 'bool';
+  if (ty === 'opt-string') return 'string';
+  if (ty === 'opt-bool') return 'bool';
+  if (ty === 'opt-uint16') return 'uint16';
   if (ty === 'opt-uint32') return 'uint32';
   if (ty === 'opt-uint64') return 'uint64';
   if (ty === 'sentinel-uint64') return 'uint64';
@@ -1236,6 +1260,37 @@ function planField(fld: FieldSpec, payload: Record<string, unknown>): FieldPlan 
       const present = isPresent(raw);
       const word = encUintWord(present ? 1n : 0n, 8, fld.wireKey);
       return mkPlan(fld, present ? 'true' : 'false', present, async () => word, true);
+    }
+    case 'opt-string': {
+      // An optional string with no presence half: signs the value, or `""` when
+      // absent (the node's `Option::unwrap_or_default`). The wire key is
+      // emitted ONLY when present.
+      const present = isPresent(raw);
+      if (present && typeof raw !== 'string') {
+        throw new RangeError(`${fld.wireKey} must be a string`);
+      }
+      const s = present ? (raw as string) : '';
+      return mkPlan(fld, jsonStr(s), s, () => keccak256(enc.encode(s)), !present);
+    }
+    case 'opt-bool': {
+      // The boolean value half of a flattened optional. Signs the value, or
+      // `false` when absent (the node's `Option::unwrap_or(false)`). The wire
+      // key is emitted ONLY when present.
+      const present = isPresent(raw);
+      if (present && typeof raw !== 'boolean') {
+        throw new RangeError(`${fld.wireKey} must be a boolean`);
+      }
+      const v = present && raw === true;
+      const word = encUintWord(v ? 1n : 0n, 8, fld.wireKey);
+      return mkPlan(fld, v ? 'true' : 'false', v, async () => word, !present);
+    }
+    case 'opt-uint16': {
+      // The 16-bit value half of a flattened optional. Same rule as
+      // `opt-uint32`.
+      const present = isPresent(raw);
+      const v = present ? asBigInt(raw, fld.wireKey) : 0n;
+      const word = encUintWord(v, 16, fld.wireKey);
+      return mkPlan(fld, v.toString(), numberFor(v, fld.wireKey), async () => word, !present);
     }
     case 'opt-uint32': {
       // The value half of a flattened optional. Signs the uint32 value, or `0`

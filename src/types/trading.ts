@@ -69,6 +69,14 @@ export interface Order {
   /// `Cloid(u128)`). On the SIGNED wire this is the raw 128-bit integer, so it
   /// is a `bigint` here (NOT a hex string). Omit for no cloid — the encoder
   /// skips the key and the node fills `None`.
+  ///
+  /// A cloid names exactly ONE order. The node refuses a repeat with
+  /// `ORDER_DUPLICATE_CLOID`, and the rule applies per LEG: a `batchOrder`
+  /// dedups every leg that carries one, and two legs of ONE action that share a
+  /// cloid refuse the WHOLE action (`duplicate cloid within one action`) — the
+  /// action is one signature on one nonce, so no leg is admitted. An attempt
+  /// the COMMIT refused gives its cloid back, so a re-signed retry may reuse it.
+  /// NOT LIVE YET: the per-leg rule ships with the next node release.
   cloid?: bigint;
   /// Reduce-only flag (matches `OrderParams.reduce_only: bool`). The node
   /// requires this field on the signed wire (no serde default). Omit to default
@@ -390,8 +398,11 @@ export interface ScaleOrder {
   position_side?: NativePositionSide;
   /// The ladder handle — `0x`-hex 32-char (16-byte) client order id, REQUIRED.
   /// Every rung carries it; `cancelScale` sweeps the group by it. Use a fresh
-  /// `0x5c`-tagged handle per ladder (the group-cancel joins any resting order
-  /// that reuses the cloid).
+  /// `0x5c`-tagged handle per ladder.
+  ///
+  /// The handle is RESERVED. A later single order that reuses it is refused
+  /// with `ORDER_DUPLICATE_CLOID` at admission; it no longer joins the group.
+  /// NOT LIVE YET: the refusal ships with the next node release.
   cloid: string;
 }
 
@@ -522,6 +533,19 @@ export type OrderStatus =
   /// never on `reason`. NOT LIVE YET: it ships with the next node release, and
   /// until then the same outcome arrives as `error`.
   | { noop: { reason: string } }
+  /// A TP/SL or stop leg ACCEPTED and PARKED. It holds a real `oid` and is an
+  /// open order, but it never rests on the book, so it carries no depth and
+  /// `l2_book` does not show it. The chain fires it when the mark crosses its
+  /// trigger price.
+  ///
+  /// **This is a SUCCESS. Do not retry it.** Cancel it by its `oid`
+  /// (`cancelOrder`) or by its `cloid` (`cancelByCloid`) — both reach a parked
+  /// leg. A `positionTpsl` group places no book order at all, so `parked`
+  /// entries are its WHOLE answer; the array is longer than it was, because a
+  /// parked leg used to be left out of `statuses` entirely.
+  ///
+  /// NOT LIVE YET: it ships with the next node release.
+  | { parked: { oid: string; cloid?: string } }
   /// Admitted, but no commit observed within the wait window — track via
   /// `/info` / WS. NOT a fabricated oid.
   | { pending: { action_hash: string; nonce: number } }
@@ -662,6 +686,16 @@ export type ApiErrorCode =
   | 'NOT_FOUND'
   | 'ACTION_UNSUPPORTED'
   | 'PRECONDITION_FAILED'
+  /// The block builder dropped the action: this account already used the nonce,
+  /// or the nonce sits more than 64 below the newest one it committed. Nothing
+  /// committed. It arrives at HTTP 200, because it is a commit verdict and not
+  /// an admission refusal — on an order action inside `statuses[0].error`, on
+  /// every other action as the top-level `error`.
+  ///
+  /// **Do not retry the same nonce.** Re-sign above the account's newest.
+  /// NOT LIVE YET: it ships with the next node release, and until then the same
+  /// action times out with no verdict.
+  | 'NONCE_REPLAYED'
   | 'INTERNAL'
   | 'UNAVAILABLE'
   | (string & {});

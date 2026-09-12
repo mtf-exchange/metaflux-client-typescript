@@ -136,9 +136,14 @@ const VECTORS: Vector[] = [
   },
   {
     actionType: 'vault_modify',
-    payload: { vault_id: 42, new_name: 'renamed-vault' },
+    payload: {
+      vault_id: 42,
+      new_name: 'renamed-vault',
+      new_management_fee_bps: 250,
+      new_paused: true,
+    },
     nonce: 17n,
-    digest: '28eea2c131a8e72a1948b49cf42072aadffea8301c78b86272dc00cca9f3786f',
+    digest: '0eb6b7d3a72e593968d57ded92ce53ed85c8a7e5d98dacc86c9b1fdfa61b80d4',
   },
   {
     actionType: 'spot_margin_close',
@@ -1033,6 +1038,64 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(fields.find((t) => t.name === 'value')?.type).toBe('string');
     // The same value string appears verbatim in the POST action JSON.
     expect(built.actionJson.includes('"value":"abstraction-value"')).toBe(true);
+  });
+
+  // The digest pin above cannot say WHICH field moved if it drifts. These two
+  // assertions name it: the type string is copied from the node's
+  // `VAULT_MODIFY_TYPE`, and the wire rule is that an absent optional signs its
+  // presence flag `false` and is omitted from the POST params.
+  it('vault_modify: the type string matches the node and every applied field is bound', async () => {
+    const { buildTyped, encodeType, typedActionDigest, typedDataV4 } = await import(
+      '../src/native/typed.js'
+    );
+    expect(encodeType('vault_modify')).toBe(
+      'MetaFluxTransaction:VaultModify(string metafluxChain,uint64 vaultId,string newName,' +
+        'bool hasNewLockPeriodSecs,uint64 newLockPeriodSecs,bool hasNewManagementFeeBps,' +
+        'uint16 newManagementFeeBps,bool hasNewPaused,bool newPaused,uint64 nonce)',
+    );
+
+    const full = buildTyped(
+      'vault_modify',
+      { vault_id: 42, new_name: 'renamed', new_management_fee_bps: 250, new_paused: true },
+      17n,
+      CHAIN_ID,
+    );
+    expect(JSON.parse(full.actionJson)).toEqual({
+      type: 'vault_modify',
+      params: {
+        vault_id: 42,
+        new_name: 'renamed',
+        new_management_fee_bps: 250,
+        new_paused: true,
+      },
+    });
+    const msg = typedDataV4(full).message;
+    expect(msg.hasNewManagementFeeBps).toBe(true);
+    expect(msg.newManagementFeeBps).toBe(250);
+    expect(msg.hasNewPaused).toBe(true);
+    expect(msg.newPaused).toBe(true);
+    expect(msg.hasNewLockPeriodSecs).toBe(false);
+    expect(msg.newLockPeriodSecs).toBe(0);
+
+    // Absent everywhere: the params carry the vault id alone, and the name
+    // signs the empty-string sentinel without being written to the wire.
+    const bare = buildTyped('vault_modify', { vault_id: 42 }, 17n, CHAIN_ID);
+    expect(JSON.parse(bare.actionJson)).toEqual({
+      type: 'vault_modify',
+      params: { vault_id: 42 },
+    });
+    expect(typedDataV4(bare).message.newName).toBe('');
+
+    // A fee the caller never sent must not share a digest with a fee of 0.
+    const zeroFee = buildTyped(
+      'vault_modify',
+      { vault_id: 42, new_management_fee_bps: 0 },
+      17n,
+      CHAIN_ID,
+    );
+    expect(toHex(await typedActionDigest(zeroFee))).not.toBe(
+      toHex(await typedActionDigest(bare)),
+    );
   });
 
   it('decimal delta/shares/borrow ride verbatim into the POST action', async () => {

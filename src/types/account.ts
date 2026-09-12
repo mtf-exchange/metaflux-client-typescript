@@ -7,6 +7,11 @@
 
 /// `update_leverage` — set the per-asset leverage (and optionally flip to
 /// isolated margin).
+///
+/// An `asset` that names no listed perp market is refused with
+/// `PRECONDITION_FAILED` / `no perp market for asset`. It used to write a
+/// permanent leverage row for a market that does not exist. NOT LIVE YET: the
+/// refusal ships with the next node release.
 export interface UpdateLeverage {
   /// Target asset / market id (`u32`).
   asset: number;
@@ -24,7 +29,14 @@ export interface UpdateIsolatedMargin {
   delta: string;
 }
 
-/// `top_up_isolated_only_margin` — top up a strict-isolated-only position.
+/// `top_up_isolated_only_margin` — add margin to an open ISOLATED position.
+///
+/// It takes margin mode isolated OR strict-isolated. A CROSS position is
+/// refused with `PRECONDITION_FAILED` / `no isolated position`. On a
+/// strict-isolated position this is the only margin action available, because
+/// [`UpdateIsolatedMargin`] refuses a withdrawal there; on a plain isolated
+/// position it is the add-only half of [`UpdateIsolatedMargin`]. Earlier docs
+/// called it strict-isolated-only; that was wrong.
 export interface TopUpIsolatedOnlyMargin {
   /// Target asset / market id (`u32`).
   asset: number;
@@ -117,8 +129,17 @@ export interface UserSetAbstraction {
   value: string;
 }
 
-/// `agent_set_abstraction` — an approved agent sets an abstraction config value
-/// for `user`. The node verifies the signer is an approved agent of `user`.
+/// `agent_set_abstraction` — **NOT AVAILABLE.**
+///
+/// @deprecated The node refuses every call with `PRECONDITION_FAILED` and the
+/// message `agentSetAbstraction is not available; the account owner must sign
+/// userSetAbstraction`. That holds whatever the sender, the target account or
+/// the `kind`, and whether or not the sender is an approved agent of `user`.
+/// An approved agent holds TRADING authority only; the abstraction mode moves
+/// the account's spot wallet into its perp wallet and can block the owner's own
+/// later orders, so the owner signs [`UserSetAbstraction`] from the master key.
+/// The action stays on the wire and keeps its type and its id; it never
+/// succeeds. NOT LIVE YET: the refusal ships with the next node release.
 export interface AgentSetAbstraction {
   /// `0x`-hex 20-byte account whose config the agent is updating.
   user: string;
@@ -172,12 +193,21 @@ export interface SubAccountSpotTransfer {
 }
 
 /// `c_deposit` — move spot MTF into the free staking balance.
+///
+/// `amount` must be a whole multiple of the token's wei quantum. MTF declares 8
+/// `wei_decimals`, so `"0.00000001"` is accepted and `"0.000000001"` is refused
+/// with `INVALID_REQUEST` / `amount is finer than the token's wei_decimals`.
+/// Trailing zeros do not count: `"1.000000000"` is on an 8-decimal grid.
+/// Sub-wei amounts used to commit and leave dust no ledger row could render.
+/// NOT LIVE YET: the refusal ships with the next node release.
 export interface CDeposit {
   /// Amount of MTF to move (positive), as a canonical decimal string.
   amount: string;
 }
 
 /// `c_withdraw` — move the free staking balance back to spot MTF.
+///
+/// Same wei-precision rule as [`CDeposit`].
 export interface CWithdraw {
   /// Amount of MTF to move (positive), as a canonical decimal string.
   amount: string;
