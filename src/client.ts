@@ -335,6 +335,16 @@ export class Client {
   /// owner and the node routes the order under the owner. Absent, the signer
   /// trades for itself. Either way the signer is not cross-checked locally — an
   /// agent key is not the owner.
+  ///
+  /// NOT LIVE YET: with the next node release after 0.9.7, an order your
+  /// balance cannot fund at all is refused with `insufficient spot balance`,
+  /// and no order id is burned. The refusal is about money, not liquidity: a
+  /// funded order that finds no counterparty still answers `filled` with
+  /// `total_sz: "0"`. One exception stays an accepted no-op: a market buy that
+  /// holds quote, when the pair carries no FOREIGN ask (an ask from another
+  /// account). A foreign ask your quote cannot buy one lot of is a refusal, not
+  /// a no-op. Node 0.9.7 accepts an entirely unaffordable order as a no-op and
+  /// answers `filled` with `total_sz: "0"`.
   async submitSpotOrderNative(
     order: NativeSpotOrder,
     opts: TradeOpts = {},

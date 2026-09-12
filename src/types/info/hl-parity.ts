@@ -156,6 +156,12 @@ export interface ExchangeStatus {
 /// The `[buy, sell]` pairs: `available_to_trade` is the per-side NOTIONAL
 /// still openable given free collateral × leverage (whole-USDC), and
 /// `max_trade_szs` the same budget converted to base-unit SIZE at the mark.
+///
+/// A pooled `standard` account (`AccountState.split === false`) is capped by its
+/// `perp` reservation as well. On a split account the free collateral is the
+/// perp wallet's, with no cap. NOT LIVE YET for a split account: node 0.9.7
+/// still caps both figures by the `perp` reservation, so a split account that
+/// reserved nothing reads `['0', '0']` on a funded perp wallet.
 export interface ActiveAssetData {
   /// Echo of the requested 0x address.
   address: string;

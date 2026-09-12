@@ -12,6 +12,16 @@ import type { U64Input } from '../native/digest.js';
 /// `reduce_only` / `position_side`. All three time-in-force values work: `ioc`
 /// drops the residual, `gtc` and `alo` rest it with escrow.
 ///
+/// NOT LIVE YET: with the next node release after 0.9.7, an order your balance
+/// cannot fund at all is refused with `insufficient spot balance`, and no order
+/// id is burned. The refusal is about money, not liquidity: a funded order that
+/// finds no counterparty still answers `filled` with `total_sz: "0"`. One
+/// exception stays an accepted no-op: a market buy that holds quote, when the
+/// pair carries no FOREIGN ask (an ask from another account). A foreign ask
+/// your quote cannot buy one lot of is a refusal, not a no-op. Node 0.9.7
+/// accepts an entirely unaffordable order as a no-op and answers `filled` with
+/// `total_sz: "0"`.
+///
 /// Field ORDER is load-bearing for the signed bytes (see `buildNativeSpotOrderAction`).
 export interface NativeSpotOrder {
   /// Optional agent-resolved owner (`0x`-hex). With `owner` set, an APPROVED

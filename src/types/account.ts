@@ -83,14 +83,31 @@ export interface ConvertToMultiSigUser {
 /// `user_set_abstraction` — set the account's margin mode, or a per-product
 /// reservation.
 ///
+/// `standard` mode keeps two USDC wallets: a perp wallet and a spot wallet.
+/// `usdClassTransfer` moves USDC between them. A mode change needs a flat
+/// account.
+///
+/// Reservations (`kind` 1, 2 and 3) apply only to a POOLED `standard` account:
+/// one that entered the mode before block 5,710,001 on testnet and keeps one
+/// USDC balance.
+///
 /// A reservation is a ceiling on ENCUMBRANCE, not on spending: it caps what a
 /// product may have committed at one time (perp margin, an option writer's
 /// escrow, a spot-margin borrow). An option premium and a plain spot buy are
-/// conversions, so no reservation bounds them.
+/// conversions, so no reservation bounds them. A pooled account with no
+/// reservations admits nothing, because every ceiling starts at zero. A
+/// reservation change does not need a flat account, and lowering one is always
+/// allowed.
 ///
-/// Entering `standard` mode with no reservations admits nothing — every ceiling
-/// starts at zero. A mode change needs a flat account; a reservation change does
-/// not, and lowering one is always allowed.
+/// NOT LIVE YET: with the next node release after 0.9.7, a split account
+/// (`AccountState.split === true`) is refused `kind` 1, 2 and 3 at every
+/// `value`, `'0'` included — `a split standard account has no reservations`.
+/// Its perp and option orders then use the perp wallet's free collateral, with
+/// no cap. Node 0.9.7 still binds a split account by the `perp` and `option`
+/// reservations wherever they cap ENCUMBRANCE: it admits no perp order and no
+/// option WRITE until one is set. An option BUY is a conversion, so the perp
+/// wallet funds it and 0.9.7 admits it. 0.9.7 refuses only a nonzero `kind: 2`,
+/// with `spot has its own wallet in standard mode; no spot reservation`.
 export interface UserSetAbstraction {
   /// `0` sets the mode; `1` perp, `2` spot, `3` option reservation. Anything
   /// else is rejected.

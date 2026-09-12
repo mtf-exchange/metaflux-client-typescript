@@ -24,8 +24,11 @@ export type Tier = 'Safe' | 'T0' | 'T1' | 'T2' | 'T3';
 export type MarginMode = 'cross' | 'isolated' | 'strict_iso';
 
 /// Account margin abstraction class: `"unified"` (default cross-collateral
-/// account), `"standard"` (per-product reservations, set with
-/// `user_set_abstraction`) or `"portfolio"` (portfolio-margin enrolled).
+/// account), `"standard"` (two USDC wallets, a perp wallet and a spot wallet;
+/// set with `user_set_abstraction`) or `"portfolio"` (portfolio-margin
+/// enrolled). A `standard` account that entered before block 5,710,001 on
+/// testnet keeps one pooled balance and per-product reservations;
+/// `AccountState.split` tells the two apart.
 /// Replaces the old account-level `pm_enabled` boolean — derive PM enrollment as
 /// `abstraction === 'portfolio'`.
 export type Abstraction = 'unified' | 'standard' | 'portfolio';
@@ -104,6 +107,11 @@ export interface DexPositions {
 /// `total - hold` is NOT the spendable amount. `hold` counts spot order escrow
 /// only: USDC that margins an open perpetual position stays in `total` and
 /// never enters `hold`. Read `AccountState.withdrawable` for the budget.
+///
+/// A split `standard` account (`AccountState.split === true`) is the exception.
+/// Its USDC row is the spot wallet alone and holds no perp margin, so
+/// `total - hold` IS what a spot order may spend. `withdrawable` is the perp
+/// wallet there, not the spot budget.
 export interface TokenBalance {
   /// Token symbol (e.g. `"USDC"`).
   name: string;
@@ -204,7 +212,8 @@ export interface AccountOptionLane {
   next_expiry?: number;
 }
 
-/// One scope's row of the `standard`-mode reservation ledger.
+/// One scope's row of the reservation ledger of a pooled `standard` account
+/// (`AccountState.split === false`).
 ///
 /// Served from the release AFTER 0.9.6. A 0.9.6 node omits the ledger, so
 /// `AccountState.reservations` is `undefined` against such a node in every mode
@@ -212,9 +221,9 @@ export interface AccountOptionLane {
 export interface ProductReservation {
   /// The cap the owner set for this scope, whole-USDC decimal string.
   ///
-  /// A scope the owner never set reads `'0'`, and in `standard` mode `0` admits
-  /// NOTHING. The mode is fail-closed: a fresh `standard` account trades
-  /// nothing until it allocates.
+  /// A scope the owner never set reads `'0'`, and `0` admits NOTHING. The
+  /// ledger is fail-closed: a pooled account trades nothing in a scope until it
+  /// allocates.
   reserved: string;
   /// USDC this scope encumbers RIGHT NOW, whole-USDC decimal string: cross plus
   /// isolated perp initial margin, spot-margin initial margin, or option
@@ -230,7 +239,7 @@ export interface ProductReservation {
   available: string;
 }
 
-/// The per-product reservation ledger of a `standard`-mode account.
+/// The per-product reservation ledger of a pooled `standard` account.
 ///
 /// The three keys are reservation SCOPES, not markets. `spot` covers spot AND
 /// spot margin — one reservation binds both — so it is WIDER than the `spot` of
@@ -259,6 +268,10 @@ export interface Reservations {
 /// it. `pm_net_value` is the same case: it reads like a perp figure and is a
 /// WHOLE-ACCOUNT one, which is why it sits at the top level.
 ///
+/// A split `standard` account is the one exception: its two USDC wallets hold
+/// different money, so `account_value` plus the USDC row of `spot.balances` is
+/// the account total. See `split`.
+///
 /// Every lane key is ALWAYS present, zeroed when the lane is empty, so
 /// `state.perp.init_margin` needs no guard. The one exception is
 /// `option.next_expiry`, which is absent when the option lane is empty.
@@ -275,6 +288,9 @@ export interface AccountState {
   /// Echo of the requested 0x address.
   address: string;
   /// Equity including unrealised PnL, whole-USDC decimal string. CROSS-LANE.
+  ///
+  /// Split `standard` account: the PERP wallet only. The spot wallet is the
+  /// USDC row of `spot.balances`; add the two for the account total.
   account_value: string;
   /// Settled cash equity, whole-USDC decimal string. It EXCLUDES unrealised
   /// PnL, so a mark move alone never moves it. `account_value` is the same
@@ -287,6 +303,8 @@ export interface AccountState {
   /// margin is funded by open profit reads `'0'` — that means "nothing to
   /// withdraw", not "broke". The chain's admission gate uses the raw signed
   /// figure, which can go negative; this read never does.
+  ///
+  /// Split `standard` account: the perp wallet only.
   withdrawable: string;
   /// `account_value - cross_maintenance_margin_used` (signed decimal string).
   /// Read the maintenance margin itself with `detail: "margin"`.
@@ -302,23 +320,30 @@ export interface AccountState {
   /// Margin abstraction class (`abstraction === 'portfolio'` = PM enrolled).
   abstraction: Abstraction;
   /// The per-product reservation ledger. Present ONLY when `abstraction` is
-  /// `'standard'` — the other two modes have no ledger, because
-  /// `userSetAbstraction` clears the reservations on the way back to `unified`
-  /// and refuses to set one in any other mode. Branch on `abstraction`.
+  /// `'standard'` AND `split` is `false`: a pooled account that entered
+  /// `standard` before block 5,710,001 on testnet. The other two modes have no
+  /// ledger, because `userSetAbstraction` clears the reservations on the way
+  /// back to `unified` and refuses to set one in any other mode. A split
+  /// account has no reservations. Branch on `abstraction` and `split`.
   ///
-  /// Served from the release AFTER 0.9.6, so a 0.9.6 node leaves it
+  /// NOT LIVE YET: the key goes absent on a split account with the next node
+  /// release after 0.9.7. Node 0.9.7 still serves the ledger there, with a
+  /// `spot` row that reads the spot wallet. A 0.9.6 node leaves the key
   /// `undefined` in every mode.
-  ///
-  /// A split `standard` account (node 0.9.7 and later) has its own spot wallet,
-  /// so its `spot` row reads `reserved: "0"` and `available` is that wallet. A
-  /// `standard` account that entered before the split keeps the pooled row
-  /// until it re-enters the mode.
   reservations?: Reservations;
   /// Present ONLY when `abstraction` is `'standard'`. `true` = the account
-  /// holds two USDC wallets (it entered `standard` under the live split gate);
-  /// `false` = one pooled balance, the posture of an account that entered
-  /// before the arm. Read it before you interpret `reservations.spot`.
-  /// Served from node 0.9.7; an older node leaves it `undefined`.
+  /// holds two USDC wallets (it entered `standard` at or after block
+  /// 5,710,001 on testnet); `false` = one pooled balance (it entered before
+  /// that block). Served from node 0.9.7; an older node leaves it `undefined`.
+  ///
+  /// When `true`:
+  /// - `account_value` and `withdrawable` are the PERP wallet. Perp orders,
+  ///   option orders and withdrawals use it.
+  /// - The USDC row of `spot.balances` is the SPOT wallet, and its `total`
+  ///   includes `hold`. Spot orders use it.
+  /// - The account total is `account_value` plus that row's `total`. This sum
+  ///   does not double-count: the two wallets hold different USDC.
+  /// - `reservations` is absent — NOT LIVE YET, see that field.
   split?: boolean;
   /// Portfolio-margin net account value, whole-USDC decimal string. Always
   /// present — `"0"` when the account is not PM-enrolled.
