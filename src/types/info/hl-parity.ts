@@ -159,9 +159,7 @@ export interface ExchangeStatus {
 ///
 /// A pooled `standard` account (`AccountState.split === false`) is capped by its
 /// `perp` reservation as well. On a split account the free collateral is the
-/// perp wallet's, with no cap. NOT LIVE YET for a split account: node 0.9.7
-/// still caps both figures by the `perp` reservation, so a split account that
-/// reserved nothing reads `['0', '0']` on a funded perp wallet.
+/// perp wallet's, with no cap.
 export interface ActiveAssetData {
   /// Echo of the requested 0x address.
   address: string;

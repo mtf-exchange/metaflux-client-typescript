@@ -333,15 +333,13 @@ export class Client {
   /// trades for itself. Either way the signer is not cross-checked locally — an
   /// agent key is not the owner.
   ///
-  /// NOT LIVE YET: with the next node release after 0.9.7, an order your
-  /// balance cannot fund at all is refused with `insufficient spot balance`,
-  /// and no order id is burned. The refusal is about money, not liquidity: a
-  /// funded order that finds no counterparty still answers `filled` with
-  /// `total_sz: "0"`. One exception stays an accepted no-op: a market buy that
-  /// holds quote, when the pair carries no FOREIGN ask (an ask from another
-  /// account). A foreign ask your quote cannot buy one lot of is a refusal, not
-  /// a no-op. Node 0.9.7 accepts an entirely unaffordable order as a no-op and
-  /// answers `filled` with `total_sz: "0"`.
+  /// An order your balance cannot fund at all is refused with `insufficient
+  /// spot balance`, and no order id is burned. The refusal is about money, not
+  /// liquidity: a funded order that finds no counterparty still answers
+  /// `filled` with `total_sz: "0"`. One exception is an accepted no-op: a
+  /// market buy that holds quote, when the pair carries no FOREIGN ask (an ask
+  /// from another account). A foreign ask your quote cannot buy one lot of is a
+  /// refusal, not a no-op.
   async submitSpotOrderNative(
     order: NativeSpotOrder,
     opts: TradeOpts = {},
@@ -609,8 +607,8 @@ export class Client {
   /// SENDER-AUTHORIZED (the digest binds the optional agent-resolved
   /// `params.owner` when present — the signer is then the approved agent, so no
   /// owner cross-check). Availability is gated: the node rejects the action
-  /// until the `scale_order` feature is armed. `params.market` is a PERP market
-  /// today — see [`ScaleOrder`] for the spot lane that is not live yet.
+  /// until the `scale_order` feature is armed. `params.market` takes a PERP
+  /// market or a SPOT pair — see [`ScaleOrder`] for the spot rules.
   async placeScale(
     params: ScaleOrder,
     opts: TradeOpts = {},
@@ -647,8 +645,8 @@ export class Client {
   /// channel: track the Leg on `open_orders` / `order_updates` by `cloid`, and
   /// keep the `chase_oid` from the ack (`statuses[0].chase.chase_oid`) for
   /// [`cancelChase`]. SENDER-AUTHORIZED (the digest binds the optional
-  /// agent-resolved `params.owner` when present). `params.market` is a PERP
-  /// market today — see [`ChaseOrder`] for the spot lane that is not live yet.
+  /// agent-resolved `params.owner` when present). `params.market` takes a PERP
+  /// market or a SPOT pair — see [`ChaseOrder`] for the spot rules.
   async placeChase(
     params: ChaseOrder,
     opts: TradeOpts = {},
@@ -704,10 +702,9 @@ export class Client {
 
   // ── TWAP ──────────────────────────────────────
 
-  /// Submit a sliced (TWAP) order via `POST /exchange`. `params.market` is a
-  /// PERP market today — see [`TwapOrder`] for the spot lane that is not live
-  /// yet. A HEDGE account is refused at commit unless the parent carries
-  /// `position_side`.
+  /// Submit a sliced (TWAP) order via `POST /exchange`. `params.market` takes a
+  /// PERP market or a SPOT pair — see [`TwapOrder`] for the spot rules. A HEDGE
+  /// account is refused at commit unless the parent carries `position_side`.
   async twapOrder(
     params: TwapOrder,
     opts: TradeOpts = {},
@@ -1057,10 +1054,7 @@ export class Client {
   /// presence flag plus its value, so an absent key and a key sent as `0` are
   /// different digests — one signature covers exactly one wire form.
   ///
-  /// **BREAKING:** the type string gained six fields. A signature made with the
-  /// old four-field type is refused. **NOT LIVE YET:** the new type ships with
-  /// the next node release; until that release the live node still verifies the
-  /// four-field form.
+  /// The node refuses a signature made with the older four-field type string.
   async vaultModify(
     params: VaultModify,
     opts: { nonce?: bigint; chainId?: number } = {},
@@ -1454,8 +1448,8 @@ export class Client {
   }
 
   /// Move USD notional between the spot and perp classes (`usd_class_transfer`,
-  /// typed scheme). Accepted only by a split `standard` account (node 0.9.7 and
-  /// later); every other account holds ONE USDC balance and is refused.
+  /// typed scheme). Accepted only by a split `standard` account; every other
+  /// account holds ONE USDC balance and is refused.
   async usdClassTransfer(
     params: UsdClassTransfer,
     opts: { nonce?: bigint; chainId?: number } = {},
@@ -1781,10 +1775,6 @@ export class Client {
   // All nine are sender-authorized: the recovered signer IS the deployer or one
   // of its sub-deployers. None carries a `bid` — the legacy gas-auction lane is
   // dead and the handler rejects a non-zero bid.
-  //
-  // NOT LIVE YET. The nine tags landed in the node but that binary is not
-  // released, so the live chain refuses every one of them today. They start
-  // working at the activation height of the release that carries them.
 
   /// Allocate a fresh MIP-3 perp market (`perp_register_asset`). The signer
   /// becomes its deployer. `decimals` of `0` reads as the handler default of 8.

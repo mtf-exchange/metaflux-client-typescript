@@ -325,16 +325,11 @@ export interface AccountState {
   /// ledger, because `userSetAbstraction` clears the reservations on the way
   /// back to `unified` and refuses to set one in any other mode. A split
   /// account has no reservations. Branch on `abstraction` and `split`.
-  ///
-  /// NOT LIVE YET: the key goes absent on a split account with the next node
-  /// release after 0.9.7. Node 0.9.7 still serves the ledger there, with a
-  /// `spot` row that reads the spot wallet. A 0.9.6 node leaves the key
-  /// `undefined` in every mode.
   reservations?: Reservations;
   /// Present ONLY when `abstraction` is `'standard'`. `true` = the account
   /// holds two USDC wallets (it entered `standard` at or after block
   /// 5,710,001 on testnet); `false` = one pooled balance (it entered before
-  /// that block). Served from node 0.9.7; an older node leaves it `undefined`.
+  /// that block).
   ///
   /// When `true`:
   /// - `account_value` and `withdrawable` are the PERP wallet. Perp orders,
@@ -343,7 +338,7 @@ export interface AccountState {
   ///   includes `hold`. Spot orders use it.
   /// - The account total is `account_value` plus that row's `total`. This sum
   ///   does not double-count: the two wallets hold different USDC.
-  /// - `reservations` is absent — NOT LIVE YET, see that field.
+  /// - `reservations` is absent.
   split?: boolean;
   /// Portfolio-margin net account value, whole-USDC decimal string. Always
   /// present — `"0"` when the account is not PM-enrolled.
@@ -578,8 +573,7 @@ export interface MarketStatic {
   /// The governance risk override in force on this market.
   ///
   /// `null` means NO override exists. An OBJECT with every field absent means
-  /// an override record exists and overrides nothing — a different fact, and
-  /// the one that used to be invisible.
+  /// an override record exists and overrides nothing — a different fact.
   risk_override?: RiskOverride | null;
 }
 

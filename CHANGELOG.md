@@ -4,10 +4,11 @@ All notable changes to the TypeScript SDK are documented here.
 
 ## [0.29.0] - 2026-09-12
 
-Everything below is NOT LIVE YET. It ships with the next node release. Until
-that release the live chain still answers the old way, and `vaultModify` must
-still be signed with the old type. The doc comments carry the same notice per
-item.
+**This shape is LIVE since 2026-09-16.** An earlier copy of this entry said the
+opposite: that nothing below was live, and that `vaultModify` must still be
+signed with the old type. That was true when it was written and stopped being
+true when the chain swapped to node release 0.9.10. It is corrected here rather
+than left to instruct a caller to build a digest the live node now refuses.
 
 ### Breaking
 

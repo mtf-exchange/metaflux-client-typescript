@@ -407,8 +407,7 @@ export type {
   SpotSeedHolders,
   SpotFinalizeSupply,
   RegisterMetaliquidityOperator,
-  // MIP-3 permissionless perp-deployer lane. Landed in the node, NOT yet
-  // released: the live chain refuses all nine tags until the swap height.
+  // MIP-3 permissionless perp-deployer lane.
   PerpRegisterAsset,
   PerpSetOracle,
   PerpSetLeverage,

@@ -37,7 +37,6 @@ export interface FaucetResponse {
 /// address once, ever. `amount: 1` takes 1 USDC and forfeits the other 2999.
 /// The MTF grant is fixed at 10 and `amount` never scales it, so that lane
 /// always pays in full and then closes. Omit `amount` to take the full grant.
-/// NOT LIVE YET — read the 429 note below for what the live chain does today.
 ///
 /// `faucetBaseUrl` is the faucet's OWN origin (e.g. `http://localhost:8080`
 /// on devnet, `https://api.testnet.mtf.exchange/faucet` in production) — NOT the
@@ -57,12 +56,6 @@ export interface FaucetResponse {
 /// faucet node restarts, and a release restarts it — so read it as a speed
 /// bump, not as an anti-sybil control. The per-address rule and the reserve
 /// balance bound the payout.
-///
-/// NOT LIVE YET. Both rules take the form above with the next node release.
-/// Today the live chain allows one grant per IP per MINUTE. It also lets an
-/// address that claimed a partial `amount` claim again after the faucet node
-/// restarts, because the old per-address rule counts VALUE against a cap.
-/// Build against the rules above; do not depend on the live behaviour.
 export async function requestFaucet(
   faucetBaseUrl: string,
   address: string,

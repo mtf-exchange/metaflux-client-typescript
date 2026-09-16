@@ -9,9 +9,7 @@
 /// isolated margin).
 ///
 /// An `asset` that names no listed perp market is refused with
-/// `PRECONDITION_FAILED` / `no perp market for asset`. It used to write a
-/// permanent leverage row for a market that does not exist. NOT LIVE YET: the
-/// refusal ships with the next node release.
+/// `PRECONDITION_FAILED` / `no perp market for asset`.
 export interface UpdateLeverage {
   /// Target asset / market id (`u32`).
   asset: number;
@@ -111,15 +109,10 @@ export interface ConvertToMultiSigUser {
 /// reservation change does not need a flat account, and lowering one is always
 /// allowed.
 ///
-/// NOT LIVE YET: with the next node release after 0.9.7, a split account
-/// (`AccountState.split === true`) is refused `kind` 1, 2 and 3 at every
-/// `value`, `'0'` included — `a split standard account has no reservations`.
-/// Its perp and option orders then use the perp wallet's free collateral, with
-/// no cap. Node 0.9.7 still binds a split account by the `perp` and `option`
-/// reservations wherever they cap ENCUMBRANCE: it admits no perp order and no
-/// option WRITE until one is set. An option BUY is a conversion, so the perp
-/// wallet funds it and 0.9.7 admits it. 0.9.7 refuses only a nonzero `kind: 2`,
-/// with `spot has its own wallet in standard mode; no spot reservation`.
+/// A split account (`AccountState.split === true`) is refused `kind` 1, 2 and 3
+/// at every `value`, `'0'` included — `a split standard account has no
+/// reservations`. Its perp and option orders use the perp wallet's free
+/// collateral, with no cap.
 export interface UserSetAbstraction {
   /// `0` sets the mode; `1` perp, `2` spot, `3` option reservation. Anything
   /// else is rejected.
@@ -139,7 +132,7 @@ export interface UserSetAbstraction {
 /// the account's spot wallet into its perp wallet and can block the owner's own
 /// later orders, so the owner signs [`UserSetAbstraction`] from the master key.
 /// The action stays on the wire and keeps its type and its id; it never
-/// succeeds. NOT LIVE YET: the refusal ships with the next node release.
+/// succeeds.
 export interface AgentSetAbstraction {
   /// `0x`-hex 20-byte account whose config the agent is updating.
   user: string;
@@ -198,8 +191,6 @@ export interface SubAccountSpotTransfer {
 /// `wei_decimals`, so `"0.00000001"` is accepted and `"0.000000001"` is refused
 /// with `INVALID_REQUEST` / `amount is finer than the token's wei_decimals`.
 /// Trailing zeros do not count: `"1.000000000"` is on an 8-decimal grid.
-/// Sub-wei amounts used to commit and leave dust no ledger row could render.
-/// NOT LIVE YET: the refusal ships with the next node release.
 export interface CDeposit {
   /// Amount of MTF to move (positive), as a canonical decimal string.
   amount: string;

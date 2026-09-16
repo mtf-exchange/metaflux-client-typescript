@@ -183,10 +183,9 @@ export interface WsSubscription {
 /// or a coin that names no perp is refused with an `error` frame carrying
 /// `market not found`, and no subscription is created — the same refusal the
 /// REST read answers `404 MARKET_NOT_FOUND`. An unparseable `user` is refused
-/// as ``invalid `user` address``. There is no zeroed fallback snapshot any
-/// more. `coin` takes the market symbol; this channel also accepts the numeric
-/// asset id, which REST does not. NOT LIVE YET: the refusal ships with the next
-/// node release; until then a bad coin answers a zeroed body.
+/// as ``invalid `user` address``. There is no zeroed fallback snapshot. `coin`
+/// takes the market symbol; this channel also accepts the numeric asset id,
+/// which REST does not.
 export type ActiveAssetDataFrame =
   import("../types/info/index.js").ActiveAssetData;
 
@@ -299,12 +298,11 @@ export interface WsOrderUpdate {
   ///
   /// `noop` is a SUCCESS, not a rejection: a `reduce_only` order with nothing
   /// left to reduce. It placed nothing, carries a null `oid`, and must not be
-  /// retried. Not live yet — until the next node release the same outcome
-  /// arrives as `rejected`.
+  /// retried.
   ///
   /// `parked` is a TP/SL or stop leg registered off the book, awaiting its mark
   /// cross. It holds a real `oid`; `filled_sz`, `avg_px` and `reason` are all
-  /// `null`. Not live yet — it ships with the next node release.
+  /// `null`.
   status:
     | "open"
     | "filled"
@@ -415,10 +413,6 @@ export type WsNotificationKind =
 /// come from a committed-state diff; `action_dropped` comes from the commit
 /// loop. Each push is an array.
 ///
-/// **`action_dropped` IS NOT LIVE YET** — the node emits it from the next
-/// release. Until then a dropped action stays silent until your 5 s timeout,
-/// which is the defect it closes. The other kinds are live.
-///
 /// `kind` tags the record. Only `kind`, `message` and `time` are on every
 /// record; the rest depend on the kind.
 export interface WsNotification {
@@ -516,15 +510,13 @@ export interface WsLedgerUpdate {
   deposit?: boolean;
   /// `true` = the asset moves to the perp side (`asset_send` / `asset_receive`).
   to_perp?: boolean;
-  /// Perp market a `liquidation` record's forced close ran on. Not live yet.
+  /// Perp market a `liquidation` record's forced close ran on.
   market?: string;
   /// Forced-close cause on a `liquidation` record, e.g. `"forced_close_full"`.
-  /// Not live yet.
   cause?: string;
   /// Whole-USDC mark a `liquidation` slice was priced from; absent when the
   /// market had no usable mark. On a `liquidation` record `amount` is SIGNED
-  /// (negative on a loss) — the one signed exception on this channel. Not
-  /// live yet.
+  /// (negative on a loss) — the one signed exception on this channel.
   mark_px?: string;
 }
 
@@ -692,8 +684,7 @@ export interface WsFrame {
   /// The `candles` channel is the exception: read `data.snapshot` there.
   ///
   /// A subscribe answers exactly ONE `is_snapshot: true` frame. The only second
-  /// one is a re-snapshot after the feed reconnects. NOT LIVE YET: until the
-  /// next node release a subscribe can answer two.
+  /// one is a re-snapshot after the feed reconnects.
   is_snapshot?: boolean;
 }
 

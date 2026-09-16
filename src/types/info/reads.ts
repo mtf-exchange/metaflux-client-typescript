@@ -88,8 +88,7 @@ export interface OpenOrder {
   /// committed book does not retain it.
   orig_sz: string | null;
   /// Client order id (`0x`-hex), or `null` when the order carried none. A
-  /// PARKED trigger row carries it too, from the next node release on; it was
-  /// always `null` before.
+  /// PARKED trigger row carries it too.
   cloid: string | null;
   /// Time-in-force token, or `null` when unknown.
   tif: OrderTif | null;
@@ -586,8 +585,7 @@ export interface TriggerOrderStatus {
   /// Limit price for a limit trigger, normalized decimal string; `null` for a
   /// market trigger.
   limit_px: string | null;
-  /// Client order id (`0x`-hex), or `null` when the leg carried none. NOT LIVE
-  /// YET: the field ships with the next node release.
+  /// Client order id (`0x`-hex), or `null` when the leg carried none.
   cloid?: string | null;
   /// Scaled-TP/SL ladder handle — same rule as `OrderTrigger.group`. Absent
   /// unless this leg belongs to a ladder.
@@ -605,9 +603,8 @@ export interface TriggerOrderStatus {
 /// also resolves a PARKED leg straight from chain state, so it keeps resolving
 /// after a node restart.
 ///
-/// Two answers that used to read `unknown` are terminal from the next node
-/// release on: a SPOT order or scale rung that neither rests nor matches
-/// resolves `rejected` with the reason
+/// Two answers are terminal: a SPOT order or scale rung that neither rests nor
+/// matches resolves `rejected` with the reason
 /// `"Order could not immediately match against any resting orders."`, and a
 /// cancelled SPOT order resolves `canceled`.
 ///
@@ -669,7 +666,7 @@ export interface HistoricalOrder {
   /// executed in — so `"filled"` is not a terminal flag and `oid` repeats.
   /// Treat it as an open set: match the value, never assume the list is closed.
   /// `"noop"` is an ACCEPTED order that changed nothing; do not count it as a
-  /// rejection. Not live yet — it ships with the next node release.
+  /// rejection.
   status: string;
   /// Fill price, 8-dp tape decimal string.
   px: string;
@@ -773,13 +770,11 @@ export interface LedgerUpdate {
   coin: string;
   /// Event timestamp (consensus ms).
   time: number;
-  /// Event kind. Live today: `"deposit"`, `"withdraw"`, `"transfer"`,
-  /// `"liquidation"`. A VAULT deposit or withdrawal arrives as `"transfer"`.
-  ///
-  /// The next release adds `"staking_deposit"`, `"staking_withdraw"`,
-  /// `"delegate"`, `"undelegate"`, `"staking_reward"`, `"earn_deposit"` and
-  /// `"earn_withdraw"`. The type stays an open string, so a kind your build
-  /// predates must never throw.
+  /// Event kind: `"deposit"`, `"withdraw"`, `"transfer"`, `"liquidation"`,
+  /// `"staking_deposit"`, `"staking_withdraw"`, `"delegate"`, `"undelegate"`,
+  /// `"staking_reward"`, `"earn_deposit"` and `"earn_withdraw"`. A VAULT deposit
+  /// or withdrawal arrives as `"transfer"`. The type stays an open string, so a
+  /// kind your build predates must never throw.
   kind?: string;
   /// Signed balance delta, decimal string (money-movement rows). Signed from
   /// the side the holder could spend a moment earlier: `-` leaves that side.

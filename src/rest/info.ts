@@ -367,10 +367,7 @@ export class InfoApi {
   /// Use it on the recent window only: a window old enough to reach the deep
   /// archive returns those rows per-leg beside the folded ones.
   ///
-  /// NOT LIVE YET. A node without it does not reject the field — it IGNORES it
-  /// and answers the per-leg rows, so the call succeeds and the fold silently
-  /// did not happen. Detect it by the presence of `n`, never by the row count:
-  /// a folded response always carries `n`, and `n` is 1 for a lone fill.
+  /// A folded response always carries `n`, and `n` is 1 for a lone fill.
   async userFills(
     address: string,
     opts?: {
@@ -653,11 +650,6 @@ export class InfoApi {
   /// for the tier itself.
   ///
   /// Served by the historical archive, not by a validator.
-  ///
-  /// **NOT LIVE YET.** The archive serves this and the gateway routes it, but
-  /// neither is released — a live gateway answers `400 UNKNOWN_TYPE` until both
-  /// swap. This method ships ahead so you can build against the shape; a
-  /// rejection before that release is not a bug in your call.
   async userVolumeHistory(
     address: string,
     startTime?: number,
@@ -688,9 +680,6 @@ export class InfoApi {
   /// REQUEST KEY is `user` (0x hex), NOT `address`. Build an "Interest" view on
   /// this read: a second interest-charging lane joins its `borrows` array
   /// rather than getting its own query type.
-  ///
-  /// **NOT LIVE YET.** The node read is landed and unreleased; a live node
-  /// answers `unknown info type` until the next swap.
   async userInterest(user: string): Promise<UserInterest> {
     return this.post<UserInterest>({ type: "user_interest", user });
   }

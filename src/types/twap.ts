@@ -4,11 +4,10 @@
 // `delay_ms` apart. Sender-authorized (no `owner` field); `total_size` is in
 // fixed-point tick units like a perp order's `size`.
 //
-// PERP MARKETS ONLY TODAY. A spot pair id in `market` is refused at commit with
-// `no perp market for asset`. The spot lane is built and waits for an activation
-// height. Above it each slice is an Ioc through the spot order path, priced off
-// the base token's oracle mark rather than off the touch, and THREE fields are
-// REFUSED rather than dropped — the whole action is rejected:
+// `market` takes a PERP market or a SPOT pair. On a spot pair each slice is an
+// Ioc through the spot order path, priced off the base token's oracle mark
+// rather than off the touch, and THREE fields are REFUSED rather than dropped —
+// the whole action is rejected:
 //
 //   reduce_only: true  -> `spot has no position to reduce: reduce_only is not supported`
 //   position_side      -> `spot has no position side`
@@ -17,15 +16,13 @@
 // A slice with no reference mark PARKS (it does not fire and does not count); a
 // slice that fires and crosses nothing ADVANCES the schedule and fills nothing.
 // One live-parent budget covers perp and spot parents together, and `twap_cancel`
-// takes a spot parent's id unchanged. The wire shape does not change, so these
-// types need no new field.
+// takes a spot parent's id unchanged. The wire shape is the same on both lanes.
 
 import type { NativePositionSide, NativeSide } from './trading.js';
 
 /// `twap_order` — submit a sliced (TWAP) order.
 export interface TwapOrder {
-  /// Target market id (`u32`) — a PERP market today. A spot pair id is refused
-  /// until the spot lane activates (see the module doc).
+  /// Target market id (`u32`) — a PERP market or a SPOT pair (see the module doc).
   market: number;
   /// Side: `"bid"` (buy) or `"ask"` (sell).
   side: NativeSide;
