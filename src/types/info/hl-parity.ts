@@ -352,15 +352,20 @@ export interface PerpDexLimits {
   per_market_limits: PerpDexPerMarketLimits;
 }
 
-/// The per-market ceilings inside `PerpDexLimits`.
+/// The ceilings inside `PerpDexLimits`.
+///
+/// Named per-market, but one pair of values applies to every perp. The two
+/// open-interest ceilings are therefore in WHOLE UNITS of the base asset, not
+/// in lots: a lot is a different real quantity on each market. The chain
+/// converts each ceiling into a market's own size plane before applying it.
 export interface PerpDexPerMarketLimits {
-  /// Per-market open-interest cap, size base units as a decimal string.
+  /// Open-interest cap, whole units of the base asset as a decimal string.
   max_oi: string;
   /// Max leverage a deployed market may offer.
   max_leverage: number;
   /// Per-market taker-fee ceiling, decimal bps string.
   max_taker_fee_bps: string;
-  /// Per-market open-interest growth-rate cap, size base units per second.
+  /// Open-interest growth-rate cap, whole units of the base asset per second.
   max_oi_per_second: string;
 }
 
