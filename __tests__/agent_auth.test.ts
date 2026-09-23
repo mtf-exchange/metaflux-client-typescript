@@ -48,6 +48,7 @@ async function signerAddress(privKey: Uint8Array): Promise<string> {
 describe.skipIf(!wasmBuilt)('Client agent authorization', () => {
   let exchangeBodies: string[] = [];
   let infoBodies: string[] = [];
+  let exchangeReply = '';
   let agentsReply: () => { ok: boolean; status: number; body: string };
   let savedFetch: typeof globalThis.fetch;
 
@@ -90,6 +91,7 @@ describe.skipIf(!wasmBuilt)('Client agent authorization', () => {
   beforeEach(() => {
     exchangeBodies = [];
     infoBodies = [];
+    exchangeReply = '{"data":{"statuses":[]}}';
     agentsReply = () => approved([]);
     savedFetch = globalThis.fetch;
     // The WASM loader fetches pkg/*.wasm through this same global, so pass
@@ -102,7 +104,7 @@ describe.skipIf(!wasmBuilt)('Client agent authorization', () => {
           return {
             ok: true,
             status: 200,
-            text: async () => '{"data":{"statuses":[]}}',
+            text: async () => exchangeReply,
           } as Response;
         }
         if (target.includes('/info')) {
@@ -292,6 +294,29 @@ describe.skipIf(!wasmBuilt)('Client agent authorization', () => {
       c.batchCancel({ owner: master, cancels: [cancel(STRANGER)] }),
     ).rejects.toThrow(/batch_cancel item 0 owner .* is not the acting account/);
     expect(exchangeBodies.length).toBe(0);
+  });
+
+  it('batchCancel returns the per-leg statuses beside the summary', async () => {
+    const signer = await signerAddress(MASTER_PRIV);
+    const reply = {
+      accepted: true,
+      committed: true,
+      mempool_depth: 0,
+      nonce: 7,
+      action_hash: '0xab',
+      statuses: [
+        { canceled: { oid: '42' } },
+        { error: { code: 'ORDER_NOT_FOUND', message: 'precondition failed: order not found' } },
+      ],
+    };
+    exchangeReply = JSON.stringify({ data: reply });
+
+    const c = await client(MASTER_PRIV);
+    const ack = await c.batchCancel({ cancels: [cancel(signer), cancel(signer)] });
+
+    expect(ack).toEqual(reply);
+    const first = ack.statuses?.[0];
+    expect(first && 'canceled' in first ? first.canceled.oid : undefined).toBe('42');
   });
 
   it('takes the SIGNER as the actor when a batch names no owner', async () => {

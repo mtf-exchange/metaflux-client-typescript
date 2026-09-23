@@ -532,6 +532,9 @@ export type OrderStatus =
   /// leg. A `positionTpsl` group places no book order at all, so `parked`
   /// entries are its WHOLE answer.
   | { parked: { oid: string; cloid?: string } }
+  /// A `batch_cancel` leg that removed its order. A refused leg is an `error`
+  /// entry instead. Not sent until the next node release.
+  | { canceled: { oid: string } }
   /// Admitted, but no commit observed within the wait window — track via
   /// `/info` / WS. NOT a fabricated oid.
   | { pending: { action_hash: string; nonce: number } }
@@ -556,8 +559,12 @@ export type OrderStatus =
 ///   fail inside a `statuses` entry while the request as a whole succeeds.
 /// - **Every other action** carries the admission summary: `accepted` +
 ///   `mempool_depth` + `nonce` + `action_hash` + `committed`.
+/// - **A committed `batch_cancel`** carries the admission summary AND
+///   `statuses`, one entry per leg in request order: `canceled` or `error`.
+///   Not sent until the next node release.
 export interface NativeExchangeAck {
-  /// Per-order status union — present only for order-type actions.
+  /// Per-order status union — present for order-type actions and a committed
+  /// `batch_cancel`.
   statuses?: OrderStatus[];
   /// Whether the action was admitted to the mempool (admission summary; omitted
   /// on the order path).
