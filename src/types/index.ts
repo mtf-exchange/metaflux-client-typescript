@@ -98,6 +98,7 @@ export type {
   PerpSetFeeTier,
   PerpSetMakerRebate,
   PerpSetMinSize,
+  PerpSetOiCap,
   PerpActivateMarket,
   PerpDeactivateMarket,
   PerpSetSubDeployers,

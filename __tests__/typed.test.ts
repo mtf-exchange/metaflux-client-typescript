@@ -1,7 +1,7 @@
 // EIP-712 typed-action signing — cross-impl known-answer vectors + round-trips.
 //
 // Pins the TS typed-action digest to the SAME value the server commits to for
-// the 58 reachable actions (chain id 114514 / "Testnet"). If a digest drifts,
+// the 59 reachable actions (chain id 114514 / "Testnet"). If a digest drifts,
 // the TS SDK is signing something the server will not verify. Vectors mirror the
 // the chain's own cross-language vector set; the digest pins are the frozen contract.
 
@@ -399,7 +399,7 @@ const VECTORS: Vector[] = [
     nonce: 18n,
     digest: '3e5afde6b9f0d0b1c0b2f9f55234c62ca9487d8d46f990ae0593ff147dfc3bb5',
   },
-  // ---- The nine MIP-3 perp-deployer actions. Digests taken from the node's
+  // ---- The MIP-3 perp-deployer actions. Digests taken from the node's
   // own vector set (domain chain 114514), not
   // hand-derived. Asset 1001 is a MIP-3 id: the lane allocates at or above
   // 1000, and the chain's own perps sit below that.
@@ -440,6 +440,13 @@ const VECTORS: Vector[] = [
     nonce: 206n,
     digest: 'db58e1837626e4e08b8887e6055cf0fb35a7016d1b9efe6e1a0e0f4302dc131c',
   },
+  // NOT LIVE until the release after 2026-10-01. The cap is whole units.
+  {
+    actionType: 'perp_set_oi_cap',
+    payload: { asset: 1001, oi_cap_units: 250000 },
+    nonce: 211n,
+    digest: 'ebf3e4481721177291ff46a1fa8dad3c55246dc05575f38272088738da451915',
+  },
   {
     actionType: 'perp_activate_market',
     payload: { asset: 1001 },
@@ -466,7 +473,7 @@ const VECTORS: Vector[] = [
     nonce: 210n,
     digest: '236b8ff7a7c11b0a7cf1221d60815ca9df77a8273f8af963add190a93fa896b7',
   },
-  // The tenth MIP-3 deployer action: the repeating index-px push. The px is
+  // The one repeating MIP-3 deployer action: the index-px push. The px is
   // hashed VERBATIM, so this pin also fixes its SPELLING — a re-formatted
   // string is a different digest and an unsigned push.
   {
@@ -512,10 +519,10 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     }
   });
 
-  it('reproduces all 59 contract KAT digests byte-for-byte (chain 114514)', async () => {
+  it('reproduces all 61 contract KAT digests byte-for-byte (chain 114514)', async () => {
     const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
-    // 59 vectors, 58 actions: the two approve-fee keys share one digest pin.
-    expect(VECTORS.length).toBe(60);
+    // 61 vectors, 60 actions: the two approve-fee keys share one digest pin.
+    expect(VECTORS.length).toBe(61);
     for (const v of VECTORS) {
       const built = buildTyped(v.actionType, v.payload, v.nonce, CHAIN_ID);
       const digest = await typedActionDigest(built);
@@ -738,12 +745,12 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(toHex(base)).not.toBe(toHex(otherChain));
   });
 
-  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 68 reachable actions', async () => {
+  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 69 reachable actions', async () => {
     const { isTypedAction, TYPED_ACTION_TYPES } = await import('../src/native/typed.js');
-    // 70 keys, 68 actions. Two legacy keys share a spec with their canonical
+    // 71 keys, 69 actions. Two legacy keys share a spec with their canonical
     // name: `approve_builder_fee` with `approve_broker_fee`, and
     // `claim_builder_rewards` with `claim_broker_rewards`.
-    expect(TYPED_ACTION_TYPES.length).toBe(70);
+    expect(TYPED_ACTION_TYPES.length).toBe(71);
     for (const [legacy, canonical] of [
       ['approve_builder_fee', 'approve_broker_fee'],
       ['claim_builder_rewards', 'claim_broker_rewards'],
@@ -753,19 +760,20 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     }
     // `noop` (132) burns a nonce and does nothing else.
     expect(isTypedAction('noop')).toBe(true);
-    // MIP-3 perp deployer lane (9). Landed in the node, NOT yet released: the
-    // live chain refuses all nine until the swap height.
+    // MIP-3 perp deployer lane (11). `perp_set_oi_cap` is NOT LIVE until the
+    // release after 2026-10-01.
     expect(isTypedAction('perp_register_asset')).toBe(true);
     expect(isTypedAction('perp_set_oracle')).toBe(true);
     expect(isTypedAction('perp_set_leverage')).toBe(true);
     expect(isTypedAction('perp_set_fee_tier')).toBe(true);
     expect(isTypedAction('perp_set_maker_rebate')).toBe(true);
     expect(isTypedAction('perp_set_min_size')).toBe(true);
+    expect(isTypedAction('perp_set_oi_cap')).toBe(true);
     expect(isTypedAction('perp_activate_market')).toBe(true);
     expect(isTypedAction('perp_deactivate_market')).toBe(true);
     expect(isTypedAction('perp_set_sub_deployers')).toBe(true);
     expect(isTypedAction('perp_set_sub_deployer_perms')).toBe(true);
-    // The tenth deployer action. It rides its own fork feature,
+    // The one repeating deployer action. It rides its own fork feature,
     // `mip3_deployer_oracle`, active from genesis on a fresh chain.
     expect(isTypedAction('mip3_set_oracle_px')).toBe(true);
     // MIP-1 spot deployer lane (6) + the metaliquidity operator grant + BOLE.

@@ -2,6 +2,25 @@
 
 All notable changes to the TypeScript SDK are documented here.
 
+## [Unreleased]
+
+**NOT LIVE.** The node half of `perp_set_oi_cap` ships in the release after
+2026-10-01. Until then the live chain answers `unknown variant` for it.
+
+### Added
+
+- `perpSetOiCap` and the `PerpSetOiCap` type (`perp_set_oi_cap`): a MIP-3
+  deployer sets the open-interest cap of its own market. The wire is
+  `{"type":"perp_set_oi_cap","params":{"asset":<u32>,"oi_cap_units":<u64>}}`,
+  sender-authorized, with no `owner` and no `bid`.
+  - The cap is in WHOLE UNITS of the base asset, not lots and not USD. The node
+    converts it to the market's size plane once, at the write.
+  - `0` removes the cap.
+  - A cap under the current open interest closes no position. The node refuses
+    orders that raise open interest at the cap; closing orders still pass.
+  - The deployer, or a delegate that holds permission bit 9 (value `512`), may
+    send it. The every-bit mask for `perpSetSubDeployerPerms` is now `1023`.
+
 ## [0.29.0] - 2026-09-12
 
 **This shape is LIVE since 2026-09-16.** An earlier copy of this entry said the

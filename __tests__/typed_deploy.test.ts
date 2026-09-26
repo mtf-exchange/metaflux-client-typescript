@@ -8,7 +8,7 @@
 //
 // The digest assertions here are RELATIONAL, not absolute — each one proves a
 // field reaches the digest, or that two inputs separate. The absolute 32-byte
-// known-answer vectors for all 58 actions live in `typed.test.ts` and
+// known-answer vectors for all 59 actions live in `typed.test.ts` and
 // carry the chain's OWN digests, from its cross-language vector set.
 
 import { describe, expect, it } from 'vitest';
@@ -372,9 +372,9 @@ describe.skipIf(!wasmBuilt)('typed digest binding — every field enters its dig
 
 // ── MIP-3 perp-deployer lane ─────────────────────────────────────────────────
 //
-// The ten tags landed in the node but that binary is NOT released, so the live
-// chain refuses every one of them today. The type strings are frozen all the
-// same: they are what the node will verify against at the swap height.
+// `perp_set_oi_cap` is NOT LIVE: its node half ships in the release after
+// 2026-10-01, and the live chain answers `unknown variant` until then. Its type
+// string is frozen all the same: the node verifies against it at the swap.
 
 describe('typed encodeType — MIP-3 perp deployer lane', () => {
   const FROZEN_PERP: Record<string, string> = {
@@ -390,6 +390,8 @@ describe('typed encodeType — MIP-3 perp deployer lane', () => {
       'MetaFluxTransaction:PerpSetMakerRebate(string metafluxChain,uint32 asset,uint16 rebateBps,uint64 nonce)',
     perp_set_min_size:
       'MetaFluxTransaction:PerpSetMinSize(string metafluxChain,uint32 asset,uint64 minOrderSize,uint64 nonce)',
+    perp_set_oi_cap:
+      'MetaFluxTransaction:PerpSetOiCap(string metafluxChain,uint32 asset,uint64 oiCapUnits,uint64 nonce)',
     perp_activate_market:
       'MetaFluxTransaction:PerpActivateMarket(string metafluxChain,uint32 asset,uint64 nonce)',
     perp_deactivate_market:
@@ -400,14 +402,14 @@ describe('typed encodeType — MIP-3 perp deployer lane', () => {
       'MetaFluxTransaction:PerpSetSubDeployerPerms(string metafluxChain,uint32 asset,address subDeployer,uint16 permissions,uint64 nonce)',
   };
 
-  it('matches the node type string for all ten actions', async () => {
+  it('matches the node type string for all eleven actions', async () => {
     const { encodeType } = await import('../src/native/typed.js');
     for (const [actionType, frozen] of Object.entries(FROZEN_PERP)) {
       expect(encodeType(actionType)).toBe(frozen);
     }
   });
 
-  it('none of the ten takes an agent-resolved owner', async () => {
+  it('none of the eleven takes an agent-resolved owner', async () => {
     const { accountSupportsOwner } = await import('../src/native/typed.js');
     for (const actionType of Object.keys(FROZEN_PERP)) {
       expect(accountSupportsOwner(actionType)).toBe(false);
@@ -426,7 +428,8 @@ describe('typed encodeType — MIP-3 perp deployer lane', () => {
         actionType,
         { symbol: 'GRAD:WIF', decimals: 8, name: 'GRAD', asset: 1001, oracle_source_mask: 1, max_leverage: 20,
           taker_fee_dbps: 45, maker_fee_dbps: 12, deployer_fee_bps: 6, rebate_bps: 2,
-          min_order_size: 1000, sub_deployer: addr(0xaa), add: true, permissions: 0x1ff, bid: '1' },
+          min_order_size: 1000, oi_cap_units: 250000, sub_deployer: addr(0xaa), add: true, permissions: 0x1ff,
+          bid: '1' },
         1n,
         CHAIN_ID,
       );
@@ -477,6 +480,21 @@ describe('typed wire shape — MIP-3 perp deployer lane', () => {
     const revoke = toHex(await typedActionDigest(grant(addr(0xaa), false)));
     expect(otherDelegate).not.toBe(base);
     expect(revoke).not.toBe(base);
+  });
+
+  /// The cap posts in WHOLE units under the snake_case key the node reads, and
+  /// signs under the camelCase name the type string declares.
+  it('perp_set_oi_cap posts and signs the whole-unit cap', async () => {
+    const { buildTyped, typedDataV4 } = await import('../src/native/typed.js');
+    const built = buildTyped('perp_set_oi_cap', { asset: 1001, oi_cap_units: 250000 }, 211n, CHAIN_ID);
+    expect(JSON.parse(built.actionJson)).toEqual({
+      type: 'perp_set_oi_cap',
+      params: { asset: 1001, oi_cap_units: 250000 },
+    });
+    const msg = typedDataV4(built).message;
+    expect(msg.asset).toBe(1001);
+    expect(String(msg.oiCapUnits)).toBe('250000');
+    expect(Object.keys(msg)).not.toContain('owner');
   });
 
   /// SECURITY: the granular grant must bind the MASK too. A relay that could

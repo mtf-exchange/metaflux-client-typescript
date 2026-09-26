@@ -625,7 +625,7 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('maxSupply', 'string-decimal', 'max_supply'),
     ],
   },
-  // ---- MIP-3 permissionless perp deployer lane (9) ----
+  // ---- MIP-3 permissionless perp deployer lane (11) ----
   //
   // One spec per `PerpDeployKind`. Each binds ONLY the fields its own
   // sub-handler reads, so no digest carries a field the chain ignores.
@@ -687,6 +687,16 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('minOrderSize', 'uint64', 'min_order_size'),
     ],
   },
+  // NOT LIVE until the release after 2026-10-01: the live chain answers
+  // `unknown variant` before then.
+  perp_set_oi_cap: {
+    pascal: 'PerpSetOiCap',
+    wireType: 'perp_set_oi_cap',
+    fields: [
+      f('asset', 'uint32', 'asset'),
+      f('oiCapUnits', 'uint64', 'oi_cap_units'),
+    ],
+  },
   perp_activate_market: {
     pascal: 'PerpActivateMarket',
     wireType: 'perp_activate_market',
@@ -717,7 +727,7 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
   },
   // ---- MIP-3 deployer oracle (1) ----
   //
-  // The tenth deployer action and the only repeating one. `asset` and the
+  // The one repeating deployer action. `asset` and the
   // VERBATIM `px` string are both in the digest, so a relay can neither reprice
   // a push nor re-target it at another market. It rides its own fork feature,
   // active from genesis on a fresh chain.

@@ -2,14 +2,14 @@
 //
 // The permissionless perp lane: register a market, bind its oracle subset, set
 // leverage / fees / rebate / min size, delegate authority, then open or close
-// the market. All nine are SENDER-AUTHORIZED — the recovered signer IS the
+// the market. All of them are SENDER-AUTHORIZED: the recovered signer IS the
 // deployer, so none of them takes an `owner`. After registration the market's
 // deployer and its sub-deployers are the only accounts the handler accepts.
 //
-// `mip3_set_oracle_px` is the TENTH deployer action and the only repeating one:
+// `mip3_set_oracle_px` is the only repeating deployer action:
 // a market may run its own index feed, and the deployer then pushes every
 // price. It is sender-authorized in the same way, and it rides a SEPARATE fork
-// feature from the nine — see `Mip3SetOraclePx`.
+// feature from the rest. See `Mip3SetOraclePx`.
 //
 // NONE of them carries a `bid`. The legacy gas-auction lane is dead and the
 // handler rejects a non-zero bid, so the field is off this wire entirely.
@@ -121,6 +121,24 @@ export interface PerpSetMinSize {
   min_order_size: number;
 }
 
+/// `perp_set_oi_cap`: set the market's open-interest cap.
+///
+/// **NOT LIVE yet.** The node half ships in the release after 2026-10-01. Until
+/// then the live chain answers `unknown variant`.
+///
+/// The deployer, or a delegate that holds permission bit 9 (value `512`), may
+/// send it. A cap under the current open interest closes no position: the node
+/// refuses orders that raise open interest at the cap, and closing orders still
+/// pass.
+export interface PerpSetOiCap {
+  /// Target market asset id (`u32`).
+  asset: number;
+  /// Cap in WHOLE UNITS of the base asset (`u64`), not lots and not USD. The
+  /// node converts it to the market's size plane once, at the write. `0`
+  /// removes the cap.
+  oi_cap_units: number;
+}
+
 /// `perp_activate_market` — open the market to trading.
 export interface PerpActivateMarket {
   /// Target market asset id (`u32`).
@@ -161,7 +179,8 @@ export interface PerpSetSubDeployers {
 /// Bit 0 `mip3_set_oracle_px`, 1 `perp_set_leverage`, 2 `perp_set_fee_tier`,
 /// 3 `perp_set_maker_rebate`, 4 `perp_set_min_size`, 5 `perp_activate_market`,
 /// 6 `perp_deactivate_market`, 7 `perp_set_fba_mode`, 8 `perp_register_asset`
-/// into this dex. `511` is every bit.
+/// into this dex, 9 `perp_set_oi_cap`. `1023` is every bit. Bit 9 is NOT LIVE
+/// until the release after 2026-10-01.
 ///
 /// **Both `sub_deployer` and `permissions` sit inside the signed digest.** A
 /// relay therefore cannot re-target the delegate, and cannot widen the mask,
@@ -175,7 +194,7 @@ export interface PerpSetSubDeployerPerms {
   /// The delegate address (`0x`-hex). The node refuses an unparsable address at
   /// admission.
   sub_deployer: string;
-  /// The permission bitmask (`u16`, `0`–`511`). A bit above the defined set is
+  /// The permission bitmask (`u16`, `0` to `1023`). A bit above the defined set is
   /// refused. `0` revokes every bit.
   permissions: number;
 }

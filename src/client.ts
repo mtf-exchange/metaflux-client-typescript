@@ -98,6 +98,7 @@ import type {
   PerpSetLeverage,
   PerpSetMakerRebate,
   PerpSetMinSize,
+  PerpSetOiCap,
   PerpSetOracle,
   PerpSetSubDeployers,
   PerpSetSubDeployerPerms,
@@ -1772,7 +1773,7 @@ export class Client {
 
   // ── MIP-3 permissionless perp deployer lane ───────────────────────────────
   //
-  // All nine are sender-authorized: the recovered signer IS the deployer or one
+  // All are sender-authorized: the recovered signer IS the deployer or one
   // of its sub-deployers. None carries a `bid` — the legacy gas-auction lane is
   // dead and the handler rejects a non-zero bid.
 
@@ -1855,6 +1856,20 @@ export class Client {
   ): Promise<NativeExchangeAck> {
     return this.submitTyped(
       'perp_set_min_size',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Set the market's open-interest cap (`perp_set_oi_cap`), in WHOLE units of
+  /// the base asset. `0` removes the cap. NOT LIVE until the release after
+  /// 2026-10-01; see `PerpSetOiCap`.
+  async perpSetOiCap(
+    params: PerpSetOiCap,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'perp_set_oi_cap',
       params as unknown as Record<string, unknown>,
       opts,
     );
