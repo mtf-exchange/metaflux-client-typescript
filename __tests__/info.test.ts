@@ -1394,18 +1394,6 @@ describe('InfoApi P2 wave-1 reads', () => {
     expect(res.fundings[0]?.funding_rate).toBe('-0.0005');
   });
 
-  it('userLedgerUpdates types the envelope, leaves records raw', async () => {
-    const api = new InfoApi(BASE);
-    nextData = { address: ADDR, start_time: null, end_time: null, updates: [] };
-    await api.userLedgerUpdates(ADDR);
-    expect(JSON.parse(captured!.body)).toEqual({
-      type: 'user_ledger_updates',
-      address: ADDR,
-    });
-    const res = await api.userLedgerUpdates(ADDR);
-    expect(res.updates).toEqual([]);
-  });
-
   it('userNonFundingLedgerUpdates decodes the camelCase ledgerUpdates union', async () => {
     const api = new InfoApi(BASE);
     // ledger_canonical 3-row union (money-movement / spot-token / trade).

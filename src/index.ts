@@ -238,7 +238,6 @@ export type {
   HistoricalOrder,
   UserFunding,
   UserFundingRecord,
-  UserLedgerUpdates,
   UserNonFundingLedgerUpdates,
   UserVolumeHistory,
   VolumeDay,

@@ -744,24 +744,6 @@ export interface UserFunding {
   fundings: UserFundingRecord[];
 }
 
-/// `user_ledger_updates` — per-account balance-ledger deltas (node kind), keyed
-/// by `address`. Optional `start_time` / `end_time` are echoed.
-///
-/// `updates` is `[]` on the node today, and the future node record shape is
-/// doc-locked and DIFFERS from the gateway union (`amount` / `amount_units` vs
-/// `delta`) — so the record type is deliberately left as raw JSON (`unknown[]`).
-/// For the gateway-served normalized union use `userNonFundingLedgerUpdates`.
-export interface UserLedgerUpdates {
-  /// Resolved account address (0x).
-  address: string;
-  /// Echoed window start (ms), `null` when the request omitted it.
-  start_time: number | null;
-  /// Echoed window end (ms), `null` when the request omitted it.
-  end_time: number | null;
-  /// Ledger deltas — untyped pending the retention-seam record shape.
-  updates: unknown[];
-}
-
 /// One record inside a `UserNonFundingLedgerUpdates` union. Two row shapes
 /// (money-movement / trade) share `coin` + `time`; the rest varies per row.
 export interface LedgerUpdate {

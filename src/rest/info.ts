@@ -71,7 +71,6 @@ import type {
   UserInterest,
   UserFills,
   UserFunding,
-  UserLedgerUpdates,
   UserNonFundingLedgerUpdates,
   UserVolumeHistory,
   UserPositionHistory,
@@ -596,24 +595,6 @@ export class InfoApi {
     if (startTime !== undefined) body.start_time = startTime;
     if (endTime !== undefined) body.end_time = endTime;
     return this.post<UserFunding>(body);
-  }
-
-  /// `user_ledger_updates` — per-account balance-ledger deltas (NODE kind),
-  /// keyed by `address` (0x). Optional window bounds as above. The `updates`
-  /// records are untyped (`unknown[]`) pending the retention-seam shape; for
-  /// the gateway-served NORMALIZED union use `userNonFundingLedgerUpdates`.
-  async userLedgerUpdates(
-    address: string,
-    startTime?: number,
-    endTime?: number,
-  ): Promise<UserLedgerUpdates> {
-    const body: { type: string; [k: string]: unknown } = {
-      type: "user_ledger_updates",
-      address,
-    };
-    if (startTime !== undefined) body.start_time = startTime;
-    if (endTime !== undefined) body.end_time = endTime;
-    return this.post<UserLedgerUpdates>(body);
   }
 
   /// `user_non_funding_ledger_updates` — every NON-TRADING movement of an

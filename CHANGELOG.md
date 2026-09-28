@@ -21,6 +21,11 @@ All notable changes to the TypeScript SDK are documented here.
   - The deployer, or a delegate that holds permission bit 9 (value `512`), may
     send it. The every-bit mask for `perpSetSubDeployerPerms` is now `1023`.
 
+### Breaking
+
+- Removed `userLedgerUpdates` and `UserLedgerUpdates`: the read is retired; use
+  `userNonFundingLedgerUpdates` (`user_non_funding_ledger_updates`).
+
 ## [0.29.0] - 2026-09-12
 
 **This shape is LIVE since 2026-09-16.** An earlier copy of this entry said the
