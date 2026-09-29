@@ -112,6 +112,8 @@ export type {
   UserPortfolioMargin,
   SetDisplayName,
   SetReferrer,
+  RegisterReferralCode,
+  SetReferrerByCode,
   ApproveAgent,
   ApproveBrokerFee,
   ApproveBuilderFee,

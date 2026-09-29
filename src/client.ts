@@ -27,6 +27,7 @@ import {
   buildNativeSpotOrderAction,
   buildNativeTwapCancelAction,
   buildNativeTwapOrderAction,
+  validateReferralCode,
 } from './native/actions.js';
 import { nextNonce } from './native/digest.js';
 import { PlaceOrderPartialError, planPlaceOrder } from './native/place.js';
@@ -118,6 +119,8 @@ import type {
   SendToEvmWithData,
   SetDisplayName,
   SetReferrer,
+  RegisterReferralCode,
+  SetReferrerByCode,
   SubAccountSpotTransfer,
   SubAccountTransfer,
   UsdClassTransfer,
@@ -820,6 +823,27 @@ export class Client {
       params as unknown as Record<string, unknown>,
       opts,
     );
+  }
+
+  /// Register a referral code for this account via `POST /exchange`. Throws a
+  /// `RangeError` before signing when the code breaks `^[a-z0-9]{3,16}$`.
+  async registerReferralCode(
+    params: RegisterReferralCode,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    validateReferralCode(params.code);
+    return this.submitTyped('register_referral_code', { code: params.code }, opts);
+  }
+
+  /// Bind the referrer that holds a referral code (one-time) via
+  /// `POST /exchange`. Throws a `RangeError` before signing when the code
+  /// breaks `^[a-z0-9]{3,16}$`.
+  async setReferrerByCode(
+    params: SetReferrerByCode,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    validateReferralCode(params.code);
+    return this.submitTyped('set_referrer_by_code', { code: params.code }, opts);
   }
 
   /// Approve an agent wallet to sign on this account's behalf via `POST /exchange`.

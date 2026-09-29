@@ -60,6 +60,9 @@ import type {
   OptionSeriesRegistry,
   OrderStatusInfo,
   PerpDexs,
+  ReferralCode,
+  ReferralLeaderboard,
+  ReferralReferees,
   ReferralState,
   RfqOpen,
   RfqUser,
@@ -789,6 +792,31 @@ export class InfoApi {
   /// admission ack and no amount, so this is the only view of the credit.
   async referralState(user: string): Promise<ReferralState> {
     return this.post<ReferralState>({ type: "referral_state", address: user });
+  }
+
+  /// `referral_code` — the owner of one referral code. An unknown or
+  /// malformed code answers `owner: null`, not an error.
+  async referralCode(code: string): Promise<ReferralCode> {
+    return this.post<ReferralCode>({ type: "referral_code", code });
+  }
+
+  /// `referral_referees` — the accounts bound to one referrer, by `address`.
+  /// `limit` defaults to 100 on the node; the node caps it at 500.
+  async referralReferees(address: string, limit?: number): Promise<ReferralReferees> {
+    const body: { type: string; [k: string]: unknown } = {
+      type: "referral_referees",
+      address,
+    };
+    if (limit !== undefined) body.limit = limit;
+    return this.post<ReferralReferees>(body);
+  }
+
+  /// `referral_leaderboard` — referrers ranked by reward. `limit` defaults to 50
+  /// on the node; the node caps it at 200.
+  async referralLeaderboard(limit?: number): Promise<ReferralLeaderboard> {
+    const body: { type: string; [k: string]: unknown } = { type: "referral_leaderboard" };
+    if (limit !== undefined) body.limit = limit;
+    return this.post<ReferralLeaderboard>(body);
   }
 
   /// `builder_state` — a broker's accrued broker-code fee credit, keyed by

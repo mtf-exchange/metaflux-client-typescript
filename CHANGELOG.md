@@ -20,6 +20,27 @@ All notable changes to the TypeScript SDK are documented here.
     orders that raise open interest at the cap; closing orders still pass.
   - The deployer, or a delegate that holds permission bit 9 (value `512`), may
     send it. The every-bit mask for `perpSetSubDeployerPerms` is now `1023`.
+- Referral codes. **NOT LIVE** until the node release that ships them; until
+  then the node answers `unknown variant` for both actions and omits the new
+  read fields.
+  - `registerReferralCode` (`register_referral_code`) and `setReferrerByCode`
+    (`set_referrer_by_code`), both `{"code": <string>}`, with the builders
+    `buildNativeRegisterReferralCodeAction` and
+    `buildNativeSetReferrerByCodeAction`. A code matches `^[a-z0-9]{3,16}$`.
+    The SDK throws a `RangeError` with the node's message before it signs any
+    other code.
+  - `referralCode`, `referralReferees` and `referralLeaderboard` reads.
+  - `ReferralState` gains `address`, `referrer_code`, `code`, `referee`,
+    `referrer_stats` and `code_requirement`. Each is absent on an older node.
+  - `FeeSchedule` gains `referee_discount_permille`,
+    `referral_code_min_volume_usd`, `referee_discount_cap_usd` and
+    `referrer_reward_cap_usd`; `FeeScheduleUser` gains
+    `referee_discount_permille`.
+
+### Fixed
+
+- `FeeSchedule.referrer_share_bps` is a share of the taker fee in bps of the
+  fee (`"1000"` = 10%), not a fee rate. The doc said otherwise.
 
 ### Breaking
 

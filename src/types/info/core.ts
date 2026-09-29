@@ -788,8 +788,24 @@ export interface FeeSchedule {
   /// Burn fraction of the non-referrer remainder, decimal fraction string in
   /// `[0, 1]` (NOT bps).
   burn_ratio: string;
-  /// Referrer share of the base taker take, decimal bps string.
+  /// The referrer's share of a referee's taker fee, in bps OF THE FEE, decimal
+  /// string. `"1000"` = 10% of the fee. A share, not a fee rate.
   referrer_share_bps: string;
+  /// The taker discount a referee gets, in permille. The fee path takes the
+  /// larger of this and the staking discount, never the sum.
+  ///
+  /// The four referral fields are absent from a node before the release that
+  /// ships referral codes.
+  referee_discount_permille?: number;
+  /// 30-day volume an account needs to register a referral code, whole-USDC
+  /// decimal string. `"0"` = the code program is off.
+  referral_code_min_volume_usd?: string;
+  /// Referee volume after which the referee discount stops, whole-USDC decimal
+  /// string. `"0"` = no cap.
+  referee_discount_cap_usd?: string;
+  /// Referee volume after which the referrer share stops, whole-USDC decimal
+  /// string. `"0"` = no cap.
+  referrer_reward_cap_usd?: string;
   /// The day the POOLED volume counter stops buying a discount and each product
   /// reads only its own volume. `0` = not armed yet. A server that predates
   /// per-product fees omits it.
@@ -866,6 +882,10 @@ export interface FeeScheduleUser {
   effective_maker_bps: string;
   /// Taker-only staking discount, per mille (`100` = 10%).
   staking_discount_permille: number;
+  /// The referee taker discount that applies to this account now, per mille.
+  /// `effective_taker_bps` uses the larger of this and the staking discount.
+  /// Absent from a node before the release that ships referral codes.
+  referee_discount_permille?: number;
   /// The PERP maker rebate, before it is subtracted. Decimal bps string.
   maker_rebate_bps: string;
   /// Per-product resolved rates. A server that predates per-product fees sends
@@ -873,26 +893,142 @@ export interface FeeScheduleUser {
   products?: ProductFeeRow[];
 }
 
-/// `referral_state` — one account's referral credit and the referrer it is bound
-/// to. Keyed by `address` (0x hex). It shipped keyed by `user`, which still
-/// works, and the reply carries the account under both names.
+/// `referral_state` — one account's referral position, as referee and as
+/// referrer. Keyed by `address` (0x hex). It shipped keyed by `user`, which
+/// still works, and the reply carries the account under both names.
 ///
 /// READ THE CREDIT BEFORE YOU CLAIM IT. `claim_referral_rewards` returns an
 /// admission ack and no amount, so this is the only place the pending credit is
-/// visible.
+/// visible. To list the accounts one referrer brought in, read
+/// `referral_referees`.
 ///
-/// The referral graph is address-based and ONE-DIRECTIONAL. There is no referral
-/// code and no reverse map, so this read cannot list the traders one referrer
-/// brought in — it answers only for the account you name.
+/// The fields after `referrer` are absent from a node before the release that
+/// ships referral codes.
 export interface ReferralState {
   /// Echo of the requested account, 0x hex.
   user: string;
+  /// Echo of the requested account, 0x hex. Same value as `user`.
+  address?: string;
   /// Referral fee credit accrued and not yet claimed, whole-USDC decimal
   /// string. `"0"` when nothing is pending.
   claimable_rewards: string;
-  /// The referrer this account bound with `set_referrer`, 0x hex. `null` when
-  /// the account never bound one — binding is one-time.
+  /// The referrer this account is bound to, 0x hex. `null` when unbound. A
+  /// binding is permanent.
   referrer: string | null;
+  /// The referral code of the bound referrer. `null` when unbound or when the
+  /// referrer holds no code.
+  referrer_code?: string | null;
+  /// This account's own referral code. `null` when it holds none.
+  code?: string | null;
+  /// This account's position as a referee. `null` when unbound.
+  referee?: ReferralRefereeState | null;
+  /// This account's totals as a referrer.
+  referrer_stats?: ReferrerStats;
+  /// Whether this account can register a referral code now.
+  code_requirement?: ReferralCodeRequirement;
+}
+
+/// `ReferralState.referee` — the counters since this account bound its
+/// referrer. USDC values are whole-USDC decimal strings.
+export interface ReferralRefereeState {
+  /// Consensus ms of the binding. `0` for a binding made before the release
+  /// that ships referral codes; its counters start at zero.
+  bound_ms: number;
+  /// Taker notional traded since the binding.
+  volume_since_bind: string;
+  /// Taker fees paid since the binding.
+  fees_paid: string;
+  /// Referrer share earned from this account's fees.
+  rewarded: string;
+  /// The referee taker discount that applies now, in permille. `0` when the
+  /// discount is off or its volume cap is reached. The fee path takes the
+  /// larger of this and the staking discount, never the sum.
+  discount_permille: number;
+  /// Volume left before the discount stops. `null` when the discount has no cap.
+  discount_volume_remaining: string | null;
+  /// Volume left before the referrer share stops. `null` when the share has no
+  /// cap.
+  share_volume_remaining: string | null;
+}
+
+/// `ReferralState.referrer_stats` — totals over every referee of one referrer.
+/// USDC values are whole-USDC decimal strings.
+export interface ReferrerStats {
+  /// Number of accounts bound to this referrer.
+  referee_count: number;
+  /// Taker fees the referees paid.
+  referred_fees: string;
+  /// Referrer share earned in total.
+  rewarded: string;
+  /// Referrer share claimed in total.
+  claimed: string;
+}
+
+/// `ReferralState.code_requirement` — the gate on `register_referral_code`.
+export interface ReferralCodeRequirement {
+  /// `false` when the code program is off and registration is refused.
+  enabled: boolean;
+  /// 30-day volume a registration needs, whole-USDC decimal string.
+  min_volume_30d: string;
+  /// This account's 30-day volume, whole-USDC decimal string.
+  volume_30d: string;
+  /// `true` when the program is on and the volume meets the minimum.
+  eligible: boolean;
+}
+
+/// `referral_code` — the owner of one referral code.
+export interface ReferralCode {
+  /// The queried code.
+  code: string;
+  /// The account that holds the code, 0x hex. `null` when the code is unknown
+  /// or malformed.
+  owner: string | null;
+}
+
+/// One row of `ReferralReferees`. USDC values are whole-USDC decimal strings.
+export interface RefereeRow {
+  /// The referee, 0x hex.
+  user: string;
+  /// Consensus ms of the binding. `0` for a binding made before the release
+  /// that ships referral codes.
+  bound_ms: number;
+  /// Taker notional traded since the binding.
+  volume_since_bind: string;
+  /// Taker fees paid since the binding.
+  fees_paid: string;
+  /// Referrer share earned from this referee.
+  rewarded: string;
+}
+
+/// `referral_referees` — the accounts bound to one referrer.
+export interface ReferralReferees {
+  /// The queried referrer, 0x hex.
+  address: string;
+  /// Sorted by `rewarded` descending, then `user` ascending.
+  referees: RefereeRow[];
+}
+
+/// One row of `ReferralLeaderboard`. USDC values are whole-USDC decimal strings.
+export interface ReferralLeaderboardRow {
+  /// The referrer, 0x hex.
+  address: string;
+  /// The referrer's code. `null` when it holds none.
+  code: string | null;
+  /// Number of accounts bound to this referrer.
+  referee_count: number;
+  /// Taker fees the referees paid.
+  referred_fees: string;
+  /// Referrer share earned in total.
+  rewarded: string;
+  /// Referrer share claimed in total.
+  claimed: string;
+}
+
+/// `referral_leaderboard` — referrers ranked by reward.
+export interface ReferralLeaderboard {
+  /// Sorted by `rewarded` descending, `referee_count` descending, then
+  /// `address` ascending.
+  rows: ReferralLeaderboardRow[];
 }
 
 /// `builder_state` — one broker's accrued broker-code fee credit. Keyed by

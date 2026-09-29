@@ -180,6 +180,23 @@ describe('real native write-action builders (JSON shape)', () => {
     );
   });
 
+  it('referral code actions: {code} under their own tag, code rule enforced', async () => {
+    const { buildNativeRegisterReferralCodeAction, buildNativeSetReferrerByCodeAction } =
+      await import('../src/native/actions.js');
+    expect(buildNativeRegisterReferralCodeAction({ code: 'alice1' })).toBe(
+      '{"type":"register_referral_code","params":{"code":"alice1"}}',
+    );
+    expect(buildNativeSetReferrerByCodeAction({ code: '0123456789abcdef' })).toBe(
+      '{"type":"set_referrer_by_code","params":{"code":"0123456789abcdef"}}',
+    );
+    for (const bad of ['ab', 'ALICE', 'a-b-c', 'abcdefghijklmnopq']) {
+      expect(() => buildNativeRegisterReferralCodeAction({ code: bad })).toThrow(
+        'referral code must be 3-16 characters, a-z and 0-9',
+      );
+      expect(() => buildNativeSetReferrerByCodeAction({ code: bad })).toThrow(RangeError);
+    }
+  });
+
   it('cancel_all_orders: empty params when no asset filter', async () => {
     const { buildNativeCancelAllOrdersAction } = await import(
       '../src/native/actions.js'
@@ -456,6 +473,18 @@ describe.skipIf(!wasmBuilt)('P0 redirected methods == typed submitTyped path', (
       conv: (c, n) => c.setReferrer({ referrer: ADDR }, { nonce: n }),
     },
     {
+      name: 'registerReferralCode',
+      tag: 'register_referral_code',
+      payload: { code: 'alice1' },
+      conv: (c, n) => c.registerReferralCode({ code: 'alice1' }, { nonce: n }),
+    },
+    {
+      name: 'setReferrerByCode',
+      tag: 'set_referrer_by_code',
+      payload: { code: 'alice1' },
+      conv: (c, n) => c.setReferrerByCode({ code: 'alice1' }, { nonce: n }),
+    },
+    {
       name: 'linkStakingUser',
       tag: 'link_staking_user',
       payload: { target: ADDR },
@@ -576,6 +605,18 @@ describe.skipIf(!wasmBuilt)('P0 redirected methods == typed submitTyped path', (
       expect(parsed.action.type).toBe(tc.tag);
     });
   }
+
+  it('a malformed referral code is refused before signing', async () => {
+    const c = await client();
+    for (const bad of ['ab', 'Alice1', 'alice_1', 'abcdefghijklmnopq', '']) {
+      bodies = [];
+      await expect(c.registerReferralCode({ code: bad })).rejects.toThrow(
+        'referral code must be 3-16 characters, a-z and 0-9',
+      );
+      await expect(c.setReferrerByCode({ code: bad })).rejects.toThrow(RangeError);
+      expect(bodies).toEqual([]);
+    }
+  });
 
   it('rfqQuote with opts.owner binds the owner-carrying digest', async () => {
     const c = await client();

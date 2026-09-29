@@ -93,6 +93,18 @@ const VECTORS: Vector[] = [
     digest: 'cc6752669ed0658d0d26490b25b3654ae6d62607842b844a92a286ec89fe58a2',
   },
   {
+    actionType: 'register_referral_code',
+    payload: { code: 'alice1' },
+    nonce: 2n,
+    digest: 'd31467d6596ca7304914c25e5b658ad8d7264486d9c62d289bf969afd2cd4684',
+  },
+  {
+    actionType: 'set_referrer_by_code',
+    payload: { code: 'alice1' },
+    nonce: 3n,
+    digest: '3ba414f7b7fc217e0446f3fb420c0a344d81d8b2320ca2513af80d72cc59d318',
+  },
+  {
     actionType: 'set_position_mode',
     payload: { hedge: true },
     nonce: 5n,
@@ -519,10 +531,10 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     }
   });
 
-  it('reproduces all 61 contract KAT digests byte-for-byte (chain 114514)', async () => {
+  it('reproduces all 63 contract KAT digests byte-for-byte (chain 114514)', async () => {
     const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
-    // 61 vectors, 60 actions: the two approve-fee keys share one digest pin.
-    expect(VECTORS.length).toBe(61);
+    // 63 vectors, 62 actions: the two approve-fee keys share one digest pin.
+    expect(VECTORS.length).toBe(63);
     for (const v of VECTORS) {
       const built = buildTyped(v.actionType, v.payload, v.nonce, CHAIN_ID);
       const digest = await typedActionDigest(built);
@@ -745,12 +757,14 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(toHex(base)).not.toBe(toHex(otherChain));
   });
 
-  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 69 reachable actions', async () => {
+  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 71 reachable actions', async () => {
     const { isTypedAction, TYPED_ACTION_TYPES } = await import('../src/native/typed.js');
-    // 71 keys, 69 actions. Two legacy keys share a spec with their canonical
+    // 73 keys, 71 actions. Two legacy keys share a spec with their canonical
     // name: `approve_builder_fee` with `approve_broker_fee`, and
     // `claim_builder_rewards` with `claim_broker_rewards`.
-    expect(TYPED_ACTION_TYPES.length).toBe(71);
+    expect(TYPED_ACTION_TYPES.length).toBe(73);
+    expect(isTypedAction('register_referral_code')).toBe(true);
+    expect(isTypedAction('set_referrer_by_code')).toBe(true);
     for (const [legacy, canonical] of [
       ['approve_builder_fee', 'approve_broker_fee'],
       ['claim_builder_rewards', 'claim_broker_rewards'],

@@ -2320,6 +2320,88 @@ describe('RFQ session + fee-credit reads', () => {
     expect(res.claimable_rewards).toBe('12.5');
   });
 
+  it('referralState decodes the code-era fields', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      user: ADDR,
+      address: ADDR,
+      claimable_rewards: '4.5',
+      referrer: VAULT,
+      referrer_code: 'alice1',
+      code: null,
+      referee: {
+        bound_ms: 0,
+        volume_since_bind: '0',
+        fees_paid: '0',
+        rewarded: '0',
+        discount_permille: 40,
+        discount_volume_remaining: '25000000',
+        share_volume_remaining: null,
+      },
+      referrer_stats: { referee_count: 0, referred_fees: '0', rewarded: '0', claimed: '0' },
+      code_requirement: {
+        enabled: true,
+        min_volume_30d: '10000',
+        volume_30d: '0',
+        eligible: false,
+      },
+    };
+    const res = await api.referralState(ADDR);
+    expect(res.referrer_code).toBe('alice1');
+    expect(res.referee?.discount_permille).toBe(40);
+    // `null` remaining volume = no cap, not zero left.
+    expect(res.referee?.share_volume_remaining).toBeNull();
+    expect(res.code_requirement?.eligible).toBe(false);
+  });
+
+  it('referralCode sends the code and reads a null owner as unknown', async () => {
+    const api = new InfoApi(BASE);
+    nextData = { code: 'nobody', owner: null };
+    const res = await api.referralCode('nobody');
+    expect(JSON.parse(captured!.body)).toEqual({ type: 'referral_code', code: 'nobody' });
+    expect(res.owner).toBeNull();
+  });
+
+  it('referralReferees is keyed by address and sends limit only when given', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      address: ADDR,
+      referees: [
+        { user: VAULT, bound_ms: 5, volume_since_bind: '100', fees_paid: '1', rewarded: '0.1' },
+      ],
+    };
+    const res = await api.referralReferees(ADDR);
+    expect(JSON.parse(captured!.body)).toEqual({ type: 'referral_referees', address: ADDR });
+    expect(res.referees[0]!.rewarded).toBe('0.1');
+    await api.referralReferees(ADDR, 5);
+    expect(JSON.parse(captured!.body)).toEqual({
+      type: 'referral_referees',
+      address: ADDR,
+      limit: 5,
+    });
+  });
+
+  it('referralLeaderboard sends limit only when given', async () => {
+    const api = new InfoApi(BASE);
+    nextData = {
+      rows: [
+        {
+          address: ADDR,
+          code: 'alice1',
+          referee_count: 3,
+          referred_fees: '900',
+          rewarded: '90',
+          claimed: '40',
+        },
+      ],
+    };
+    const res = await api.referralLeaderboard();
+    expect(JSON.parse(captured!.body)).toEqual({ type: 'referral_leaderboard' });
+    expect(res.rows[0]!.referee_count).toBe(3);
+    await api.referralLeaderboard(10);
+    expect(JSON.parse(captured!.body)).toEqual({ type: 'referral_leaderboard', limit: 10 });
+  });
+
   it('builderState is keyed by user and carries the credit, not a rate', async () => {
     const api = new InfoApi(BASE);
     nextData = { user: VAULT, claimable_rewards: '0' };

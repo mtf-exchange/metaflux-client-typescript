@@ -314,6 +314,16 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
     wireType: 'set_display_name',
     fields: [f('displayName', 'string', 'display_name')],
   },
+  register_referral_code: {
+    pascal: 'RegisterReferralCode',
+    wireType: 'register_referral_code',
+    fields: [f('code', 'string', 'code')],
+  },
+  set_referrer_by_code: {
+    pascal: 'SetReferrerByCode',
+    wireType: 'set_referrer_by_code',
+    fields: [f('code', 'string', 'code')],
+  },
   set_position_mode: {
     pascal: 'SetPositionMode',
     wireType: 'set_position_mode',

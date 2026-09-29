@@ -64,6 +64,8 @@ import type {
   ScheduleCancel,
   SetDisplayName,
   SetReferrer,
+  RegisterReferralCode,
+  SetReferrerByCode,
   SubmitEncryptedOrder,
   TokenDelegate,
   TopUpIsolatedOnlyMargin,
@@ -753,6 +755,28 @@ export function buildNativeSetReferrerAction(params: SetReferrer): string {
     'set_referrer',
     `{${jsonStr('referrer')}:${jsonStr(params.referrer)}}`,
   );
+}
+
+const REFERRAL_CODE = /^[a-z0-9]{3,16}$/;
+
+export function validateReferralCode(code: unknown): asserts code is string {
+  if (typeof code !== 'string' || !REFERRAL_CODE.test(code)) {
+    throw new RangeError('referral code must be 3-16 characters, a-z and 0-9');
+  }
+}
+
+/// `register_referral_code` — register a referral code for this account.
+export function buildNativeRegisterReferralCodeAction(
+  params: RegisterReferralCode,
+): string {
+  validateReferralCode(params.code);
+  return wrapParams('register_referral_code', `{${jsonStr('code')}:${jsonStr(params.code)}}`);
+}
+
+/// `set_referrer_by_code` — bind the referrer that holds a referral code.
+export function buildNativeSetReferrerByCodeAction(params: SetReferrerByCode): string {
+  validateReferralCode(params.code);
+  return wrapParams('set_referrer_by_code', `{${jsonStr('code')}:${jsonStr(params.code)}}`);
 }
 
 /// `approve_agent` — approve an agent wallet to sign on this account's behalf.

@@ -60,6 +60,20 @@ export interface SetReferrer {
   referrer: string;
 }
 
+/// `register_referral_code` — register a referral code for this account.
+export interface RegisterReferralCode {
+  /// The code, `^[a-z0-9]{3,16}$`. Lowercase only: the node rejects, it does
+  /// not fold case.
+  code: string;
+}
+
+/// `set_referrer_by_code` — bind the referrer that holds a referral code. The
+/// binding is permanent.
+export interface SetReferrerByCode {
+  /// The referrer's code, `^[a-z0-9]{3,16}$`.
+  code: string;
+}
+
 /// `approve_agent` — approve an agent wallet to sign on behalf of this account.
 export interface ApproveAgent {
   /// `0x`-hex 20-byte agent address.
