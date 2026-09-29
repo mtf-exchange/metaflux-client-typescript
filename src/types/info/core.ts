@@ -898,8 +898,9 @@ export interface FeeScheduleUser {
 /// still works, and the reply carries the account under both names.
 ///
 /// READ THE CREDIT BEFORE YOU CLAIM IT. `claim_referral_rewards` returns an
-/// admission ack and no amount, so this is the only place the pending credit is
-/// visible. To list the accounts one referrer brought in, read
+/// admission ack and no amount, so this and `BuilderState` are the only place
+/// the pending credit is visible. From the next node release either claim
+/// drains both credits. To list the accounts one referrer brought in, read
 /// `referral_referees`.
 ///
 /// The fields after `referrer` are absent from a node before the release that
@@ -1035,7 +1036,8 @@ export interface ReferralLeaderboard {
 /// `user` (0x hex), like `referral_state`.
 ///
 /// READ THE CREDIT BEFORE YOU CLAIM IT. `claim_broker_rewards` returns an
-/// admission ack and no amount.
+/// admission ack and no amount. From the next node release either claim drains
+/// this credit and the `ReferralState` one together.
 ///
 /// It carries NO rate. What a broker may charge is the per-order `builder_fee`,
 /// bounded by the payer's `approved_builders[].max_fee_bps`.

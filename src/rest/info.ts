@@ -788,8 +788,9 @@ export class InfoApi {
   ///
   /// Keyed by `address`. It shipped keyed by `user`, which still works.
   ///
-  /// Read it BEFORE `claim_referral_rewards`: the claim answers with an
-  /// admission ack and no amount, so this is the only view of the credit.
+  /// Read it BEFORE a claim: the claim answers with an admission ack and no
+  /// amount, so this and `builderState` are the only view of the credit. From
+  /// the next node release either claim drains both credits, so show the sum.
   async referralState(user: string): Promise<ReferralState> {
     return this.post<ReferralState>({ type: "referral_state", address: user });
   }

@@ -37,6 +37,16 @@ All notable changes to the TypeScript SDK are documented here.
     `referrer_reward_cap_usd`; `FeeScheduleUser` gains
     `referee_discount_permille`.
 
+### Changed
+
+- `claimReferralRewards` and `claimBrokerRewards` (and its old name
+  `claimBuilderRewards`) now each drain BOTH the referral credit and the
+  broker-code credit. **NOT LIVE** until the next node release; a live node
+  drains only the credit that matches the action. No signature, wire body or
+  return type changes. The reply still reports no amount: read `referralState`
+  and `builderState` first, and show their sum. The node's `node_actions` row
+  of the claim carries `claimed`, `referral` and `broker`.
+
 ### Fixed
 
 - `FeeSchedule.referrer_share_bps` is a share of the taker fee in bps of the

@@ -999,12 +999,18 @@ export class Client {
     );
   }
 
-  /// Drain the sender's accrued broker-code fee credit into spendable
-  /// cross-collateral via `POST /exchange`. No params. SENDER-AUTHORIZED.
+  /// Drain the sender's accrued broker-code AND referral fee credit into
+  /// spendable cross-collateral via `POST /exchange`. No params.
+  /// SENDER-AUTHORIZED.
+  ///
+  /// The same claim as `claimReferralRewards`: either action drains both
+  /// credits. NOT LIVE until the next node release; a live node drains only the
+  /// broker credit here.
   ///
   /// The POSTed tag is `claim_broker_rewards`. The EIP-712 type string stays
   /// `ClaimBuilderRewards`: it is consensus-frozen, so the two names differ on
-  /// purpose. The claim reports no amount — read `builder_state` first.
+  /// purpose. The reply reports no amount — read `builderState` and
+  /// `referralState` first.
   async claimBrokerRewards(
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
@@ -1018,9 +1024,15 @@ export class Client {
     return this.claimBrokerRewards(opts);
   }
 
-  /// Drain the sender's accrued referrer fee credit into spendable
-  /// cross-collateral via `POST /exchange` (`claim_referral_rewards`, typed
-  /// scheme). No params. SENDER-AUTHORIZED.
+  /// Drain the sender's accrued referrer AND broker-code fee credit into
+  /// spendable cross-collateral via `POST /exchange` (`claim_referral_rewards`,
+  /// typed scheme). No params. SENDER-AUTHORIZED.
+  ///
+  /// The same claim as `claimBrokerRewards`: either action drains both
+  /// credits. NOT LIVE until the next node release; a live node drains only the
+  /// referral credit here. On a live node, read both balances after the claim
+  /// commits and send the other claim if its balance is still above zero. The
+  /// reply reports no amount — read `referralState` and `builderState` first.
   async claimReferralRewards(
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
