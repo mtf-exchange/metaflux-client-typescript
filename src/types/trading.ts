@@ -533,7 +533,7 @@ export type OrderStatus =
   /// entries are its WHOLE answer.
   | { parked: { oid: string; cloid?: string } }
   /// A `batch_cancel` leg that removed its order. A refused leg is an `error`
-  /// entry instead. Not sent until the next node release.
+  /// entry instead.
   | { canceled: { oid: string } }
   /// Admitted, but no commit observed within the wait window — track via
   /// `/info` / WS. NOT a fabricated oid.
@@ -561,7 +561,6 @@ export type OrderStatus =
 ///   `mempool_depth` + `nonce` + `action_hash` + `committed`.
 /// - **A committed `batch_cancel`** carries the admission summary AND
 ///   `statuses`, one entry per leg in request order: `canceled` or `error`.
-///   Not sent until the next node release.
 export interface NativeExchangeAck {
   /// Per-order status union — present for order-type actions and a committed
   /// `batch_cancel`.

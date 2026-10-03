@@ -4,8 +4,9 @@ All notable changes to the TypeScript SDK are documented here.
 
 ## [Unreleased]
 
-**NOT LIVE.** The node half of `perp_set_oi_cap` ships in the release after
-2026-10-01. Until then the live chain answers `unknown variant` for it.
+## [0.30.0] - 2026-10-04
+
+Needs node 0.9.16 or later.
 
 ### Added
 
@@ -20,9 +21,7 @@ All notable changes to the TypeScript SDK are documented here.
     orders that raise open interest at the cap; closing orders still pass.
   - The deployer, or a delegate that holds permission bit 9 (value `512`), may
     send it. The every-bit mask for `perpSetSubDeployerPerms` is now `1023`.
-- Referral codes. **NOT LIVE** until the node release that ships them; until
-  then the node answers `unknown variant` for both actions and omits the new
-  read fields.
+- Referral codes.
   - `registerReferralCode` (`register_referral_code`) and `setReferrerByCode`
     (`set_referrer_by_code`), both `{"code": <string>}`, with the builders
     `buildNativeRegisterReferralCodeAction` and
@@ -41,11 +40,10 @@ All notable changes to the TypeScript SDK are documented here.
 
 - `claimReferralRewards` and `claimBrokerRewards` (and its old name
   `claimBuilderRewards`) now each drain BOTH the referral credit and the
-  broker-code credit. **NOT LIVE** until the next node release; a live node
-  drains only the credit that matches the action. No signature, wire body or
-  return type changes. The reply still reports no amount: read `referralState`
-  and `builderState` first, and show their sum. The node's `node_actions` row
-  of the claim carries `claimed`, `referral` and `broker`.
+  broker-code credit. No signature, wire body or return type changes. The
+  reply still reports no amount: read `referralState` and `builderState`
+  first, and show their sum. The node's `node_actions` row of the claim carries
+  `claimed`, `referral` and `broker`.
 
 ### Fixed
 

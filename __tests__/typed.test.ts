@@ -452,7 +452,7 @@ const VECTORS: Vector[] = [
     nonce: 206n,
     digest: 'db58e1837626e4e08b8887e6055cf0fb35a7016d1b9efe6e1a0e0f4302dc131c',
   },
-  // NOT LIVE until the release after 2026-10-01. The cap is whole units.
+  // Needs node 0.9.16 or later. The cap is whole units.
   {
     actionType: 'perp_set_oi_cap',
     payload: { asset: 1001, oi_cap_units: 250000 },
@@ -774,8 +774,8 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     }
     // `noop` (132) burns a nonce and does nothing else.
     expect(isTypedAction('noop')).toBe(true);
-    // MIP-3 perp deployer lane (11). `perp_set_oi_cap` is NOT LIVE until the
-    // release after 2026-10-01.
+    // MIP-3 perp deployer lane (11). `perp_set_oi_cap` needs node 0.9.16 or
+    // later.
     expect(isTypedAction('perp_register_asset')).toBe(true);
     expect(isTypedAction('perp_set_oracle')).toBe(true);
     expect(isTypedAction('perp_set_leverage')).toBe(true);

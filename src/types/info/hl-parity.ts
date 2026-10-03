@@ -241,9 +241,6 @@ export interface UserRateLimit {
 }
 
 /// `spot_deploy_auction` — MIP-1 spot-pair-deploy gas-auction state.
-///
-/// The node answers this read under the older name `spot_deploy_state` until
-/// the release that ships the rename. Same body either way.
 export interface SpotDeployAuction {
   /// Current round.
   auction_round: number;

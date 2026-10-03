@@ -794,8 +794,7 @@ export interface FeeSchedule {
   /// The taker discount a referee gets, in permille. The fee path takes the
   /// larger of this and the staking discount, never the sum.
   ///
-  /// The four referral fields are absent from a node before the release that
-  /// ships referral codes.
+  /// The four referral fields are absent from a node before 0.9.16.
   referee_discount_permille?: number;
   /// 30-day volume an account needs to register a referral code, whole-USDC
   /// decimal string. `"0"` = the code program is off.
@@ -884,7 +883,7 @@ export interface FeeScheduleUser {
   staking_discount_permille: number;
   /// The referee taker discount that applies to this account now, per mille.
   /// `effective_taker_bps` uses the larger of this and the staking discount.
-  /// Absent from a node before the release that ships referral codes.
+  /// Absent from a node before 0.9.16.
   referee_discount_permille?: number;
   /// The PERP maker rebate, before it is subtracted. Decimal bps string.
   maker_rebate_bps: string;
@@ -899,12 +898,11 @@ export interface FeeScheduleUser {
 ///
 /// READ THE CREDIT BEFORE YOU CLAIM IT. `claim_referral_rewards` returns an
 /// admission ack and no amount, so this and `BuilderState` are the only place
-/// the pending credit is visible. From the next node release either claim
-/// drains both credits. To list the accounts one referrer brought in, read
+/// the pending credit is visible. From node 0.9.16 either claim drains both
+/// credits. To list the accounts one referrer brought in, read
 /// `referral_referees`.
 ///
-/// The fields after `referrer` are absent from a node before the release that
-/// ships referral codes.
+/// The fields after `referrer` are absent from a node before 0.9.16.
 export interface ReferralState {
   /// Echo of the requested account, 0x hex.
   user: string;
@@ -932,8 +930,8 @@ export interface ReferralState {
 /// `ReferralState.referee` — the counters since this account bound its
 /// referrer. USDC values are whole-USDC decimal strings.
 export interface ReferralRefereeState {
-  /// Consensus ms of the binding. `0` for a binding made before the release
-  /// that ships referral codes; its counters start at zero.
+  /// Consensus ms of the binding. `0` for a binding made before node 0.9.16;
+  /// its counters start at zero.
   bound_ms: number;
   /// Taker notional traded since the binding.
   volume_since_bind: string;
@@ -990,8 +988,7 @@ export interface ReferralCode {
 export interface RefereeRow {
   /// The referee, 0x hex.
   user: string;
-  /// Consensus ms of the binding. `0` for a binding made before the release
-  /// that ships referral codes.
+  /// Consensus ms of the binding. `0` for a binding made before node 0.9.16.
   bound_ms: number;
   /// Taker notional traded since the binding.
   volume_since_bind: string;
@@ -1036,8 +1033,8 @@ export interface ReferralLeaderboard {
 /// `user` (0x hex), like `referral_state`.
 ///
 /// READ THE CREDIT BEFORE YOU CLAIM IT. `claim_broker_rewards` returns an
-/// admission ack and no amount. From the next node release either claim drains
-/// this credit and the `ReferralState` one together.
+/// admission ack and no amount. From node 0.9.16 either claim drains this
+/// credit and the `ReferralState` one together.
 ///
 /// It carries NO rate. What a broker may charge is the per-order `builder_fee`,
 /// bounded by the payer's `approved_builders[].max_fee_bps`.

@@ -123,8 +123,7 @@ export interface PerpSetMinSize {
 
 /// `perp_set_oi_cap`: set the market's open-interest cap.
 ///
-/// **NOT LIVE yet.** The node half ships in the release after 2026-10-01. Until
-/// then the live chain answers `unknown variant`.
+/// Needs node 0.9.16 or later. An older node answers `unknown variant`.
 ///
 /// The deployer, or a delegate that holds permission bit 9 (value `512`), may
 /// send it. A cap under the current open interest closes no position: the node
@@ -179,8 +178,8 @@ export interface PerpSetSubDeployers {
 /// Bit 0 `mip3_set_oracle_px`, 1 `perp_set_leverage`, 2 `perp_set_fee_tier`,
 /// 3 `perp_set_maker_rebate`, 4 `perp_set_min_size`, 5 `perp_activate_market`,
 /// 6 `perp_deactivate_market`, 7 `perp_set_fba_mode`, 8 `perp_register_asset`
-/// into this dex, 9 `perp_set_oi_cap`. `1023` is every bit. Bit 9 is NOT LIVE
-/// until the release after 2026-10-01.
+/// into this dex, 9 `perp_set_oi_cap`. `1023` is every bit. Bit 9 needs node
+/// 0.9.16 or later.
 ///
 /// **Both `sub_deployer` and `permissions` sit inside the signed digest.** A
 /// relay therefore cannot re-target the delegate, and cannot widen the mask,

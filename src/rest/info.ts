@@ -735,9 +735,6 @@ export class InfoApi {
 
   /// `spot_deploy_auction` — MIP-1 spot-pair-deploy gas-auction state. No
   /// params.
-  ///
-  /// UPGRADE NOTICE: the node answers this read under the older name
-  /// `spot_deploy_state` until the release that ships the rename.
   async spotDeployAuction(): Promise<SpotDeployAuction> {
     return this.post<SpotDeployAuction>({ type: "spot_deploy_auction" });
   }
@@ -790,7 +787,7 @@ export class InfoApi {
   ///
   /// Read it BEFORE a claim: the claim answers with an admission ack and no
   /// amount, so this and `builderState` are the only view of the credit. From
-  /// the next node release either claim drains both credits, so show the sum.
+  /// node 0.9.16 either claim drains both credits, so show the sum.
   async referralState(user: string): Promise<ReferralState> {
     return this.post<ReferralState>({ type: "referral_state", address: user });
   }

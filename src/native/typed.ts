@@ -697,8 +697,7 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('minOrderSize', 'uint64', 'min_order_size'),
     ],
   },
-  // NOT LIVE until the release after 2026-10-01: the live chain answers
-  // `unknown variant` before then.
+  // Needs node 0.9.16 or later.
   perp_set_oi_cap: {
     pascal: 'PerpSetOiCap',
     wireType: 'perp_set_oi_cap',

@@ -372,9 +372,8 @@ describe.skipIf(!wasmBuilt)('typed digest binding — every field enters its dig
 
 // ── MIP-3 perp-deployer lane ─────────────────────────────────────────────────
 //
-// `perp_set_oi_cap` is NOT LIVE: its node half ships in the release after
-// 2026-10-01, and the live chain answers `unknown variant` until then. Its type
-// string is frozen all the same: the node verifies against it at the swap.
+// `perp_set_oi_cap` needs node 0.9.16 or later. Its type string is frozen, and
+// the node verifies the signature against it.
 
 describe('typed encodeType — MIP-3 perp deployer lane', () => {
   const FROZEN_PERP: Record<string, string> = {

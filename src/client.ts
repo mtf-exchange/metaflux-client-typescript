@@ -1003,9 +1003,8 @@ export class Client {
   /// spendable cross-collateral via `POST /exchange`. No params.
   /// SENDER-AUTHORIZED.
   ///
-  /// The same claim as `claimReferralRewards`: either action drains both
-  /// credits. NOT LIVE until the next node release; a live node drains only the
-  /// broker credit here.
+  /// The same claim as `claimReferralRewards`: from node 0.9.16, either action
+  /// drains both credits.
   ///
   /// The POSTed tag is `claim_broker_rewards`. The EIP-712 type string stays
   /// `ClaimBuilderRewards`: it is consensus-frozen, so the two names differ on
@@ -1028,11 +1027,9 @@ export class Client {
   /// spendable cross-collateral via `POST /exchange` (`claim_referral_rewards`,
   /// typed scheme). No params. SENDER-AUTHORIZED.
   ///
-  /// The same claim as `claimBrokerRewards`: either action drains both
-  /// credits. NOT LIVE until the next node release; a live node drains only the
-  /// referral credit here. On a live node, read both balances after the claim
-  /// commits and send the other claim if its balance is still above zero. The
-  /// reply reports no amount — read `referralState` and `builderState` first.
+  /// The same claim as `claimBrokerRewards`: from node 0.9.16, either action
+  /// drains both credits. The reply reports no amount — read `referralState`
+  /// and `builderState` first.
   async claimReferralRewards(
     opts: { nonce?: bigint; chainId?: number } = {},
   ): Promise<NativeExchangeAck> {
@@ -1898,8 +1895,8 @@ export class Client {
   }
 
   /// Set the market's open-interest cap (`perp_set_oi_cap`), in WHOLE units of
-  /// the base asset. `0` removes the cap. NOT LIVE until the release after
-  /// 2026-10-01; see `PerpSetOiCap`.
+  /// the base asset. `0` removes the cap. Needs node 0.9.16 or later; see
+  /// `PerpSetOiCap`.
   async perpSetOiCap(
     params: PerpSetOiCap,
     opts: { nonce?: bigint; chainId?: number } = {},
