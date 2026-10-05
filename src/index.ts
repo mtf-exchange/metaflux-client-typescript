@@ -16,7 +16,15 @@ export {
   planPlaceOrder,
   PlaceOrderPartialError,
 } from './native/place.js';
-export { requestFaucet, type FaucetResponse } from './faucet.js';
+export {
+  // Signed testnet faucet claim. A browser wallet signs `faucetClaimMessage`.
+  FAUCET_CLAIM_TTL_SECS,
+  faucetClaimMessage,
+  signFaucetClaim,
+  requestFaucet,
+  type FaucetClaim,
+  type FaucetResponse,
+} from './faucet.js';
 export {
   // MTF-native signed-action signing core. Exported so power users can build /
   // sign / inspect actions out-of-band.

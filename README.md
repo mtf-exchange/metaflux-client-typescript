@@ -414,6 +414,41 @@ list; the notes below cover the shapes that most often surprise people.
   the cumulative amount. The inner `order` is the SAME canonical row the REST
   `open_orders` read returns.
 
+### Testnet faucet
+
+The recipient signs every claim. `requestFaucet` signs with a private key, or
+sends a claim that a wallet already signed:
+
+```ts
+import {
+  requestFaucet,
+  faucetClaimMessage,
+  FAUCET_CLAIM_TTL_SECS,
+  TESTNET_CHAIN_ID,
+} from '@metaflux-dex/client';
+
+const FAUCET = 'https://api.testnet.mtf.exchange';
+
+// A local key signs the claim. Its address is the recipient.
+await requestFaucet(FAUCET, privateKey);
+
+// A browser wallet signs the same text with personal_sign.
+const expires = Math.floor(Date.now() / 1000) + FAUCET_CLAIM_TTL_SECS;
+const message = faucetClaimMessage(address, TESTNET_CHAIN_ID, expires);
+const signature = await provider.request({
+  method: 'personal_sign',
+  params: [message, address],
+});
+await requestFaucet(FAUCET, { address, expires, signature });
+```
+
+- The signature is an EIP-191 `personal_sign` by the recipient over
+  `MetaFlux faucet claim\naddress: <0x lowercase>\nchain: <chain id>\nexpires: <unix seconds>`.
+- The node refuses an `expires` in the past and one more than 600 s ahead.
+- The node refuses a recipient that holds less than **0.01 ETH on Ethereum
+  mainnet**. Show its refusal text to the user as it is.
+- The grant is fixed: 3000 USDC and 10 MTF. Each address can claim once, ever.
+
 ### Power-user exports
 
 The barrel also exports the low-level pieces so you can build custom flows —
