@@ -4,6 +4,10 @@ All notable changes to the TypeScript SDK are documented here.
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-15
+
+Needs node 0.9.17 or later.
+
 ### Changed
 
 - **Breaking.** The recipient signs every faucet claim.
@@ -11,8 +15,8 @@ All notable changes to the TypeScript SDK are documented here.
   32-byte private key and signs, or takes a `FaucetClaim`
   (`{ address, expires, signature }`) that a wallet already signed. The body is
   `{"address","expires","signature"}`.
-  - The `amount` argument is gone. From the next node release the grant is
-    fixed and the node ignores `amount`: the signature does not cover it, so a
+  - The `amount` argument is gone. From node 0.9.17 the grant is fixed and
+    the node ignores `amount`: the signature does not cover it, so a
     copier of a signed body could otherwise spend the claim on a tiny grant.
   - The signature is an EIP-191 `personal_sign` over `faucetClaimMessage`:
     `MetaFlux faucet claim\naddress: <0x lowercase>\nchain: <chain id>\nexpires: <unix seconds>`.
@@ -20,8 +24,8 @@ All notable changes to the TypeScript SDK are documented here.
   - `signFaucetClaim` sets `expires` to the current time plus
     `FAUCET_CLAIM_TTL_SECS` (300 s). The node refuses a past value and a value
     more than 600 s ahead.
-  - A node before the next release ignores the new fields, so a signed claim
-    works on it too.
+  - Node 0.9.17 refuses an unsigned claim. A node before 0.9.17 ignores the
+    new fields, so a signed claim works on it too.
 
 ## [0.30.0] - 2026-10-04
 
