@@ -1,9 +1,10 @@
 // MTF-native account / margin / agent action payload types.
 //
-// All sender-authorized: the recovered signer is the account whose state
-// mutates, so none carry an `owner` field. Decimal magnitudes (`delta` /
-// `amount` / `value`) ride the wire as JSON strings to preserve precision; ids,
-// leverage, and bps are plain integers.
+// Sender-authorized: the recovered signer is the account whose state mutates.
+// `update_leverage` alone takes an optional `owner`, which routes admission to
+// an account the signer is an approved agent of; the digest stays owner-less.
+// Decimal magnitudes (`delta` / `amount` / `value`) ride the wire as JSON
+// strings to preserve precision; ids, leverage, and bps are plain integers.
 
 /// `update_leverage` — set the per-asset leverage (and optionally flip to
 /// isolated margin).
@@ -11,6 +12,9 @@
 /// An `asset` that names no listed perp market is refused with
 /// `PRECONDITION_FAILED` / `no perp market for asset`.
 export interface UpdateLeverage {
+  /// Set the leverage AS this account. The signer must be an approved agent of
+  /// it (a vault operator is one). Absent, the signer's own account changes.
+  owner?: string;
   /// Target asset / market id (`u32`).
   asset: number;
   /// New leverage multiplier (`u32`, e.g. `10`).

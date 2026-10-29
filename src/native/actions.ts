@@ -695,10 +695,17 @@ export function buildNativeTwapCancelAction(params: TwapCancel): string {
 export function buildNativeUpdateLeverageAction(params: UpdateLeverage): string {
   validateMarket(params.asset);
   validateU32(params.leverage, 'leverage');
-  return wrapParams(
-    'update_leverage',
-    `{${jsonStr('asset')}:${params.asset},${jsonStr('leverage')}:${params.leverage},${jsonStr('is_isolated')}:${params.is_isolated ? 'true' : 'false'}}`,
+  const parts: string[] = [];
+  if (params.owner !== undefined) {
+    validateAddress(params.owner, 'owner');
+    parts.push(`${jsonStr('owner')}:${jsonStr(params.owner)}`);
+  }
+  parts.push(
+    `${jsonStr('asset')}:${params.asset}`,
+    `${jsonStr('leverage')}:${params.leverage}`,
+    `${jsonStr('is_isolated')}:${params.is_isolated ? 'true' : 'false'}`,
   );
+  return wrapParams('update_leverage', `{${parts.join(',')}}`);
 }
 
 /// `update_isolated_margin` — add (`+`) or remove (`-`) isolated margin.
