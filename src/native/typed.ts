@@ -1013,11 +1013,19 @@ function requireSpec(actionType: string): TypedSpec {
 /// must sign WHICH account it acts for. Omitting `owner` is not a rejection: the
 /// request is admitted for the operator's OWN account, and the escrow and the
 /// option position land on the operator wallet instead of the vault.
+///
+/// The leverage / margin / position-mode four bind the owner when the params
+/// carry one (an agent acting for a master). The owner-less string stays the
+/// owner's own self-signed form; the node refuses it from an agent.
 const ACCOUNT_OWNER_SUPPORTING: ReadonlySet<string> = new Set([
   'cancel_all_orders',
   'rfq_request',
   'rfq_quote',
   'rfq_accept',
+  'update_leverage',
+  'update_isolated_margin',
+  'top_up_isolated_only_margin',
+  'set_position_mode',
 ]);
 
 /// Whether `actionType` accepts a digest-level agent-resolved `owner`.
@@ -1511,8 +1519,17 @@ export function buildTyped(
   const chainTag = metafluxChainTag(chainId);
   // The agent-resolved `owner` binds only for owner-supporting actions (operator
   // / vault trading); other actions ignore a passed owner, matching the Rust SDK.
-  const ownerBound = owner !== undefined && ACCOUNT_OWNER_SUPPORTING.has(actionType);
-  if (ownerBound) validateAddress(owner, 'owner');
+  // A params-level `owner` (e.g. `UpdateLeverage.owner`) binds the same way.
+  const paramsOwner = typeof payload.owner === 'string' ? payload.owner : undefined;
+  if (owner !== undefined && paramsOwner !== undefined && owner.toLowerCase() !== paramsOwner.toLowerCase()) {
+    throw new RangeError(
+      `${actionType}: owner ${owner} differs from params.owner ${paramsOwner}; ` +
+        'the digest and the sent bytes must carry the same owner',
+    );
+  }
+  const bound = owner ?? paramsOwner;
+  const ownerBound = bound !== undefined && ACCOUNT_OWNER_SUPPORTING.has(actionType);
+  if (ownerBound) validateAddress(bound, 'owner');
   const plans = spec.fields.map((fld) => planField(fld, payload));
   // The POST `action.params` omits flattened-optional presence flags and absent
   // optional values (`omitFromParams`), so the wire shape matches the server's
@@ -1524,7 +1541,7 @@ export function buildTyped(
     .filter((p) => !p.omitFromParams)
     .map((p) => `${jsonStr(p.wireKey)}:${p.jsonValue}`);
   const paramEntries = ownerBound
-    ? [`${jsonStr('owner')}:${jsonStr(owner)}`, ...fieldParams]
+    ? [`${jsonStr('owner')}:${jsonStr(bound)}`, ...fieldParams]
     : [...fieldParams];
   // `multi_sig` also carries the wrapper nonce inside `params` (a required serde
   // field on the node's `NativeMultiSig`); same value as the envelope nonce and
@@ -1545,7 +1562,7 @@ export function buildTyped(
     nonce,
     plans,
     actionJson,
-    owner: ownerBound ? owner : undefined,
+    owner: ownerBound ? bound : undefined,
     expiresAfter,
   };
 }

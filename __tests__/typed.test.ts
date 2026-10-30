@@ -1398,3 +1398,65 @@ describe.skipIf(!wasmBuilt)('typed action expiresAfter fold', () => {
     expect(recovered.length).toBe(42);
   });
 });
+
+// ── owner-bound leverage / margin / position mode (agent signing, metaflux#172) ─
+//
+// Node KATs: chain 114514, owner 0x11..11, nonce 7. A params-level `owner`
+// binds the same digest as the `owner` argument; owner-less stays owner-less.
+
+describe.skipIf(!wasmBuilt)('EIP-712 typed signing — owner-bound account actions', () => {
+  const OWNER_11 = addr(0x11);
+  const KATS: { actionType: string; payload: Record<string, unknown>; type: string; digest: string }[] = [
+    {
+      actionType: 'update_leverage',
+      payload: { asset: 1, leverage: 20, is_isolated: false },
+      type: 'MetaFluxTransaction:UpdateLeverage(string metafluxChain,address owner,uint32 asset,uint32 leverage,bool isIsolated,uint64 nonce)',
+      digest: '51a1e33faff20e5f504d1abb72f9fc208f9f3e5d8c8e8c73c4b8e44ed7f4f396',
+    },
+    {
+      actionType: 'update_isolated_margin',
+      payload: { asset: 1, delta: '-5' },
+      type: 'MetaFluxTransaction:UpdateIsolatedMargin(string metafluxChain,address owner,uint32 asset,string delta,uint64 nonce)',
+      digest: 'dd62d7c0d8256374abeecc45f15e31bc28cb96bc0f7f097a4aa2bb7191714959',
+    },
+    {
+      actionType: 'top_up_isolated_only_margin',
+      payload: { asset: 1, amount: '5' },
+      type: 'MetaFluxTransaction:TopUpIsolatedOnlyMargin(string metafluxChain,address owner,uint32 asset,string amount,uint64 nonce)',
+      digest: '9f178c1b814f5fe81bce49ca7852435cfb821ad4cef8d3d44d8671824b185d5c',
+    },
+    {
+      actionType: 'set_position_mode',
+      payload: { hedge: true },
+      type: 'MetaFluxTransaction:SetPositionMode(string metafluxChain,address owner,bool hedge,uint64 nonce)',
+      digest: '8261799554b2f20ceacb9d523757fc025f92bc8620b92a2ac583432c207d3642',
+    },
+  ];
+
+  it('reproduces the node owner-bound KATs byte-for-byte', async () => {
+    const { buildTyped, typedActionDigest, encodeType, accountSupportsOwner } =
+      await import('../src/native/typed.js');
+    for (const k of KATS) {
+      expect(accountSupportsOwner(k.actionType)).toBe(true);
+      expect(encodeType(k.actionType, true), k.actionType).toBe(k.type);
+      const viaArg = buildTyped(k.actionType, k.payload, 7n, CHAIN_ID, OWNER_11);
+      expect(viaArg.owner).toBe(OWNER_11);
+      expect(viaArg.actionJson.includes(`"owner":"${OWNER_11}"`)).toBe(true);
+      const argHex = toHex(await typedActionDigest(viaArg));
+      expect(argHex, `${k.actionType} digest`).toBe(k.digest);
+      const viaParams = buildTyped(k.actionType, { owner: OWNER_11, ...k.payload }, 7n, CHAIN_ID);
+      expect(viaParams.actionJson).toBe(viaArg.actionJson);
+      expect(toHex(await typedActionDigest(viaParams))).toBe(k.digest);
+      const plain = buildTyped(k.actionType, k.payload, 7n, CHAIN_ID);
+      expect(plain.owner).toBeUndefined();
+      expect(toHex(await typedActionDigest(plain))).not.toBe(k.digest);
+    }
+  });
+
+  it('a params.owner that differs from the owner argument throws', async () => {
+    const { buildTyped } = await import('../src/native/typed.js');
+    expect(() =>
+      buildTyped('set_position_mode', { owner: OWNER_11, hedge: true }, 7n, CHAIN_ID, addr(0xbb)),
+    ).toThrow(/differs from params.owner/);
+  });
+});

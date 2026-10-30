@@ -194,9 +194,11 @@ export type NativeTpSl = 'tp' | 'sl';
 /// server `SetPositionModeParams`. Toggles the account between one-way (net,
 /// `hedge:false`) and hedge / two-way (`hedge:true`) position modes. Only legal
 /// while flat on every market (the node rejects a switch with open positions).
-/// Sender-authorized: the recovered signer IS the account, so there is no
-/// `owner` field.
 export interface NativeSetPositionMode {
+  /// Act AS this account. The signer must be an approved agent of it, and the
+  /// owner is bound into the signed digest. Absent, the signer's own account
+  /// changes.
+  owner?: string;
   /// `true` = hedge / two-way; `false` = one-way / net.
   hedge: boolean;
 }
@@ -321,6 +323,10 @@ export interface CancelByCloid {
 /// `schedule_cancel` action payload — cancel-all of the sender's open orders at
 /// a future block.
 export interface ScheduleCancel {
+  /// Act AS this account. The signer must be an approved agent of it, and the
+  /// owner is bound into the signed digest. Absent, the signer's own orders are
+  /// scheduled.
+  owner?: string;
   /// Block height at which all of the sender's open orders are cancelled
   /// (`u64`).
   cancel_at_block: number;

@@ -130,10 +130,17 @@ const ENCODE_TYPES: Readonly<Record<string, string>> = Object.freeze({
 /// The selection rule, verbatim from the chain: `randomize: true` selects V3
 /// WHATEVER the leg — a one-way randomized parent signs an EMPTY `positionSide`
 /// rather than needing a fourth string. Otherwise a non-null `position_side`
-/// selects V2, and absent selects the base string.
+/// selects V2, and absent selects the base string. Each variant has an
+/// owner-bound form (`address owner` after `metafluxChain`), selected on
+/// `params.owner` exactly like the base string.
 const TWAP_ORDER_TYPE_VARIANTS: Readonly<Record<string, string>> = Object.freeze({
   v2: 'MetaFluxTransaction:TwapOrder(string metafluxChain,uint32 market,string side,uint64 totalSize,uint32 sliceCount,uint64 delayMs,bool reduceOnly,string positionSide,uint64 nonce)',
   v3: 'MetaFluxTransaction:TwapOrder(string metafluxChain,uint32 market,string side,uint64 totalSize,uint32 sliceCount,uint64 delayMs,bool reduceOnly,string positionSide,bool randomize,uint64 nonce)',
+});
+
+const TWAP_ORDER_TYPE_VARIANTS_WITH_OWNER: Readonly<Record<string, string>> = Object.freeze({
+  v2: 'MetaFluxTransaction:TwapOrder(string metafluxChain,address owner,uint32 market,string side,uint64 totalSize,uint32 sliceCount,uint64 delayMs,bool reduceOnly,string positionSide,uint64 nonce)',
+  v3: 'MetaFluxTransaction:TwapOrder(string metafluxChain,address owner,uint32 market,string side,uint64 totalSize,uint32 sliceCount,uint64 delayMs,bool reduceOnly,string positionSide,bool randomize,uint64 nonce)',
 });
 
 /// Which `twap_order` signing string this payload selects: `''` = the base
@@ -154,7 +161,21 @@ function twapTypeVariant(p: TwapOrder): '' | 'v2' | 'v3' {
 /// `batch_order` carries its `owner` inside its own params struct (the
 /// `BatchOrder.owner` field); the other seven take a digest-level `owner`
 /// argument. Both land the `address owner` word at the same position 2.
+///
+/// `submit_order` and `cancel_order` ALWAYS sign the owner-bound form: their
+/// wire `owner` is mandatory, and the node accepts the bound form from the
+/// owner and from an agent alike. The node accepts the owner-less form only as
+/// the owner's own signature, so an agent signature can no longer be
+/// re-submitted under another owner.
 const ENCODE_TYPES_WITH_OWNER: Readonly<Record<string, string>> = Object.freeze({
+  submit_order:
+    'MetaFluxTransaction:SubmitOrder(string metafluxChain,address owner,uint32 market,string side,string kind,uint64 size,uint64 limitPx,string tif,string stpMode,bool reduceOnly,string cloid,uint16 builderFee,address builderUser,string positionSide,uint64 triggerPx,bool triggerIsMarket,string triggerTpsl,uint64 nonce)',
+  cancel_order:
+    'MetaFluxTransaction:CancelOrder(string metafluxChain,address owner,uint32 market,uint64 oid,uint64 nonce)',
+  schedule_cancel:
+    'MetaFluxTransaction:ScheduleCancel(string metafluxChain,address owner,uint64 cancelAtBlock,uint64 nonce)',
+  twap_order:
+    'MetaFluxTransaction:TwapOrder(string metafluxChain,address owner,uint32 market,string side,uint64 totalSize,uint32 sliceCount,uint64 delayMs,bool reduceOnly,uint64 nonce)',
   spot_order:
     'MetaFluxTransaction:SpotOrder(string metafluxChain,address owner,uint32 pair,string side,uint64 size,uint64 limitPx,string tif,string stpMode,string cloid,uint64 nonce)',
   spot_cancel:
@@ -199,18 +220,24 @@ const ENCODE_TYPES_TRAIL: Readonly<Record<string, string>> = Object.freeze({
     'MetaFluxTransaction:BatchOrder(string metafluxChain,bytes32 orders,string grouping,bytes32 trailPxs,uint64 nonce)',
 });
 
-/// The owner-carrying trailing variant. `batch_order` only — `submit_order` has
-/// no owner form.
+/// The owner-carrying trailing variants.
 const ENCODE_TYPES_WITH_OWNER_TRAIL: Readonly<Record<string, string>> = Object.freeze({
+  submit_order:
+    'MetaFluxTransaction:SubmitOrder(string metafluxChain,address owner,uint32 market,string side,string kind,uint64 size,uint64 limitPx,string tif,string stpMode,bool reduceOnly,string cloid,uint16 builderFee,address builderUser,string positionSide,uint64 triggerPx,bool triggerIsMarket,string triggerTpsl,uint64 trailPx,uint64 nonce)',
   batch_order:
     'MetaFluxTransaction:BatchOrder(string metafluxChain,address owner,bytes32 orders,string grouping,bytes32 trailPxs,uint64 nonce)',
 });
 
 /// The trading actions that take a DIGEST-LEVEL agent-resolved `owner` (passed to
-/// [`buildTypedOrder`] / [`signTypedOrder`]). `batch_order` is excluded — it
-/// carries its owner inside its `BatchOrder.owner` params field — matching the
-/// Rust SDK's `supports_owner` gating.
+/// [`buildTypedOrder`] / [`signTypedOrder`]), or carry it in the wire body
+/// (`order.owner` / `cancel.owner` / `params.owner`, see [`bodyOwner`]).
+/// `batch_order` is excluded — it carries its owner inside its
+/// `BatchOrder.owner` params field — matching the Rust SDK's `supports_owner`.
 const OWNER_SUPPORTING_ACTIONS: ReadonlySet<string> = new Set([
+  'submit_order',
+  'cancel_order',
+  'schedule_cancel',
+  'twap_order',
   'spot_order',
   'spot_cancel',
   'cancel_by_cloid',
@@ -235,24 +262,28 @@ const PARAMS_OWNER_ACTIONS: ReadonlySet<string> = new Set([
   'cancel_chase',
 ]);
 
-/// The agent-resolved `owner` a payload carries INSIDE its own wire body
-/// (`NativeSpotOrder.owner` / `NativeSpotCancel.owner` / `BatchCancel.owner`).
+/// The agent-resolved `owner` a payload carries INSIDE its own wire body.
 /// The node reads that field from the POSTed bytes to pick its digest variant,
-/// so the client digest must bind the same value.
+/// so the client digest must bind the same value. `submit_order` and
+/// `cancel_order` carry a MANDATORY owner, so they always bind.
 function bodyOwner(
   actionType: string,
   payload: TypedOrderPayload,
 ): string | undefined {
-  if (actionType === 'spot_order') {
-    return (payload.order as NativeSpotOrder | undefined)?.owner;
+  switch (actionType) {
+    case 'submit_order':
+    case 'spot_order':
+      return (payload.order as NativeOrder | NativeSpotOrder | undefined)?.owner;
+    case 'cancel_order':
+    case 'spot_cancel':
+      return (payload.cancel as NativeCancel | NativeSpotCancel | undefined)?.owner;
+    case 'schedule_cancel':
+    case 'twap_order':
+    case 'batch_cancel':
+      return (payload.params as { owner?: string } | undefined)?.owner;
+    default:
+      return undefined;
   }
-  if (actionType === 'spot_cancel') {
-    return (payload.cancel as NativeSpotCancel | undefined)?.owner;
-  }
-  if (actionType === 'batch_cancel') {
-    return (payload.params as BatchCancel | undefined)?.owner;
-  }
-  return undefined;
 }
 
 /// Pick the one `owner` the digest binds. A spot payload may carry it in its wire
@@ -285,9 +316,9 @@ export function isTypedOrderAction(actionType: string): boolean {
   return Object.prototype.hasOwnProperty.call(ENCODE_TYPES, actionType);
 }
 
-/// Whether `actionType` accepts a digest-level agent-resolved `owner` (the
-/// `*_WITH_OWNER` shape), used for operator / vault trading. `batch_order` is
-/// `false` here (its owner rides in `BatchOrder.owner`).
+/// Whether `actionType` binds an agent-resolved `owner` (the `*_WITH_OWNER`
+/// shape), used for operator / vault trading. `batch_order` is `false` here
+/// (its owner rides in `BatchOrder.owner`).
 export function supportsOwner(actionType: string): boolean {
   return OWNER_SUPPORTING_ACTIONS.has(actionType);
 }
@@ -600,7 +631,7 @@ async function encodeOrderData(
 ): Promise<Uint8Array[]> {
   const chainWord = await encString(chainTag);
   const nonceWord = encUint(nonce, 64, 'nonce');
-  // Agent-resolved owner: bound right after metafluxChain for the seven
+  // Agent-resolved owner: bound right after metafluxChain for the
   // owner-supporting actions (operator / vault trading). `batch_order` carries
   // its owner inside its own struct, so it is NOT in this set (empty here).
   const ownerWords: Uint8Array[] =
@@ -612,12 +643,12 @@ async function encodeOrderData(
       const order = payload.order as NativeOrder;
       const trail = trailOf(order);
       const trailWords = trail === undefined ? [] : [encUint(trail, 64, 'trigger.trail_px')];
-      return [chainWord, ...(await orderWords(order)), ...trailWords, nonceWord];
+      return [chainWord, ...ownerWords, ...(await orderWords(order)), ...trailWords, nonceWord];
     }
     case 'cancel_order': {
       const c = payload.cancel as NativeCancel;
       const [marketWord, oidWord] = cancelWords(c);
-      return [chainWord, marketWord, oidWord, nonceWord];
+      return [chainWord, ...ownerWords, marketWord, oidWord, nonceWord];
     }
     case 'spot_order': {
       const o = payload.order as NativeSpotOrder;
@@ -669,6 +700,7 @@ async function encodeOrderData(
       const p = payload.params as ScheduleCancel;
       return [
         chainWord,
+        ...ownerWords,
         encUint(asBigInt(p.cancel_at_block, 'cancel_at_block'), 64, 'cancel_at_block'),
         nonceWord,
       ];
@@ -691,6 +723,7 @@ async function encodeOrderData(
       const flagWords = variant === 'v3' ? [encBool(true)] : [];
       return [
         chainWord,
+        ...ownerWords,
         encUint(asBigInt(p.market, 'market'), 32, 'market'),
         await encString(checkEnum(VALID_SIDE, p.side, 'side')),
         encUint(asBigInt(p.total_size, 'total_size'), 64, 'total_size'),
@@ -879,13 +912,13 @@ export interface BuiltTypedOrder {
   readonly words: readonly Uint8Array[];
   /// True for an owner-carrying digest — selects the owner variant of the
   /// encodeType string (matching the extra `owner` word in `words`). Set for an
-  /// owner-carrying `batch_order` (its `BatchOrder.owner`) AND for any of the
-  /// seven owner-supporting actions signed with a bound `owner`. False otherwise.
+  /// owner-carrying `batch_order` (its `BatchOrder.owner`) AND for any
+  /// owner-supporting action signed with a bound `owner`. False otherwise.
   readonly withOwner: boolean;
-  /// The agent-resolved owner bound for the seven owner-supporting actions —
-  /// from the digest-level argument, or from the wire body for `spot_order` /
-  /// `spot_cancel`. `undefined` for an owner-less digest and for `batch_order`
-  /// (whose owner rides in `BatchOrder.owner`, not this field).
+  /// The agent-resolved owner bound for the owner-supporting actions — from
+  /// the digest-level argument, or from the wire body. Always set for
+  /// `submit_order` / `cancel_order`. `undefined` for an owner-less digest and
+  /// for `batch_order` (whose owner rides in `BatchOrder.owner`, not this field).
   readonly owner?: string;
   /// OPTIONAL top-level action-expiry (unix-ms). `0n` = never expires, digest
   /// BYTE-IDENTICAL to the pre-existing form. Non-zero folds `,uint64 expiresAfter`
@@ -936,8 +969,11 @@ export async function buildTypedOrder(
   if (expiresAfter >= 1n << 64n) throw new RangeError('expiresAfter overflows u64');
   const chainTag = metafluxChainTag(chainId);
   const bound = resolveOwner(actionType, payload, owner);
+  if (bound === undefined && (actionType === 'submit_order' || actionType === 'cancel_order')) {
+    throw new RangeError(`${actionType}: owner is required`);
+  }
   const words = await encodeOrderData(actionType, payload, chainTag, nonce, bound);
-  // The digest-level `owner` binds only for the seven owner-supporting actions;
+  // The digest-level `owner` binds only for the owner-supporting actions;
   // `batch_order` reports `withOwner` off its in-struct `BatchOrder.owner`.
   const ownerBound = bound !== undefined && OWNER_SUPPORTING_ACTIONS.has(actionType);
   const withOwner =
@@ -973,7 +1009,9 @@ async function hashStructOrder(built: BuiltTypedOrder): Promise<Uint8Array> {
     enc.encode(
       foldExpiryTypeString(
         built.twapVariant !== undefined && built.twapVariant !== ''
-          ? TWAP_ORDER_TYPE_VARIANTS[built.twapVariant]!
+          ? (built.withOwner ? TWAP_ORDER_TYPE_VARIANTS_WITH_OWNER : TWAP_ORDER_TYPE_VARIANTS)[
+              built.twapVariant
+            ]!
           : encodeOrderType(built.actionType, built.withOwner, built.withTrail),
         built.expiresAfter,
       ),

@@ -1,8 +1,8 @@
 // MTF-native account / margin / agent action payload types.
 //
 // Sender-authorized: the recovered signer is the account whose state mutates.
-// `update_leverage` alone takes an optional `owner`, which routes admission to
-// an account the signer is an approved agent of; the digest stays owner-less.
+// The leverage / margin actions take an optional `owner`: an approved agent
+// acts for that account, and the owner is bound into the signed digest.
 // Decimal magnitudes (`delta` / `amount` / `value`) ride the wire as JSON
 // strings to preserve precision; ids, leverage, and bps are plain integers.
 
@@ -25,6 +25,9 @@ export interface UpdateLeverage {
 
 /// `update_isolated_margin` — add or remove isolated margin on an open position.
 export interface UpdateIsolatedMargin {
+  /// Act AS this account. The signer must be an approved agent of it. Absent,
+  /// the signer's own account changes.
+  owner?: string;
   /// Target asset / market id (`u32`).
   asset: number;
   /// Signed margin delta as a decimal string (`+` adds, `-` withdraws).
@@ -40,6 +43,9 @@ export interface UpdateIsolatedMargin {
 /// position it is the add-only half of [`UpdateIsolatedMargin`]. Earlier docs
 /// called it strict-isolated-only; that was wrong.
 export interface TopUpIsolatedOnlyMargin {
+  /// Act AS this account. The signer must be an approved agent of it. Absent,
+  /// the signer's own account changes.
+  owner?: string;
   /// Target asset / market id (`u32`).
   asset: number;
   /// Amount to add, as a positive decimal string.

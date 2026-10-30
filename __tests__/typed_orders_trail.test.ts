@@ -5,9 +5,10 @@
 // PRESENCE, not value: `,uint64 trailPx` for `submit_order`, `,bytes32 trailPxs`
 // for `batch_order`. An order with no trail keeps the frozen digest byte-for-byte.
 //
-// The four digests below are pasted verbatim from the node's own KAT emitter
+// The batch digests below are pasted verbatim from the node's own KAT emitter
 // (chain 114514 / "Testnet", domain `metaflux_v1`). If one drifts, this SDK is
-// signing something the chain will not verify.
+// signing something the chain will not verify. The owner-bound `submit_order`
+// trail KAT lives in typed_orders.test.ts.
 
 import { describe, expect, it } from 'vitest';
 import { existsSync } from 'node:fs';
@@ -74,24 +75,20 @@ function mixedBatch(trail?: number): BatchOrder {
 }
 
 const SUBMIT_TRAIL_TYPE =
-  'MetaFluxTransaction:SubmitOrder(string metafluxChain,uint32 market,string side,string kind,uint64 size,uint64 limitPx,string tif,string stpMode,bool reduceOnly,string cloid,uint16 builderFee,address builderUser,string positionSide,uint64 triggerPx,bool triggerIsMarket,string triggerTpsl,uint64 trailPx,uint64 nonce)';
+  'MetaFluxTransaction:SubmitOrder(string metafluxChain,address owner,uint32 market,string side,string kind,uint64 size,uint64 limitPx,string tif,string stpMode,bool reduceOnly,string cloid,uint16 builderFee,address builderUser,string positionSide,uint64 triggerPx,bool triggerIsMarket,string triggerTpsl,uint64 trailPx,uint64 nonce)';
 const BATCH_OWNER_TRAIL_TYPE =
   'MetaFluxTransaction:BatchOrder(string metafluxChain,address owner,bytes32 orders,string grouping,bytes32 trailPxs,uint64 nonce)';
 const BATCH_OWNER_TYPE =
   'MetaFluxTransaction:BatchOrder(string metafluxChain,address owner,bytes32 orders,string grouping,uint64 nonce)';
 
 // Node KAT digests, chain 114514, nonce 1.
-const KAT_TRAILING_SINGLE =
-  'f78212e9ab8ad38ad455552cd9343a7a6637a8d331f23528fe7ae84713a20b64';
 const KAT_MIXED_BATCH_WITH_OWNER =
   'df6da2a4e1c3cabd1852bfa1aa05495a839d3787f1a01e2df18c199b53453b88';
 const KAT_NO_TRAIL_CONTROL =
   'ef21c04ccb568652ab2d8950dffd1bd289acaafde846199f74a8ba72e0f5dad8';
-const KAT_TRAILING_SINGLE_WITH_EXPIRY =
-  '3f4d7fd0d3fb293e604fe6e5c4fc52e7b76830eaa39f8dc5d4d26b34372d5d92';
 
 describe.skipIf(!wasmBuilt)('trailing-stop typed signing', () => {
-  it('reproduces the four node KAT digests byte-for-byte', async () => {
+  it('reproduces the node batch KAT digests byte-for-byte', async () => {
     const { buildTypedOrder, typedOrderDigest } = await import(
       '../src/native/typed_orders.js'
     );
@@ -114,25 +111,23 @@ describe.skipIf(!wasmBuilt)('trailing-stop typed signing', () => {
         ),
       );
 
-    expect(await digest('submit_order', { order: richLeg(50_000_000) })).toBe(
-      KAT_TRAILING_SINGLE,
-    );
     expect(await digest('batch_order', { params: mixedBatch(50_000_000) })).toBe(
       KAT_MIXED_BATCH_WITH_OWNER,
     );
     expect(await digest('batch_order', { params: mixedBatch() })).toBe(
       KAT_NO_TRAIL_CONTROL,
     );
-    expect(
+    // An expiry still moves a trailing single.
+    expect(await digest('submit_order', { order: richLeg(50_000_000) })).not.toBe(
       await digest('submit_order', { order: richLeg(50_000_000) }, 1_900_000_000_000n),
-    ).toBe(KAT_TRAILING_SINGLE_WITH_EXPIRY);
+    );
   });
 
   it('selects the trailing type string on presence, and only then', async () => {
     const { buildTypedOrder, encodeOrderType } = await import(
       '../src/native/typed_orders.js'
     );
-    expect(encodeOrderType('submit_order', false, true)).toBe(SUBMIT_TRAIL_TYPE);
+    expect(encodeOrderType('submit_order', true, true)).toBe(SUBMIT_TRAIL_TYPE);
     expect(encodeOrderType('batch_order', true, true)).toBe(BATCH_OWNER_TRAIL_TYPE);
     expect(encodeOrderType('batch_order', true, false)).toBe(BATCH_OWNER_TYPE);
     // An action with no trailing form falls back to its frozen string.
@@ -171,8 +166,6 @@ describe.skipIf(!wasmBuilt)('trailing-stop typed signing', () => {
         ),
       );
     expect(await hex(richLeg(0))).not.toBe(await hex(richLeg()));
-    // The absent form is the frozen one.
-    expect(await hex(richLeg())).not.toBe(KAT_TRAILING_SINGLE);
   });
 
   it('permuting WHICH batch leg trails moves the digest', async () => {

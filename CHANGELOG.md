@@ -4,13 +4,43 @@ All notable changes to the TypeScript SDK are documented here.
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-31
+
+Takes effect at the next node release. After that swap the node refuses an
+agent signature over an owner-less order, cancel, TWAP, schedule-cancel,
+leverage or margin update, or position-mode switch. Update before it.
+
+### Changed
+
+- **Agent signatures bind the owner.** Eleven type strings gain an owner-bound
+  form with `address owner` right after `string metafluxChain`: `SubmitOrder`
+  (and its `trailPx` form), `CancelOrder`, `ScheduleCancel`, `TwapOrder` (all
+  three variants), `UpdateLeverage`, `UpdateIsolatedMargin`,
+  `TopUpIsolatedOnlyMargin` and `SetPositionMode`. An agent signature can no
+  longer be re-submitted under another owner.
+  - `submit_order` and `cancel_order` ALWAYS sign the bound form: their wire
+    `owner` is mandatory, and the node accepts the bound form from the owner
+    and from an agent alike.
+  - The other nine bind the owner when the params carry `owner` (or when the
+    `owner` argument is passed), and keep the owner-less string otherwise. The
+    owner-less form keeps working as the owner's own self-signed action.
+  - `supportsOwner` is now true for `submit_order`, `cancel_order`,
+    `schedule_cancel` and `twap_order`; `accountSupportsOwner` for
+    `update_leverage`, `update_isolated_margin`,
+    `top_up_isolated_only_margin` and `set_position_mode`.
+  - `buildTyped` reads a params-level `owner` for an owner-supporting action
+    and binds it. Before this release `UpdateLeverage.owner` reached the wire
+    only through `buildNativeUpdateLeverageAction`; `updateLeverage` dropped it.
+
 ### Added
 
+- `owner?: string` on `ScheduleCancel`, `TwapOrder`, `UpdateIsolatedMargin`,
+  `TopUpIsolatedOnlyMargin` and `NativeSetPositionMode`, so an agent can act
+  for a master. The `buildNative*Action` builders emit it first in `params`.
 - `UpdateLeverage.owner` (optional): an approved agent sets `owner`'s leverage
-  and margin mode through `updateLeverage`. The wire gains a params-level
-  `owner`; the digest stays owner-less. The node has accepted it since 0.9.16.
-  A vault operator needs it: a deployer-oracle market refuses a cross open,
-  and a vault has no key of its own to switch to isolated.
+  and margin mode through `updateLeverage`. A vault operator needs it: a
+  deployer-oracle market refuses a cross open, and a vault has no key of its
+  own to switch to isolated.
 
 ## [0.31.0] - 2026-10-15
 

@@ -187,18 +187,25 @@ export function buildNativeCancelAction(cancel: NativeCancel): string {
 /// Build the canonical native `set_position_mode` action JSON string.
 ///
 /// `{"type":"set_position_mode","params":{"hedge":<bool>}}` — toggles the
-/// account between one-way (`false`) and hedge / two-way (`true`). Sender-
-/// authorized: the recovered signer IS the account (no `owner`), so this is
-/// signed exactly like the order builders and POSTed verbatim. The node only
-/// permits the switch while flat on every market.
+/// account between one-way (`false`) and hedge / two-way (`true`). With `owner`
+/// present an APPROVED agent acts for that owner. The node only permits the
+/// switch while flat on every market.
 export function buildNativeSetPositionModeAction(
   mode: NativeSetPositionMode,
 ): string {
   if (typeof mode.hedge !== 'boolean') {
     throw new RangeError('set_position_mode: hedge must be a boolean');
   }
-  const paramsJson = `{${jsonStr('hedge')}:${mode.hedge ? 'true' : 'false'}}`;
+  const paramsJson = `{${ownerEntry(mode.owner)}${jsonStr('hedge')}:${mode.hedge ? 'true' : 'false'}}`;
   return `{${jsonStr('type')}:${jsonStr('set_position_mode')},${jsonStr('params')}:${paramsJson}}`;
+}
+
+/// The leading `"owner":"0x..",` params entry, or `''` when the action acts for
+/// the signer itself.
+function ownerEntry(owner: string | undefined): string {
+  if (owner === undefined) return '';
+  validateAddress(owner, 'owner');
+  return `${jsonStr('owner')}:${jsonStr(owner)},`;
 }
 
 /// Build the canonical native `spot_order` action JSON string (spot CLOB).
@@ -417,7 +424,7 @@ export function buildNativeScheduleCancelAction(params: ScheduleCancel): string 
   validateU64(params.cancel_at_block, 'cancel_at_block');
   return wrapParams(
     'schedule_cancel',
-    `{${jsonStr('cancel_at_block')}:${params.cancel_at_block}}`,
+    `{${ownerEntry(params.owner)}${jsonStr('cancel_at_block')}:${params.cancel_at_block}}`,
   );
 }
 
@@ -679,7 +686,7 @@ export function buildNativeTwapOrderAction(params: TwapOrder): string {
   const rnd = params.randomize === true ? `,${jsonStr('randomize')}:true` : '';
   return wrapParams(
     'twap_order',
-    `{${jsonStr('market')}:${params.market},${jsonStr('side')}:${jsonStr(params.side)},${jsonStr('total_size')}:${params.total_size},${jsonStr('slice_count')}:${params.slice_count},${jsonStr('delay_ms')}:${params.delay_ms},${jsonStr('reduce_only')}:${params.reduce_only ? 'true' : 'false'}${leg}${rnd}}`,
+    `{${ownerEntry(params.owner)}${jsonStr('market')}:${params.market},${jsonStr('side')}:${jsonStr(params.side)},${jsonStr('total_size')}:${params.total_size},${jsonStr('slice_count')}:${params.slice_count},${jsonStr('delay_ms')}:${params.delay_ms},${jsonStr('reduce_only')}:${params.reduce_only ? 'true' : 'false'}${leg}${rnd}}`,
   );
 }
 
@@ -716,7 +723,7 @@ export function buildNativeUpdateIsolatedMarginAction(
   validateDecimalString(params.delta, 'delta', { allowNegative: true });
   return wrapParams(
     'update_isolated_margin',
-    `{${jsonStr('asset')}:${params.asset},${jsonStr('delta')}:${jsonStr(params.delta)}}`,
+    `{${ownerEntry(params.owner)}${jsonStr('asset')}:${params.asset},${jsonStr('delta')}:${jsonStr(params.delta)}}`,
   );
 }
 
@@ -728,7 +735,7 @@ export function buildNativeTopUpIsolatedOnlyMarginAction(
   validateDecimalString(params.amount, 'amount');
   return wrapParams(
     'top_up_isolated_only_margin',
-    `{${jsonStr('asset')}:${params.asset},${jsonStr('amount')}:${jsonStr(params.amount)}}`,
+    `{${ownerEntry(params.owner)}${jsonStr('asset')}:${params.asset},${jsonStr('amount')}:${jsonStr(params.amount)}}`,
   );
 }
 

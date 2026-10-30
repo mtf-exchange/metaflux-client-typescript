@@ -87,19 +87,10 @@ interface Vector {
   digest: string;
 }
 
+// `submit_order` and `cancel_order` always sign the owner-bound string, so their
+// owner-less server pins are not reachable from the sign path; see
+// `OWNER_BOUND_VECTORS` below for their KATs.
 const VECTORS: Vector[] = [
-  {
-    actionType: 'submit_order',
-    payload: { order: sampleOrder() },
-    nonce: 40n,
-    digest: '26e9092cb07147e53fe7c9aa087bcb03a371c2bc5c03e27cf8920ce1f1ea6385',
-  },
-  {
-    actionType: 'cancel_order',
-    payload: { cancel: { owner: OWNER, market: 1, oid: 99 } as NativeCancel },
-    nonce: 41n,
-    digest: 'bf61ce82e82ce6ed077defb6fc31eb7594889117865f9c51cd561bcb1aa2f246',
-  },
   {
     actionType: 'spot_order',
     payload: {
@@ -250,26 +241,16 @@ const VECTORS: Vector[] = [
 ];
 
 describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing — trading set', () => {
-  it('reproduces all 15 server KAT digests byte-for-byte (chain 114514)', async () => {
+  it('reproduces all 13 server KAT digests byte-for-byte (chain 114514)', async () => {
     const { buildTypedOrder, typedOrderDigest } = await import(
       '../src/native/typed_orders.js'
     );
-    expect(VECTORS.length).toBe(15);
+    expect(VECTORS.length).toBe(13);
     for (const v of VECTORS) {
       const built = await buildTypedOrder(v.actionType, v.payload, '', v.nonce, CHAIN_ID);
       const digest = await typedOrderDigest(built);
       expect(toHex(digest), `digest mismatch for ${v.actionType}`).toBe(v.digest);
     }
-  });
-
-  it('submit_order matches the server pin individually', async () => {
-    const { buildTypedOrder, typedOrderDigest } = await import(
-      '../src/native/typed_orders.js'
-    );
-    const built = await buildTypedOrder('submit_order', { order: sampleOrder() }, '', 40n, CHAIN_ID);
-    expect(toHex(await typedOrderDigest(built))).toBe(
-      '26e9092cb07147e53fe7c9aa087bcb03a371c2bc5c03e27cf8920ce1f1ea6385',
-    );
   });
 
   it('batch_order T[] hashing matches the server pin', async () => {
@@ -619,17 +600,14 @@ const OWNER_VECTORS: OwnerVector[] = [
 describe.skipIf(!wasmBuilt)(
   'EIP-712 typed signing — agent-resolved owner (trading set)',
   () => {
-    it('owner-supporting actions cover exactly the seven non-batch_order actions', async () => {
+    it('owner-supporting actions cover the digest-level set, not batch_order', async () => {
       const { supportsOwner } = await import('../src/native/typed_orders.js');
       for (const v of OWNER_VECTORS) expect(supportsOwner(v.actionType)).toBe(true);
+      for (const v of OWNER_BOUND_VECTORS) expect(supportsOwner(v.actionType)).toBe(true);
       // batch_order carries its owner in `BatchOrder.owner`, NOT the digest-level
       // owner — so it is NOT a digest-level owner-supporting action.
       expect(supportsOwner('batch_order')).toBe(false);
-      // Actions with no owner form at all.
-      expect(supportsOwner('submit_order')).toBe(false);
-      expect(supportsOwner('cancel_order')).toBe(false);
-      expect(supportsOwner('schedule_cancel')).toBe(false);
-      expect(supportsOwner('twap_order')).toBe(false);
+      expect(supportsOwner('scale_order')).toBe(false);
     });
 
     it('the 7 owner-supporting actions match the Rust SDK + node *_WITH_OWNER vectors', async () => {
@@ -663,27 +641,30 @@ describe.skipIf(!wasmBuilt)(
       }
     });
 
-    it('owner is ignored for an action with no owner form (submit_order)', async () => {
-      const { buildTypedOrder, typedOrderDigest, encodeOrderType } = await import(
+    it('submit_order / cancel_order always bind the wire owner', async () => {
+      const { buildTypedOrder, typedOrderDigest } = await import(
         '../src/native/typed_orders.js'
       );
-      // The owner-carrying encodeType selector falls back to the base type.
-      expect(encodeOrderType('submit_order', true)).toBe(encodeOrderType('submit_order'));
       const order = sampleOrder();
-      const owned = await buildTypedOrder(
-        'submit_order',
-        { order },
-        '',
-        40n,
-        CHAIN_ID,
-        OWNER_BIND,
-      );
-      expect(owned.withOwner).toBe(false);
-      expect(owned.owner).toBeUndefined();
       const plain = await buildTypedOrder('submit_order', { order }, '', 40n, CHAIN_ID);
-      expect(toHex(await typedOrderDigest(owned))).toBe(
-        toHex(await typedOrderDigest(plain)),
-      );
+      expect(plain.withOwner).toBe(true);
+      expect(plain.owner).toBe(OWNER);
+      // A digest-level owner equal to the wire owner is the same digest.
+      const same = await buildTypedOrder('submit_order', { order }, '', 40n, CHAIN_ID, OWNER);
+      expect(toHex(await typedOrderDigest(same))).toBe(toHex(await typedOrderDigest(plain)));
+      // A different digest-level owner would sign one owner and send another.
+      await expect(
+        buildTypedOrder('submit_order', { order }, '', 40n, CHAIN_ID, OWNER_BIND),
+      ).rejects.toThrow(/differs from the wire body owner/);
+      await expect(
+        buildTypedOrder(
+          'cancel_order',
+          { cancel: { market: 1, oid: 1 } as unknown as NativeCancel },
+          '',
+          1n,
+          CHAIN_ID,
+        ),
+      ).rejects.toThrow(/owner is required/);
     });
 
     // The node reads `owner` out of the POSTed spot body to pick its digest
@@ -862,5 +843,138 @@ describe.skipIf(!wasmBuilt)('trading action expiresAfter fold', () => {
       EXP_SET,
     );
     expect(typedOrderRequestBody(set).includes(`"expires_after":${EXP_SET}`)).toBe(true);
+  });
+});
+
+// ── owner-bound forms (agent signing, metaflux#172) ──────────────────────────
+//
+// `submit_order` / `cancel_order` always bind their mandatory wire owner;
+// `schedule_cancel` / `twap_order` bind `params.owner` when present. Node KATs:
+// chain 114514, owner 0x11..11.
+
+const OWNER_11 = addr(0x11);
+
+/// The node's owner-bound order fixture: no cloid, no builder, no leg, no trigger.
+function boundOrder(): NativeOrder {
+  return {
+    owner: OWNER_11,
+    market: 1,
+    side: 'bid',
+    kind: 'limit',
+    size: 1_000,
+    limit_px: 5_000_000_000_000,
+    tif: 'gtc',
+    stp_mode: 'cancel_oldest',
+    reduce_only: false,
+  };
+}
+
+function boundTwap(extra: Partial<TwapOrder>): TwapOrder {
+  return {
+    owner: OWNER_11,
+    market: 4,
+    side: 'ask',
+    total_size: 1_000,
+    slice_count: 10,
+    delay_ms: 500,
+    reduce_only: true,
+    ...extra,
+  };
+}
+
+const OWNER_BOUND_VECTORS: Vector[] = [
+  {
+    actionType: 'submit_order',
+    payload: { order: boundOrder() },
+    nonce: 7n,
+    digest: 'e8bd3a1ac347a666d1cb380be7162fda93c878bc34d9172bbacdd2521aac155b',
+  },
+  {
+    actionType: 'cancel_order',
+    payload: { cancel: { owner: OWNER_11, market: 1, oid: 42 } as NativeCancel },
+    nonce: 7n,
+    digest: '58960111f53e7a47f006d040f2bc007ba988d2dbcb3b0806bbf6906bd8fe0548',
+  },
+  {
+    actionType: 'schedule_cancel',
+    payload: { params: { owner: OWNER_11, cancel_at_block: 9_000 } as ScheduleCancel },
+    nonce: 7n,
+    digest: 'c7256bff6f4ff5a3400a370d424bfe2924c22e3a06a9de4db3fdc1038bb812dd',
+  },
+  {
+    actionType: 'twap_order',
+    payload: { params: boundTwap({}) },
+    nonce: 48n,
+    digest: 'f5c885724ae108a608a83119e71a84bbac1d9348b59cfe789d7bc90fa7c9855a',
+  },
+  {
+    actionType: 'twap_order',
+    payload: { params: boundTwap({ position_side: 'long' }) },
+    nonce: 48n,
+    digest: 'd97d4ad88b28ce4aa47bdce1e9244e18a0f88f45011160fae932119faea1b18e',
+  },
+  {
+    actionType: 'twap_order',
+    payload: { params: boundTwap({ position_side: 'short', randomize: true }) },
+    nonce: 48n,
+    digest: '914d04d6544236461894a5fdb8df985717983a5380a0c17e64fa3c00cd51e8bc',
+  },
+];
+
+describe.skipIf(!wasmBuilt)('EIP-712 typed signing — owner-bound forms', () => {
+  it('reproduces the node owner-bound KATs byte-for-byte', async () => {
+    const { buildTypedOrder, typedOrderDigest } = await import(
+      '../src/native/typed_orders.js'
+    );
+    for (const v of OWNER_BOUND_VECTORS) {
+      const built = await buildTypedOrder(v.actionType, v.payload, '', v.nonce, CHAIN_ID);
+      expect(built.withOwner, `${v.actionType} withOwner`).toBe(true);
+      expect(built.owner, `${v.actionType} owner`).toBe(OWNER_11);
+      expect(toHex(await typedOrderDigest(built)), `${v.actionType} digest`).toBe(v.digest);
+    }
+  });
+
+  it('the trail form binds the owner before the order words and trailPx before the nonce', async () => {
+    // The node fixture carries `trailPx 7` with an EMPTY trigger block, which
+    // the wire type cannot express (`tpsl` is `"tp"` / `"sl"`), so the trail
+    // word is spliced in at the position `encodeOrderData` uses.
+    const { buildTypedOrder, typedOrderDigest, encodeOrderType } = await import(
+      '../src/native/typed_orders.js'
+    );
+    const { be32 } = await import('../src/native/digest.js');
+    expect(encodeOrderType('submit_order', true, true)).toBe(
+      'MetaFluxTransaction:SubmitOrder(string metafluxChain,address owner,uint32 market,string side,string kind,uint64 size,uint64 limitPx,string tif,string stpMode,bool reduceOnly,string cloid,uint16 builderFee,address builderUser,string positionSide,uint64 triggerPx,bool triggerIsMarket,string triggerTpsl,uint64 trailPx,uint64 nonce)',
+    );
+    const plain = await buildTypedOrder('submit_order', { order: boundOrder() }, '', 7n, CHAIN_ID);
+    const nonceWord = plain.words[plain.words.length - 1]!;
+    const trailed = {
+      ...plain,
+      withTrail: true,
+      words: [...plain.words.slice(0, -1), be32(7n), nonceWord],
+    };
+    expect(toHex(await typedOrderDigest(trailed))).toBe(
+      '640607ceda3c78990eb3c95768c69a42f7df84305ccb584aa7a077e79fc13f57',
+    );
+  });
+
+  it('schedule_cancel / twap_order keep the owner-less string without params.owner', async () => {
+    const { buildTypedOrder, typedOrderDigest, encodeOrderType } = await import(
+      '../src/native/typed_orders.js'
+    );
+    expect(encodeOrderType('schedule_cancel', true)).toBe(
+      'MetaFluxTransaction:ScheduleCancel(string metafluxChain,address owner,uint64 cancelAtBlock,uint64 nonce)',
+    );
+    expect(encodeOrderType('twap_order', true)).toBe(
+      'MetaFluxTransaction:TwapOrder(string metafluxChain,address owner,uint32 market,string side,uint64 totalSize,uint32 sliceCount,uint64 delayMs,bool reduceOnly,uint64 nonce)',
+    );
+    for (const v of OWNER_BOUND_VECTORS.filter((x) => x.actionType !== 'submit_order' && x.actionType !== 'cancel_order')) {
+      const { owner: _owner, ...rest } = v.payload.params as { owner?: string };
+      const plain = await buildTypedOrder(v.actionType, { params: rest as TypedOrderPayload['params'] }, '', v.nonce, CHAIN_ID);
+      expect(plain.withOwner).toBe(false);
+      expect(toHex(await typedOrderDigest(plain))).not.toBe(v.digest);
+      // A digest-level owner binds the same digest as params.owner.
+      const viaArg = await buildTypedOrder(v.actionType, { params: rest as TypedOrderPayload['params'] }, '', v.nonce, CHAIN_ID, OWNER_11);
+      expect(toHex(await typedOrderDigest(viaArg))).toBe(v.digest);
+    }
   });
 });

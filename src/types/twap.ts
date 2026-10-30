@@ -1,8 +1,8 @@
 // MTF-native TWAP (time-weighted average price) action payload types.
 //
 // A TWAP parent slices `total_size` into `slice_count` child orders spaced
-// `delay_ms` apart. Sender-authorized (no `owner` field); `total_size` is in
-// fixed-point tick units like a perp order's `size`.
+// `delay_ms` apart. An optional `owner` lets an approved agent act for a
+// master; `total_size` is in fixed-point tick units like a perp order's `size`.
 //
 // `market` takes a PERP market or a SPOT pair. On a spot pair each slice is an
 // Ioc through the spot order path, priced off the base token's oracle mark
@@ -22,6 +22,10 @@ import type { NativePositionSide, NativeSide } from './trading.js';
 
 /// `twap_order` — submit a sliced (TWAP) order.
 export interface TwapOrder {
+  /// Act AS this account. The signer must be an approved agent of it, and the
+  /// owner is bound into the signed digest. Absent, the signer trades for
+  /// itself and the digest keeps the owner-less string.
+  owner?: string;
   /// Target market id (`u32`) — a PERP market or a SPOT pair (see the module doc).
   market: number;
   /// Side: `"bid"` (buy) or `"ask"` (sell).
