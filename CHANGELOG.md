@@ -2,7 +2,7 @@
 
 All notable changes to the TypeScript SDK are documented here.
 
-## [Unreleased]
+## [0.33.0] - 2026-11-19
 
 ### Added
 
@@ -11,8 +11,8 @@ All notable changes to the TypeScript SDK are documented here.
   `Mip3SetOraclePxs` type. The type string is
   `Mip3SetOraclePxs(string metafluxChain,bytes32 pxs,uint64 nonce)`, where `pxs`
   is `keccak256(concat(uint256(asset) ‖ keccak256(px)))` in entry order.
-  `typedDataV4` refuses this action; sign it with `signTypedAction`. Not live
-  yet: the node accepts it from the next node release.
+  `typedDataV4` refuses this action; sign it with `signTypedAction`. The node accepts it
+  from node release 0.9.23.
 
 ## [0.32.0] - 2026-10-31
 
