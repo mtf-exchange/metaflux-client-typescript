@@ -225,3 +225,19 @@ export interface Mip3SetOraclePx {
   /// two digests. Build the string once, then sign and send the same bytes.
   px: string;
 }
+
+/// `mip3_set_oracle_pxs` — push index pxs for several MIP-3 markets in one
+/// action.
+///
+/// NOT LIVE YET: the node accepts it from the next node release. An older node
+/// answers `unknown variant`.
+///
+/// - `pxs` holds 1 to 64 entries, and no asset occurs twice.
+/// - All-or-nothing: if one entry fails, the node rejects the whole action and
+///   changes nothing.
+/// - Each entry acts exactly like one `Mip3SetOraclePx`: the same signer rule,
+///   the same move band and the same clamp. An agent cannot sign it.
+/// - The signature covers each asset, each px spelling and the entry order.
+export interface Mip3SetOraclePxs {
+  pxs: Mip3SetOraclePx[];
+}

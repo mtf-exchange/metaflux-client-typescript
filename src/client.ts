@@ -94,6 +94,7 @@ import type {
   PerpActivateMarket,
   PerpDeactivateMarket,
   Mip3SetOraclePx,
+  Mip3SetOraclePxs,
   PerpRegisterAsset,
   PerpSetFeeTier,
   PerpSetLeverage,
@@ -1981,6 +1982,20 @@ export class Client {
   ): Promise<NativeExchangeAck> {
     return this.submitTyped(
       'mip3_set_oracle_px',
+      params as unknown as Record<string, unknown>,
+      opts,
+    );
+  }
+
+  /// Push index pxs for several MIP-3 markets in one all-or-nothing action
+  /// (`mip3_set_oracle_pxs`). Not live until the next node release. See
+  /// `Mip3SetOraclePxs` for the batch rules.
+  async mip3SetOraclePxs(
+    params: Mip3SetOraclePxs,
+    opts: { nonce?: bigint; chainId?: number } = {},
+  ): Promise<NativeExchangeAck> {
+    return this.submitTyped(
+      'mip3_set_oracle_pxs',
       params as unknown as Record<string, unknown>,
       opts,
     );

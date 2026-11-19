@@ -439,6 +439,7 @@ export type {
   // The one repeating deployer action. It rides its own fork feature,
   // `mip3_deployer_oracle`, active from genesis on a fresh chain.
   Mip3SetOraclePx,
+  Mip3SetOraclePxs,
   // Unified placement (one entry point over the order wire actions).
   PerpOrderLeg,
   SpotOrderLeg,

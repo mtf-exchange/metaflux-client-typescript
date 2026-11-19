@@ -118,6 +118,10 @@ export function metafluxChainTag(chainId: number): MetafluxChainTag {
 /// commit different state — never-expires against expired-at-epoch. Unlike
 /// `opt-uint64` this kind carries no paired presence bool: the node's typed
 /// struct declares a plain `uint64`.
+///
+/// `oracle-pxs` backs `mip3_set_oracle_pxs.pxs`: an array of `{asset, px}` on
+/// the wire, signed as one `bytes32` =
+/// `keccak256(concat(uint256(asset) ‖ keccak256(px)))` in entry order.
 type FieldSolidityType =
   | 'string'
   | 'string-decimal'
@@ -144,7 +148,8 @@ type FieldSolidityType =
   | 'bytes'
   | 'bytes32'
   | 'bytes-hex'
-  | 'bytes[]-hex';
+  | 'bytes[]-hex'
+  | 'oracle-pxs';
 
 /// MetaBridge destination-chain string names → the `uint8` code the typed
 /// `bridge_withdraw.chain` field signs. The POST `params.chain` carries the STRING
@@ -748,6 +753,13 @@ const TYPED_SPECS: Record<string, TypedSpec> = {
       f('px', 'string-decimal', 'px'),
     ],
   },
+  // The batch form: 1 to 64 entries, all-or-nothing. Not live until the next
+  // node release.
+  mip3_set_oracle_pxs: {
+    pascal: 'Mip3SetOraclePxs',
+    wireType: 'mip3_set_oracle_pxs',
+    fields: [f('pxs', 'oracle-pxs', 'pxs')],
+  },
   // ---- Core ↔ MetaFluxEVM transfer (1) ----
   core_evm_transfer: {
     pascal: 'CoreEvmTransfer',
@@ -1053,6 +1065,7 @@ function solidityTypeName(ty: FieldSolidityType): string {
   if (ty === 'sentinel-uint64') return 'uint64';
   if (ty === 'bytes-hex') return 'bytes';
   if (ty === 'bytes[]-hex') return 'bytes[]';
+  if (ty === 'oracle-pxs') return 'bytes32';
   return ty;
 }
 
@@ -1401,6 +1414,25 @@ function planField(fld: FieldSpec, payload: Record<string, unknown>): FieldPlan 
         return keccak256(concatBytes(elemHashes));
       });
     }
+    case 'oracle-pxs': {
+      if (!Array.isArray(raw)) {
+        throw new RangeError(`${fld.wireKey} must be an array of {asset, px}`);
+      }
+      const entries = (raw as { asset: unknown; px: string }[]).map((e, i) => {
+        const at = `${fld.wireKey}[${i}]`;
+        const asset = encUintWord(asBigInt(e.asset, `${at}.asset`), 32, `${at}.asset`);
+        validateDecimal(e.px, `${at}.px`);
+        return { asset, assetNum: Number(e.asset), px: e.px };
+      });
+      const jsonValue = `[${entries
+        .map((e) => `{${jsonStr('asset')}:${e.assetNum},${jsonStr('px')}:${jsonStr(e.px)}}`)
+        .join(',')}]`;
+      return mkPlan(fld, jsonValue, '', async () => {
+        const words: Uint8Array[] = [];
+        for (const e of entries) words.push(e.asset, await keccak256(enc.encode(e.px)));
+        return keccak256(concatBytes(words));
+      });
+    }
   }
 }
 
@@ -1663,6 +1695,13 @@ export interface TypedDataV4 {
 /// Build the `eth_signTypedData_v4` payload for a typed action.
 export function typedDataV4(built: BuiltTyped): TypedDataV4 {
   const spec = requireSpec(built.actionType);
+  // ponytail: the pre-hashed `bytes32` word needs the async wasm keccak, so this
+  // sync builder refuses it. Add an async variant when a wallet must sign it.
+  if (spec.fields.some((fld) => fld.ty === 'oracle-pxs')) {
+    throw new RangeError(
+      `${built.actionType}: typedDataV4 cannot render its pre-hashed bytes32 field; sign with signTypedAction`,
+    );
+  }
   const fields: { name: string; type: string }[] = [
     { name: 'metafluxChain', type: 'string' },
   ];

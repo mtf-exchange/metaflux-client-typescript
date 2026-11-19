@@ -104,6 +104,7 @@ export type {
   PerpSetSubDeployers,
   PerpSetSubDeployerPerms,
   Mip3SetOraclePx,
+  Mip3SetOraclePxs,
 } from './perp-deploy.js';
 export type {
   UpdateLeverage,

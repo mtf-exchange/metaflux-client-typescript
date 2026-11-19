@@ -4,6 +4,16 @@ All notable changes to the TypeScript SDK are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **`mip3_set_oracle_pxs`** (action 232): push index pxs for 1 to 64 MIP-3
+  markets in one all-or-nothing action. `Client.mip3SetOraclePxs` and the
+  `Mip3SetOraclePxs` type. The type string is
+  `Mip3SetOraclePxs(string metafluxChain,bytes32 pxs,uint64 nonce)`, where `pxs`
+  is `keccak256(concat(uint256(asset) ‖ keccak256(px)))` in entry order.
+  `typedDataV4` refuses this action; sign it with `signTypedAction`. Not live
+  yet: the node accepts it from the next node release.
+
 ## [0.32.0] - 2026-10-31
 
 Takes effect at the next node release. After that swap the node refuses an

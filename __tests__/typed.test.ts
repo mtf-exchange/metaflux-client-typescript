@@ -494,6 +494,18 @@ const VECTORS: Vector[] = [
     nonce: 210n,
     digest: 'b927bb6c255ba92dee601d083e13779abee1b42e527e29f2b944dbf7c2ac56b6',
   },
+  // The batch push. Entry order and each px spelling are inside the digest.
+  {
+    actionType: 'mip3_set_oracle_pxs',
+    payload: {
+      pxs: [
+        { asset: 42, px: '1250.500001' },
+        { asset: 1001, px: '0.0003' },
+      ],
+    },
+    nonce: 232n,
+    digest: '82e0da5c2fa4e8c608ecf4a620ec8b06fb0f9e9c4095ac465c652dc848c71767',
+  },
   // `noop` carries no field: the digest is the chain tag and the nonce alone.
   {
     actionType: 'noop',
@@ -531,10 +543,10 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     }
   });
 
-  it('reproduces all 63 contract KAT digests byte-for-byte (chain 114514)', async () => {
+  it('reproduces all 64 contract KAT digests byte-for-byte (chain 114514)', async () => {
     const { buildTyped, typedActionDigest } = await import('../src/native/typed.js');
-    // 63 vectors, 62 actions: the two approve-fee keys share one digest pin.
-    expect(VECTORS.length).toBe(63);
+    // 64 vectors, 63 actions: the two approve-fee keys share one digest pin.
+    expect(VECTORS.length).toBe(64);
     for (const v of VECTORS) {
       const built = buildTyped(v.actionType, v.payload, v.nonce, CHAIN_ID);
       const digest = await typedActionDigest(built);
@@ -757,12 +769,12 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     expect(toHex(base)).not.toBe(toHex(otherChain));
   });
 
-  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 71 reachable actions', async () => {
+  it('isTypedAction / TYPED_ACTION_TYPES cover exactly the 72 reachable actions', async () => {
     const { isTypedAction, TYPED_ACTION_TYPES } = await import('../src/native/typed.js');
-    // 73 keys, 71 actions. Two legacy keys share a spec with their canonical
+    // 74 keys, 72 actions. Two legacy keys share a spec with their canonical
     // name: `approve_builder_fee` with `approve_broker_fee`, and
     // `claim_builder_rewards` with `claim_broker_rewards`.
-    expect(TYPED_ACTION_TYPES.length).toBe(73);
+    expect(TYPED_ACTION_TYPES.length).toBe(74);
     expect(isTypedAction('register_referral_code')).toBe(true);
     expect(isTypedAction('set_referrer_by_code')).toBe(true);
     for (const [legacy, canonical] of [
@@ -790,6 +802,7 @@ describe.skipIf(!wasmBuilt)('EIP-712 typed-action signing', () => {
     // The one repeating deployer action. It rides its own fork feature,
     // `mip3_deployer_oracle`, active from genesis on a fresh chain.
     expect(isTypedAction('mip3_set_oracle_px')).toBe(true);
+    expect(isTypedAction('mip3_set_oracle_pxs')).toBe(true);
     // MIP-1 spot deployer lane (6) + the metaliquidity operator grant + BOLE.
     expect(isTypedAction('spot_register_token')).toBe(true);
     expect(isTypedAction('spot_register_pair')).toBe(true);

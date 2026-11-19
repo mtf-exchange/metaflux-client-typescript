@@ -117,6 +117,23 @@ describe('typed wire shape — spot deployer / operator / BOLE / MIP-3 oracle', 
     expect(fields.find((t) => t.name === 'px')?.type).toBe('string');
   });
 
+  it('mip3_set_oracle_pxs posts its entries in order and signs bytes32 pxs', async () => {
+    const { buildTyped, encodeType, typedDataV4 } = await import('../src/native/typed.js');
+    expect(encodeType('mip3_set_oracle_pxs')).toBe(
+      'MetaFluxTransaction:Mip3SetOraclePxs(string metafluxChain,bytes32 pxs,uint64 nonce)',
+    );
+    const pxs = [
+      { asset: 42, px: '1250.500001' },
+      { asset: 1001, px: '0.0003' },
+    ];
+    const built = buildTyped('mip3_set_oracle_pxs', { pxs }, 232n, CHAIN_ID);
+    expect(JSON.parse(built.actionJson)).toEqual({
+      type: 'mip3_set_oracle_pxs',
+      params: { pxs },
+    });
+    expect(() => typedDataV4(built)).toThrow(RangeError);
+  });
+
   it('spot_seed_holders carries both parallel arrays verbatim', async () => {
     const { buildTyped, typedDataV4 } = await import('../src/native/typed.js');
     const built = buildTyped(
